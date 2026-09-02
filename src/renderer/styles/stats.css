@@ -817,3 +817,86 @@
 @media (prefers-reduced-motion: reduce) {
   .loading-mark { animation: none; opacity: 1; }
 }
+
+
+/* ── No data, and stale data ────────────────────────────────────────────── */
+
+/*
+ * Two different absences, shown differently.
+ *
+ * "is-nodata": the source is unreadable and nothing was ever cached, so there
+ * is nothing to report. Zeros in every panel would read as a measurement of
+ * zero usage, which is a claim rather than an absence.
+ *
+ * "is-stale-data": the source is unreadable but cached numbers exist. They are
+ * real, just not current, so they stay on screen and are visibly marked.
+ */
+.nodata {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  background: var(--backdrop-base, oklch(0.135 0.014 250));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stats.is-nodata .nodata {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.stats.is-nodata .stats-grid {
+  opacity: 0;
+}
+
+.nodata-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 19px;
+  font-weight: 700;
+  color: oklch(0.2 0.03 75);
+  background: var(--warn);
+  margin-bottom: 4px;
+}
+
+.nodata-body {
+  max-width: 46ch;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: oklch(0.66 0.015 235);
+}
+
+.nodata-path {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: oklch(0.55 0.05 75);
+  max-width: 70ch;
+  text-align: center;
+  word-break: break-all;
+}
+
+/* Stale but real: dim the panels and let the amber strip carry the reason. */
+.stats.is-stale-data .stats-grid {
+  opacity: 0.55;
+  filter: saturate(0.7);
+}
+
+.stats.is-stale-data .panel-hero::before {
+  content: 'NOT LIVE';
+  position: absolute;
+  top: 14px;
+  right: 92px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--warn);
+  z-index: 3;
+}

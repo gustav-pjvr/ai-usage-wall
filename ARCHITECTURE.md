@@ -489,6 +489,28 @@ case triggers a full rebuild rather than serving numbers known to be wrong.
 **If the source is unavailable** the index reports `unavailable` with the reason,
 the last good cached numbers stay on screen, and the status strip turns amber.
 
+### The headline number is real but needed context
+
+An independent recount (fresh code, not the indexer) confirmed the figures to
+within the records this session appended while it ran: **72,057 vs 72,060
+requests, 26.10B vs 26.11B tokens.**
+
+That same recount exposed a presentation flaw. The composition of "total tokens
+processed" is:
+
+| Part | Share |
+|---|---|
+| cache reads | 97.24% |
+| cache writes | 2.54% |
+| **generated** | **0.21%** |
+| fresh input | 0.01% |
+
+Cache reads are the same context re-read on every turn. The total is correct and
+correctly labelled, but on its own it reads as consumption, when only about 54M
+tokens were actually generated. So the hero now carries a proportion strip and a
+legend directly beneath it, and the counter is labelled "Generated" rather than
+"Output tokens". **A true number is not automatically an honest one.**
+
 ### Measured vs derived
 
 Every panel is tagged in the UI, because the distinction is the point.

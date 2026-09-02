@@ -183,6 +183,65 @@
   color: oklch(0.66 0.015 230);
 }
 
+/*
+ * Hero composition strip. Four segments at true proportion, so the fact that
+ * almost all of the headline is cache re-reads is visible at a glance rather
+ * than buried in a caption.
+ */
+.hero-comp {
+  margin-top: 16px;
+}
+
+.comp-bar {
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: oklch(1 0 0 / 0.06);
+}
+
+.comp-seg {
+  width: var(--w, 0%);
+  /* Sub-percent segments would otherwise vanish entirely. */
+  min-width: 1px;
+  transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.comp-cacheRead { background: oklch(0.55 0.09 205); }
+.comp-cacheCreate { background: oklch(0.7 0.13 190); }
+.comp-output { background: oklch(0.86 0.16 155); }
+.comp-input { background: oklch(0.85 0.15 75); }
+
+.comp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: oklch(0.6 0.015 235);
+}
+
+.comp-key::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+.comp-key-cacheRead::before { background: oklch(0.55 0.09 205); }
+.comp-key-cacheCreate::before { background: oklch(0.7 0.13 190); }
+.comp-key-output::before { background: oklch(0.86 0.16 155); }
+.comp-key-input::before { background: oklch(0.85 0.15 75); }
+
+/* The generated share is the one people actually mean, so it reads brightest. */
+.comp-key-output { color: oklch(0.86 0.16 155); }
+
 /* ── Live canvas ────────────────────────────────────────────────────────── */
 
 .live-wrap {

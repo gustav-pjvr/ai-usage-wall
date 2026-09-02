@@ -87,6 +87,7 @@ interface Win32Api {
   GetSystemMetrics(i: number): number;
   IsWindow(h: Hwnd): boolean;
   GetShellWindow(): Hwnd;
+  WindowFromPoint(point: { x: number; y: number }): Hwnd;
   GetForegroundWindow(): Hwnd;
   SetProcessDpiAwarenessContext(ctx: number): boolean;
   EnumProcProto: unknown;
@@ -100,6 +101,7 @@ function build(): Win32Api | null {
   if (!koffi || process.platform !== 'win32') return null;
   const k = koffi;
   const user32 = k.load('user32.dll');
+  k.struct('POINT', { x: 'int32_t', y: 'int32_t' });
 
   const EnumProcProto = k.proto('bool __stdcall EnumProc(intptr_t h, intptr_t lp)');
 
@@ -123,6 +125,8 @@ function build(): Win32Api | null {
     GetSystemMetrics: user32.func('int __stdcall GetSystemMetrics(int i)') as never,
     IsWindow: user32.func('bool __stdcall IsWindow(intptr_t h)') as never,
     GetShellWindow: user32.func('intptr_t __stdcall GetShellWindow()') as never,
+    // POINT is passed by value: two 32-bit ints packed into one 64-bit slot.
+    WindowFromPoint: user32.func('intptr_t __stdcall WindowFromPoint(POINT p)') as never,
     GetForegroundWindow: user32.func('intptr_t __stdcall GetForegroundWindow()') as never,
     SetProcessDpiAwarenessContext: user32.func('bool __stdcall SetProcessDpiAwarenessContext(intptr_t ctx)') as never,
     EnumProcProto,

@@ -28,6 +28,7 @@ import {
 import {
   applyLayerMode,
   detach,
+  inputReachesWall,
   ensureDpiAwareness,
   sinkToBottom,
   type LayerMode,
@@ -42,6 +43,8 @@ interface WallWindow {
   hwnd: number | null;
   /** The mode actually in force, which may differ from the requested one. */
   effectiveMode: LayerMode;
+  /** Whether Windows hit-tests to this window, i.e. whether clicks work. */
+  inputReachable: boolean;
 }
 
 let windows: WallWindow[] = [];
@@ -420,7 +423,7 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     console.error('[main] renderer failed to load:', err);
   });
 
-  const wall: WallWindow = { win, displayId: display.id, hwnd: null, effectiveMode: settings.layerMode };
+  const wall: WallWindow = { win, displayId: display.id, hwnd: null, effectiveMode: settings.layerMode, inputReachable: false };
 
   win.once('ready-to-show', () => {
     win.showInactive();
@@ -512,6 +515,25 @@ function applyLayer(wall: WallWindow): void {
 
   if (!result.ok) console.warn(`[main] layer mode '${mode}' failed: ${result.reason}`);
 
+  /*
+   * Placement is not input. Confirm Windows actually hit-tests to us at a pixel
+   * inside our own bounds, because a transparent shell layer sitting on top
+   * makes the wall look perfect while swallowing every click.
+   */
+  if (result.ok && display && wall.hwnd) {
+    const probe = {
+      x: Math.round(display.bounds.x * display.scaleFactor),
+      y: Math.round(display.bounds.y * display.scaleFactor),
+      width: Math.round(display.bounds.width * display.scaleFactor),
+      height: Math.round(display.bounds.height * display.scaleFactor),
+    };
+    const check = inputReachesWall(wall.hwnd, probe);
+    wall.inputReachable = check.reachable;
+    console.log(
+      `[main] layer '${wall.effectiveMode}': input ${check.reachable ? 'reaches the wall' : `goes to '${check.ownerClass}'`}`,
+    );
+  }
+
   // In wallpaper mode the desktop owns input, so mouse handling is moot.
   const ignore = settings.clickThrough || mode === 'wallpaper';
   wall.win.setIgnoreMouseEvents(ignore, { forward: true });
@@ -540,6 +562,7 @@ function wallState(wall: WallWindow) {
     mode: settings.mode,
     appVersion: app.getVersion(),
     effectiveLayerMode: wall.effectiveMode,
+    inputReachable: wall.inputReachable,
     display: display
       ? {
           id: display.id,

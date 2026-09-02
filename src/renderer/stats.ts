@@ -389,13 +389,20 @@ class ActivityCanvas {
     ctx.lineTo(w, baseline);
     ctx.stroke();
 
-    // Columns
+    /*
+     * Columns. A bucket with no tokens draws NOTHING.
+     *
+     * This used to add a small animated ripple to empty buckets so the trace
+     * would not look dead. That was decoration shaped exactly like data: a
+     * quiet stretch read as light activity when the truth was none. The chart
+     * gets its life from the sweep and the leading edge instead, both of which
+     * are obviously not measurements.
+     */
     for (let i = 0; i < n; i++) {
-      const v = this.buckets[i] / this.peak;
-      // A living baseline so an idle trace is a gentle wave, not a dead line.
-      const idleWave = (Math.sin(this.phase * 1.6 + i * 0.16) * 0.5 + 0.5) * 0.035;
-      const mag = Math.max(idleWave, Math.pow(v, 0.55));
-      const barH = mag * (h * 0.82);
+      const raw = this.buckets[i];
+      if (raw <= 0) continue;
+      const v = raw / this.peak;
+      const barH = Math.pow(v, 0.55) * (h * 0.82);
       const x = i * colW;
       const y = baseline - barH;
       const hue = 186 + Math.min(60, v * 70);
@@ -403,8 +410,18 @@ class ActivityCanvas {
       g.addColorStop(0, `hsla(${hue}, 85%, 62%, ${alpha})`);
       g.addColorStop(1, `hsla(${hue + 20}, 80%, 45%, ${alpha * 0.15})`);
       ctx.fillStyle = g;
-      ctx.fillRect(x, y, Math.max(1, colW - 1.2), barH);
+      ctx.fillRect(x, y, Math.max(1, colW - 1.2), Math.max(1, barH));
     }
+
+    // A slow sweep along the baseline, so an idle chart is alive without
+    // pretending anything happened.
+    const sweepX = ((this.phase * 26) % (w + 160)) - 80;
+    const sweep = ctx.createLinearGradient(sweepX - 70, 0, sweepX + 70, 0);
+    sweep.addColorStop(0, 'hsla(186, 90%, 65%, 0)');
+    sweep.addColorStop(0.5, `hsla(186, 90%, 65%, ${0.1 + this.intensity * 0.14})`);
+    sweep.addColorStop(1, 'hsla(186, 90%, 65%, 0)');
+    ctx.fillStyle = sweep;
+    ctx.fillRect(sweepX - 70, baseline - 2, 140, 3);
 
     // Leading edge marker: where "now" is.
     const pulse = 0.4 + 0.6 * (Math.sin(this.phase * 3) * 0.5 + 0.5);
@@ -473,6 +490,9 @@ export class StatsView {
     liveFoot.appendChild(el('span', 'live-scale', 'last 20 minutes'));
     liveFoot.appendChild(el('span', 'live-state', ''));
     liveWrap.appendChild(liveFoot);
+    liveWrap.appendChild(
+      el('div', 'live-explain', 'each column is 8 seconds of token throughput, newest on the right'),
+    );
     live.appendChild(liveWrap);
     grid.appendChild(live);
 

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      Strict CSP. The renderer loads no remote content and evaluates no strings,
+      so everything except our own bundle, inline styles we set from JS, and
+      images from the vetted mbw-asset protocol is denied.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' mbw-asset: data:; font-src 'self' mbw-asset:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>MuchBetter Client Wall</title>
+    <link rel="stylesheet" href="styles/wall.css" />
+  </head>
+  <body>
+    <div id="wall"></div>
+    <div id="detail" aria-hidden="true"></div>
+    <pre id="diagnostics"></pre>
+    <script src="main.js"></script>
+  </body>
+</html>

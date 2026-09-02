@@ -571,7 +571,18 @@ export class StatsView {
     strip.appendChild(el('span', 'status-item status-scan', ''));
     strip.appendChild(el('span', 'status-item status-ver', ''));
     strip.appendChild(el('span', 'status-item status-last', ''));
-    strip.appendChild(el('span', 'status-item status-note', 'no quota or cost data exists locally, so none is shown'));
+    /*
+     * The app version. It reads from app.getVersion(), so every deploy updates
+     * it and "which build am I looking at" is never a guess.
+     *
+     * This slot used to carry the note that no quota or cost data exists
+     * locally. That disclosure still matters, so it survives as the hover title
+     * rather than being dropped: the strip stays quiet, the reasoning stays
+     * one hover away, and ARCHITECTURE.md carries the full version.
+     */
+    const version = el('span', 'status-item status-version', '');
+    version.title = 'No quota, plan limit or cost data exists locally, so none is shown.';
+    strip.appendChild(version);
     this.root.appendChild(strip);
     this.root.appendChild(this.tip.node);
 
@@ -619,6 +630,12 @@ export class StatsView {
 
   setPerfTier(tier: string): void {
     this.canvas.setPerfTier(tier);
+  }
+
+  /** Shown bottom-right, straight from the running build. */
+  setVersion(v: string | undefined): void {
+    const node = this.root.querySelector('.status-version');
+    if (node) node.textContent = v ? `v${v}` : '';
   }
 
   setVisible(v: boolean): void {

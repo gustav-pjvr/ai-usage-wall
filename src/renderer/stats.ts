@@ -571,6 +571,47 @@ export class StatsView {
     strip.appendChild(el('span', 'status-item status-note', 'no quota or cost data exists locally, so none is shown'));
     this.root.appendChild(strip);
     this.root.appendChild(this.tip.node);
+
+    /*
+     * Loading state.
+     *
+     * Built up front and shown by default, so from the first painted frame the
+     * wall already covers the desktop and says what it is doing. A cold index
+     * is several seconds of parsing and rendering zeros during it would look
+     * broken and, worse, read as real numbers.
+     */
+    const load = el('div', 'loading');
+    const inner = el('div', 'loading-inner');
+    const marks = el('div', 'loading-marks');
+    for (let i = 0; i < 4; i++) {
+      const m = el('span', 'loading-mark');
+      m.style.setProperty('--i', String(i));
+      marks.appendChild(m);
+    }
+    inner.appendChild(marks);
+    inner.appendChild(el('div', 'loading-title', 'Indexing Claude usage'));
+    inner.appendChild(el('div', 'loading-sub', 'reading local transcripts'));
+    const track = el('div', 'loading-track');
+    track.appendChild(el('div', 'loading-fill'));
+    inner.appendChild(track);
+    inner.appendChild(el('div', 'loading-count', ''));
+    load.appendChild(inner);
+    this.root.appendChild(load);
+    this.root.classList.add('is-loading');
+  }
+
+  /** Progress from the main process during a cold index. */
+  setProgress(p: { done: number; total: number; bytesDone: number; bytesTotal: number }): void {
+    // A progress event means a cold index is running, so show the loader.
+    this.root.classList.add('is-loading');
+    if (p.bytesTotal <= 0) return;
+    const frac = p.bytesTotal > 0 ? p.bytesDone / p.bytesTotal : 0;
+    const fill = this.root.querySelector<HTMLElement>('.loading-fill');
+    if (fill) fill.style.setProperty('--p', String(Math.max(0.02, Math.min(1, frac))));
+    const count = this.root.querySelector('.loading-count');
+    if (count) {
+      count.textContent = `${p.done} / ${p.total} transcripts  ·  ${(p.bytesDone / 1048576).toFixed(0)} of ${(p.bytesTotal / 1048576).toFixed(0)} MB`;
+    }
   }
 
   setPerfTier(tier: string): void {
@@ -599,6 +640,22 @@ export class StatsView {
   update(idx: UsageIndex): void {
     this.idx = idx;
     const d = derive(idx);
+
+    /*
+     * Only leave the loading state when the main process says the index is
+     * COMPLETE, or the source is unreadable.
+     *
+     * Inferring it from "requests > 0" was wrong: refreshIndex mutates the
+     * index in place, so a half-built one is observable, and the dashboard
+     * briefly presented 5 of 419 transcripts as the final totals. Partial
+     * numbers presented as complete are worse than no numbers.
+     */
+    const indexing = (idx as unknown as { indexing?: boolean }).indexing === true;
+    if (!indexing || idx.unavailable) {
+      this.root.classList.remove('is-loading');
+    } else {
+      this.root.classList.add('is-loading');
+    }
 
     this.root.dataset.intensity = d.intensity > 0.66 ? 'high' : d.intensity > 0.3 ? 'mid' : 'calm';
     this.root.style.setProperty('--intensity', d.intensity.toFixed(3));

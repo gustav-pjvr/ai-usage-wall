@@ -13,10 +13,21 @@
   overflow: hidden;
 }
 
+/*
+ * `visibility: hidden` is the load-bearing part, not `pointer-events: none`.
+ *
+ * pointer-events does not cascade like a lock: a descendant that sets
+ * `pointer-events: auto` becomes hittable again regardless of its ancestors,
+ * and `.card` does exactly that. So the hidden client wall stayed live on top
+ * of the stats view, swallowing every hover and click. Visibility IS inherited
+ * and cannot be re-enabled from below, so it actually takes the view out of
+ * hit-testing. It is transitioned with a delay so the fade still plays.
+ */
 .view {
   position: absolute;
   inset: 0;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
   /* Scale and blur are subtle on purpose: the transition should read as one
      surface turning over, not as two slides swapping. */
@@ -25,15 +36,22 @@
   transition:
     opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
     transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+    filter 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.5s;
   will-change: opacity, transform;
 }
 
 .view.is-active {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
   transform: scale(1);
   filter: blur(0);
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
 }
 
 /* Blur is expensive under software rendering, so drop it there and let the
@@ -42,7 +60,15 @@
   filter: none;
   transition:
     opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.42s;
+}
+
+[data-perf='low'] .view.is-active {
+  transition:
+    opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0s;
 }
 
 /* ── Mode switch ────────────────────────────────────────────────────────── */

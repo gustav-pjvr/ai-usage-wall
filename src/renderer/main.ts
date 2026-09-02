@@ -55,6 +55,7 @@ declare global {
       getUsage(): Promise<UsageIndex | null>;
       setMode(mode: string): Promise<void>;
       onUsage(cb: (usage: UsageIndex) => void): () => void;
+      onUsageProgress(cb: (p: { done: number; total: number; bytesDone: number; bytesTotal: number }) => void): () => void;
     };
   }
 }
@@ -859,6 +860,7 @@ window.wall.onState((next) => {
 });
 
 window.wall.onUsage?.((usage) => statsView.update(usage));
+window.wall.onUsageProgress?.((p) => statsView.setProgress(p));
 
 window.wall
   .getState()

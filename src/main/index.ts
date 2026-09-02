@@ -23,6 +23,7 @@ import {
   loadIndex,
   refreshIndex,
   saveIndex,
+  type IndexProgress,
   type UsageIndex,
 } from './data/usage';
 import {
@@ -62,6 +63,16 @@ let usageBusy = false;
 let usageDirty = false;
 let usageLastRun = 0;
 let usageLastSave = 0;
+
+/*
+ * Whether a cold index is still running.
+ *
+ * refreshIndex mutates the index IN PLACE, so a partially built index is
+ * observable while it works. The renderer must not infer readiness from "has
+ * some data": doing that showed 5 transcripts and 11.5M tokens as if they were
+ * the final figures. Readiness is stated explicitly instead.
+ */
+let usageIndexing = false;
 
 /*
  * The cache only exists to make the NEXT cold start fast, so writing it on
@@ -170,8 +181,9 @@ async function refreshUsage(reason: string): Promise<void> {
   usageBusy = true;
   usageLastRun = Date.now();
   try {
-    const result = await refreshIndex(usage);
+    const result = await refreshIndex(usage, (p) => pushUsageProgress(p));
     usage = result.index;
+    usageIndexing = false;
     if (result.rebuilt) console.log('[usage] a transcript shrank, index rebuilt from scratch');
     if (Date.now() - usageLastSave > USAGE_SAVE_INTERVAL_MS) {
       usageLastSave = Date.now();
@@ -189,6 +201,7 @@ async function refreshUsage(reason: string): Promise<void> {
     }
     pushUsage();
   } catch (err) {
+    usageIndexing = false;
     console.error('[usage] refresh failed:', (err as Error).message);
   } finally {
     usageBusy = false;
@@ -434,6 +447,17 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     }
     applyLayer(wall);
     pushState(wall);
+    if (!wall.win.isDestroyed()) wall.win.webContents.send('wall:usage', usageForRenderer());
+    if (usageIndexing && !wall.win.isDestroyed()) {
+      // Opened while a cold index is running: keep the loading state up.
+      wall.win.webContents.send('wall:usageProgress', {
+        done: 0,
+        total: 0,
+        bytesDone: 0,
+        bytesTotal: 0,
+        cold: true,
+      });
+    }
     maybeCapture(wall);
   });
 
@@ -585,7 +609,20 @@ function wallState(wall: WallWindow) {
  */
 function usageForRenderer(): Record<string, unknown> {
   const { files, ...rest } = usage;
-  return { ...rest, fileCount: Object.keys(files).length };
+  return { ...rest, fileCount: Object.keys(files).length, indexing: usageIndexing };
+}
+
+/**
+ * Progress for the loading state. Only meaningful during a cold index; an
+ * incremental top-up finishes faster than anything could be drawn.
+ */
+function pushUsageProgress(p: IndexProgress): void {
+  if (!p.cold) return;
+  usageIndexing = true;
+  for (const w of windows) {
+    if (w.win.isDestroyed()) continue;
+    w.win.webContents.send('wall:usageProgress', p);
+  }
 }
 
 function pushUsage(): void {

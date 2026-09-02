@@ -354,16 +354,23 @@ The wall runs 24/7. Every effect is paid continuously.
     all unobtainable locally and are stated as such rather than estimated.
 13. **Never break the usage-index offset invariant.** After a refresh every
     tracked offset must equal its file size, or records get counted twice.
-14. **Never place the wall at `HWND_BOTTOM` in desktop mode.** It puts the
+14. **Hide an inactive view with `visibility: hidden`, not just
+    `pointer-events: none`.** The latter is re-enabled by any descendant that
+    sets `pointer-events: auto`, which left the hidden client wall intercepting
+    input meant for the stats view.
+15. **Never present a partially built index as complete.** `refreshIndex`
+    mutates in place, so readiness must be stated by the main process, not
+    inferred from whether any data is present.
+16. **Never place the wall at `HWND_BOTTOM` in desktop mode.** It puts the
     window under Explorer's transparent desktop icon layer, which then eats
     every click and hover while the wall still looks perfect. Anchor above
     `Progman` and confirm with `inputReachesWall()`.
-15. **Never put the wall in a state the user cannot escape without Task Manager.**
+17. **Never put the wall in a state the user cannot escape without Task Manager.**
     Focus mode is topmost, fullscreen and opaque: Escape must always exit it and
     it must always show a way out. Do not bind it to an easily-hit gesture.
-16. **`npm run deploy` is the only way the app gets installed or updated.**
+18. **`npm run deploy` is the only way the app gets installed or updated.**
     Running `release/win-unpacked` directly is what caused a stale install once.
-17. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
+19. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
     nor registers on this machine. Electron's Windows implementation is not safe
     against spaces in the profile path, and this profile has them. Write
     `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` directly via `reg.exe`,
@@ -576,6 +583,35 @@ Three changes, and all three matter:
 
 Verified after the fix: the wall reports `TOPMOST False`, `NOACTIVATE True`, with
 24 windows above it in z-order.
+
+### Startup and the loading state
+
+The app registers at login and opens straight into Claude Stats. The window is
+created at full display bounds and shown on `ready-to-show`, so it covers the
+desktop from the first painted frame.
+
+On a warm start the cached index is loaded and pushed before the window appears,
+so real numbers are on screen immediately. Only a **cold** index shows the
+loading state, with real progress (transcripts read, MB of MB) rather than an
+indeterminate spinner.
+
+**Readiness is stated by the main process, never inferred from the data.**
+`refreshIndex` mutates the index in place, so a half-built one is observable.
+Inferring "ready" from `requests > 0` briefly presented 5 of 419 transcripts as
+the final totals: 11.5M tokens, 3 days active, 2 sessions, all wrong and all
+looking authoritative. The payload now carries an explicit `indexing` flag.
+
+### Hidden views must be truly hidden
+
+`pointer-events: none` on a container **does not lock out its descendants**: a
+child that sets `pointer-events: auto` becomes hittable again, and `.card` did.
+So the hidden client wall stayed live on top of the stats view, swallowing every
+hover and click. Clicking a chart opened a client detail panel, and no tooltip
+ever appeared.
+
+`visibility: hidden` is inherited and cannot be overridden from below, so the
+inactive view now uses that, transitioned with a delay so the cross-fade still
+plays. `.card` hit-testing is additionally scoped to `.view.is-active`.
 
 ### Motion budget
 

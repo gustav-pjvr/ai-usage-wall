@@ -11,6 +11,11 @@ const api = {
   reload: () => ipcRenderer.invoke('wall:reload'),
   getUsage: () => ipcRenderer.invoke('wall:getUsage'),
   setMode: (mode: string) => ipcRenderer.invoke('wall:setMode', mode),
+  onUsageProgress: (cb: (p: unknown) => void) => {
+    const listener = (_e: unknown, p: unknown) => cb(p);
+    ipcRenderer.on('wall:usageProgress', listener);
+    return () => ipcRenderer.removeListener('wall:usageProgress', listener);
+  },
   onUsage: (cb: (usage: unknown) => void) => {
     const listener = (_e: unknown, u: unknown) => cb(u);
     ipcRenderer.on('wall:usage', listener);

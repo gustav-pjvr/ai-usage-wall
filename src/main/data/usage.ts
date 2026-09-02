@@ -348,7 +348,20 @@ function prune(index: UsageIndex): void {
  * shrank was rewritten, so its aggregates cannot be un-added: that is the one
  * case requiring a full rebuild, which is why `onShrink` is reported upward.
  */
-export async function refreshIndex(index: UsageIndex): Promise<{ index: UsageIndex; rebuilt: boolean }> {
+export interface IndexProgress {
+  /** Files whose bytes have been read so far. */
+  done: number;
+  total: number;
+  bytesDone: number;
+  bytesTotal: number;
+  /** True for the expensive first pass, false for an incremental top-up. */
+  cold: boolean;
+}
+
+export async function refreshIndex(
+  index: UsageIndex,
+  onProgress?: (p: IndexProgress) => void,
+): Promise<{ index: UsageIndex; rebuilt: boolean }> {
   const started = Date.now();
 
   let files: string[];
@@ -379,11 +392,19 @@ export async function refreshIndex(index: UsageIndex): Promise<{ index: UsageInd
     }
     if (size < known.size) {
       const fresh = emptyIndex();
-      const rebuilt = await refreshIndex(fresh);
+      const rebuilt = await refreshIndex(fresh, onProgress);
       return { index: rebuilt.index, rebuilt: true };
     }
   }
 
+  /*
+   * Work out up front how much there is to read, so a cold index can report
+   * real progress rather than an indeterminate spinner. A first run is several
+   * seconds and the user deserves to know it is working, not stuck.
+   */
+  const sizes = new Map<string, number>();
+  let bytesTotal = 0;
+  let bytesPending = 0;
   for (const f of files) {
     let size = 0;
     try {
@@ -391,14 +412,47 @@ export async function refreshIndex(index: UsageIndex): Promise<{ index: UsageInd
     } catch {
       continue;
     }
+    sizes.set(f, size);
+    bytesTotal += size;
+    const known = index.files[f] ?? { size: 0, offset: 0 };
+    if (size > known.offset) bytesPending += size - known.offset;
+  }
+
+  // A cold pass is one where essentially everything still has to be read.
+  const cold = Object.keys(index.files).length === 0 || bytesPending > bytesTotal * 0.5;
+  let done = 0;
+  let bytesDone = 0;
+  let lastReport = 0;
+
+  const report = (force = false) => {
+    if (!onProgress) return;
+    const now = Date.now();
+    // Throttled: 419 files would otherwise mean 419 IPC messages.
+    if (!force && now - lastReport < 120) return;
+    lastReport = now;
+    onProgress({ done, total: files.length, bytesDone, bytesTotal, cold });
+  };
+
+  report(true);
+
+  for (const f of files) {
+    const size = sizes.get(f);
+    if (size === undefined) continue;
     const known = index.files[f] ?? { size: 0, offset: 0 };
     if (size <= known.offset) {
       index.files[f] = { size, offset: known.offset };
+      done++;
+      bytesDone += size;
+      report();
       continue;
     }
     const offset = await ingestFile(index, f, known.offset, size);
     index.files[f] = { size, offset };
+    done++;
+    bytesDone += size;
+    report();
   }
+  report(true);
 
   await ingestHistory(index);
   prune(index);

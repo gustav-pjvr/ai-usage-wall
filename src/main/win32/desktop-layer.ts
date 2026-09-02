@@ -9,16 +9,24 @@
  *                 z-order and needs zero polling. Cost: the desktop, not us,
  *                 owns mouse input, so hover and click do not work here.
  *
- *  - 'desktop'    DEFAULT. A normal layered tool window pushed to HWND_BOTTOM
- *                 with WS_EX_NOACTIVATE. Sits above the wallpaper and below
- *                 every ordinary app, but still receives hover and click when
- *                 the desktop is visible. This is the hybrid behaviour asked for.
+ *  - 'desktop'    DEFAULT. A layered tool window with WS_EX_NOACTIVATE placed
+ *                 DIRECTLY ABOVE Progman, the desktop window. Sits above the
+ *                 wallpaper and the desktop icon layer, below every ordinary
+ *                 app, and does receive hover and click.
+ *
+ *                 It used to sit at HWND_BOTTOM, which looked identical and was
+ *                 broken: Explorer's SHELLDLL_DefView spans the screen, is
+ *                 transparent, and was hit-tested first, so every click and
+ *                 hover went to the desktop. Placement is not input.
  *
  *  - 'top'        HWND_TOPMOST. Temporary, for focus mode and the detail view.
  *
  * We do not poll to defend z-order. WS_EX_NOACTIVATE means the window is never
- * activated, so almost nothing raises it. Bottom is re-asserted only on the few
- * events that can disturb it: display change, our own show, and mode change.
+ * activated, so almost nothing raises it. Placement is re-asserted only on the
+ * few events that can disturb it: display change, our own show, and mode change.
+ *
+ * `inputReachesWall()` verifies the result with WindowFromPoint, because being
+ * visible at a pixel and owning it for hit-testing are not the same thing.
  */
 
 import {
@@ -308,9 +316,35 @@ export function applyLayerMode(
       return { ok: true };
     }
 
-    // 'desktop': drop out of topmost, then sink to the bottom of the z-order.
+    /*
+     * 'desktop': sit DIRECTLY ABOVE the desktop, not at the very bottom.
+     *
+     * HWND_BOTTOM was the obvious choice and it is wrong. It puts the window
+     * underneath Explorer's SHELLDLL_DefView, the desktop icon host, which
+     * spans the whole screen and is transparent. The wall is therefore visible
+     * through it but Windows hit-tests DefView first, so every click and every
+     * hover goes to the desktop instead of to us. Verified with
+     * WindowFromPoint: at every pixel of the wall the owner came back as
+     * "explorer". Visibility and input are not the same thing, and z-order
+     * alone does not prove interactivity.
+     *
+     * Inserting immediately above Progman fixes it. Progman is the desktop's
+     * top-level window and DefView is its child, so being above Progman puts us
+     * above the icon layer and we receive input. We still never activate
+     * (WS_EX_NOACTIVATE), so any app the user focuses rises above us and the
+     * wall stays behind everything in normal use.
+     */
     w.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-    w.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    const progman = w.FindWindowW('Progman', null);
+    if (progman) {
+      w.SetWindowPos(hwnd, progman, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    } else {
+      // No shell desktop window to anchor to. Bottom is the safe fallback: the
+      // wall stays out of the way even though it will not take input.
+      warn('Progman not found; falling back to HWND_BOTTOM (input will not reach the wall)');
+      w.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
     return { ok: true };
   } catch (err) {
     const reason = (err as Error).message;
@@ -319,14 +353,54 @@ export function applyLayerMode(
   }
 }
 
-/** Cheap re-assert of bottom placement. One SetWindowPos, no allocation. */
+/**
+ * Cheap re-assert of the desktop placement: just above Progman, not at the
+ * bottom. Sinking to HWND_BOTTOM here would undo the fix in applyLayerMode and
+ * silently kill input again, since the desktop icon layer would be back on top.
+ */
 export function sinkToBottom(hwnd: Hwnd): void {
   const w = win32();
   if (!w || !w.IsWindow(hwnd)) return;
   try {
-    w.SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    const progman = w.FindWindowW('Progman', null);
+    w.SetWindowPos(hwnd, progman || HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
   } catch {
     /* non-fatal */
+  }
+}
+
+/**
+ * Ask Windows which window actually owns a pixel inside our own bounds.
+ *
+ * This is the check that would have caught the input bug immediately. Being
+ * visible at a pixel and OWNING that pixel for hit-testing are different
+ * things: with the window at HWND_BOTTOM, Explorer's transparent desktop icon
+ * layer sat on top and swallowed every click and hover while the wall still
+ * showed through perfectly. Verifying placement is not verifying input.
+ */
+export function inputReachesWall(
+  hwnd: Hwnd,
+  bounds: { x: number; y: number; width: number; height: number },
+): { reachable: boolean; ownerClass: string } {
+  const w = win32();
+  if (!w) return { reachable: false, ownerClass: '(win32 unavailable)' };
+  try {
+    // A point well inside the window, away from any edge.
+    const at = w.WindowFromPoint({
+      x: Math.round(bounds.x + bounds.width / 2),
+      y: Math.round(bounds.y + Math.min(120, bounds.height / 4)),
+    });
+    if (!at) return { reachable: false, ownerClass: '(none)' };
+    // The hit may land on a child of ours, so walk up to the top-level owner.
+    let root = at;
+    for (let i = 0; i < 8; i++) {
+      const parent = w.GetParent(root);
+      if (!parent) break;
+      root = parent;
+    }
+    return { reachable: root === hwnd || at === hwnd, ownerClass: getClassName(root) || getClassName(at) };
+  } catch (err) {
+    return { reachable: false, ownerClass: `(error: ${(err as Error).message})` };
   }
 }
 

@@ -787,6 +787,22 @@ function renderSwitcher(): void {
   });
   switchEl.dataset.mode = mode;
 
+  /*
+   * Size and place the travelling pill from the ACTIVE BUTTON's real geometry.
+   *
+   * It was a fixed `width: 50%` with a `translateX(100%)` for the second tab,
+   * which only lines up if both labels are the same width. "Claude Stats" and
+   * "Clients" are not, so the pill sat off-centre and bled into the other
+   * label. Measuring is the only thing that works for variable-width labels.
+   */
+  requestAnimationFrame(() => {
+    const active = switchEl.querySelector<HTMLElement>('.mode-btn.is-on');
+    const thumb = switchEl.querySelector<HTMLElement>('.mode-thumb');
+    if (!active || !thumb) return;
+    thumb.style.width = `${active.offsetWidth}px`;
+    thumb.style.transform = `translateX(${active.offsetLeft - 3}px)`;
+  });
+
   // In focus mode the wall is on top of everything, so it says so and offers
   // the way out rather than leaving the user to find the tray.
   const focused = state?.focusMode === true;

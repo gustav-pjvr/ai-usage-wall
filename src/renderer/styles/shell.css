@@ -88,7 +88,7 @@
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  padding: 6px 15px;
+  padding: 6px 17px;
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
@@ -105,22 +105,24 @@
 
 /* The travelling pill behind the active label. Transform only, so the movement
    stays on the compositor. */
+/*
+ * Width and position are set from JS against the active button's real geometry,
+ * because the two labels are different widths. Only the animation lives here.
+ */
 .mode-thumb {
   position: absolute;
   top: 3px;
   bottom: 3px;
   left: 3px;
-  width: calc(50% - 3px);
+  width: 0;
   border-radius: 999px;
   background: linear-gradient(180deg, oklch(0.34 0.05 205), oklch(0.27 0.04 210));
   border: 1px solid oklch(1 0 0 / 0.1);
-  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  transition:
+    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.42s cubic-bezier(0.22, 1, 0.36, 1);
   pointer-events: none;
   z-index: 0;
-}
-
-#mode-switch[data-mode='clients'] .mode-thumb {
-  transform: translateX(100%);
 }
 
 /* In the stats view the thumb picks up the signal colour, so the control

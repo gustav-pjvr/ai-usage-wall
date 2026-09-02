@@ -211,7 +211,7 @@ Three layer modes in `src/main/win32/desktop-layer.ts`:
 
 | Mode | Mechanism | Input | Status on this machine |
 |---|---|---|---|
-| `desktop` **(default)** | `HWND_BOTTOM` + `WS_EX_NOACTIVATE` + `WS_EX_TOOLWINDOW` | hover and click work when the desktop is visible | **Verified working.** `ex=0x8080080`, not topmost, 21 visible windows above it in z-order. |
+| `desktop` **(default)** | Inserted directly above `Progman`, plus `WS_EX_NOACTIVATE` and `WS_EX_TOOLWINDOW` | hover and click work when the desktop is visible | **Verified working**, by hit test rather than by z-order: 4 of 4 sampled points return our window. |
 | `wallpaper` | `SetParent` into Explorer's WorkerW | none, the desktop owns input | **Refused on this Windows 11 build.** All 14 candidate layers rejected `SetParent`. Falls back automatically. |
 | `top` | `HWND_TOPMOST` | full | Used by focus mode. |
 
@@ -221,6 +221,23 @@ a shell replacement, UIPI, or the Windows 11 desktop composition simply refusing
 The code sets the parent, **reads it back**, tries every candidate layer, and on
 total failure logs precisely what it tried and degrades to `desktop`. A silent
 failure would leave a blank desktop with a log claiming success.
+
+**`HWND_BOTTOM` was wrong, and looked right.** The original implementation sank
+the window to the very bottom, which passed every check I ran: correct z-order,
+not topmost, visible, 21 windows above it. It was still broken. Explorer's
+`SHELLDLL_DefView`, the desktop icon host, spans the whole screen, is
+transparent, and sat above us, so Windows hit-tested it first and **every click
+and hover went to the desktop.** The wall looked perfect and was completely
+inert. Gustav found it by trying to use the mode switcher.
+
+The fix is to insert directly above `Progman` instead. `DefView` is Progman's
+child, so being above Progman puts us above the icon layer. We still never
+activate, so any focused app rises above us.
+
+**The lesson, now a rule: verifying placement is not verifying input.**
+`inputReachesWall()` calls `WindowFromPoint` inside our own bounds and logs
+which window actually owns the pixel. Confirmed after the fix: 4 of 4 sampled
+points return the wall, where all 4 previously returned `explorer`.
 
 **No z-order polling.** `WS_EX_NOACTIVATE` means the window is never activated, so
 almost nothing raises it. Bottom is re-asserted only on display change, show, and
@@ -337,12 +354,16 @@ The wall runs 24/7. Every effect is paid continuously.
     all unobtainable locally and are stated as such rather than estimated.
 13. **Never break the usage-index offset invariant.** After a refresh every
     tracked offset must equal its file size, or records get counted twice.
-14. **Never put the wall in a state the user cannot escape without Task Manager.**
+14. **Never place the wall at `HWND_BOTTOM` in desktop mode.** It puts the
+    window under Explorer's transparent desktop icon layer, which then eats
+    every click and hover while the wall still looks perfect. Anchor above
+    `Progman` and confirm with `inputReachesWall()`.
+15. **Never put the wall in a state the user cannot escape without Task Manager.**
     Focus mode is topmost, fullscreen and opaque: Escape must always exit it and
     it must always show a way out. Do not bind it to an easily-hit gesture.
-15. **`npm run deploy` is the only way the app gets installed or updated.**
+16. **`npm run deploy` is the only way the app gets installed or updated.**
     Running `release/win-unpacked` directly is what caused a stale install once.
-16. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
+17. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
     nor registers on this machine. Electron's Windows implementation is not safe
     against spaces in the profile path, and this profile has them. Write
     `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` directly via `reg.exe`,

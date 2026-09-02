@@ -108,7 +108,7 @@ so deleting the file is safe.
 
 | Key | Default | Notes |
 |---|---|---|
-| `layerMode` | `"desktop"` | `desktop` (below apps, interactive), `wallpaper` (true wallpaper layer, no input), `top` |
+| `layerMode` | `"desktop"` | `desktop` (below apps, interactive), `top` (always on top). For a wall that ignores the mouse, set `clickThrough` |
 | `performance` | `"auto"` | `auto` inspects the machine. Force with `low`/`balanced`/`high` |
 | `clickThrough` | `false` | Cards ignore the mouse entirely |
 | `opacity` | `1` | Wall opacity in ambient mode |

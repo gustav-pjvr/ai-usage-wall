@@ -52,6 +52,8 @@ export interface LayoutInput {
   lastInteraction: string | null;
   /** Forces the top tier regardless of score. */
   featured?: boolean;
+  /** Editorial override: 'feature' floors at large, 'background' caps at small. */
+  emphasis?: 'feature' | 'normal' | 'background';
   /** 'client' | 'product' | 'infrastructure' | 'personal'. See schema.ts. */
   kind?: string;
 }
@@ -133,6 +135,20 @@ const KIND_WEIGHT: Record<string, number> = {
   personal: 0.5,
 };
 
+/**
+ * Editorial override, applied as a second multiplier.
+ *
+ * The score cannot know that a R500 favour done for a friend is less worth
+ * looking at than a product with no revenue booked against it. This is the
+ * lever for saying so by hand, and it is deliberately coarse: three settings,
+ * not a number to tune. See `emphasis` in the schema.
+ */
+const EMPHASIS_WEIGHT: Record<string, number> = {
+  feature: 1.3,
+  normal: 1,
+  background: 0.45,
+};
+
 const TARGET_COL_PX = 200;
 const MIN_COLS = 6;
 const MAX_COLS = 16;
@@ -191,7 +207,8 @@ export function scoreClient(input: LayoutInput, now: Date, maxRevenue: number): 
 
   const raw = W_STATUS * status + W_REVENUE * revenue + W_RECENCY * recency + W_PROGRESS * progress;
   const kind = KIND_WEIGHT[input.kind ?? 'client'] ?? 1;
-  return Math.round(raw * kind * 10_000) / 10_000;
+  const emphasis = EMPHASIS_WEIGHT[input.emphasis ?? (input.featured ? 'feature' : 'normal')] ?? 1;
+  return Math.round(raw * kind * emphasis * 10_000) / 10_000;
 }
 
 /**
@@ -201,7 +218,9 @@ export function scoreClient(input: LayoutInput, now: Date, maxRevenue: number): 
  * absolute thresholds, a set of uniformly dormant clients would render as 40
  * identical small tiles, and a set of uniformly hot ones as 40 heroes.
  */
-export function assignTiers(ordered: { id: string; score: number; featured?: boolean }[]): Map<string, Tier> {
+export function assignTiers(
+  ordered: { id: string; score: number; featured?: boolean; emphasis?: string }[],
+): Map<string, Tier> {
   const n = ordered.length;
   const tiers = new Map<string, Tier>();
   if (n === 0) return tiers;
@@ -217,7 +236,11 @@ export function assignTiers(ordered: { id: string; score: number; featured?: boo
     else if (i < heroCount + largeCount + mediumCount) tier = 'medium';
     else tier = 'small';
     // An explicitly featured client is never demoted below 'large'.
-    if (c.featured && tier !== 'hero') tier = 'large';
+    const emphasis = c.emphasis ?? (c.featured ? 'feature' : 'normal');
+    if (emphasis === 'feature' && tier !== 'hero') tier = 'large';
+    // ...and a backgrounded one is never promoted above 'small', however well
+    // it happens to score. This is the whole point of the override.
+    if (emphasis === 'background') tier = 'small';
     tiers.set(c.id, tier);
   });
 
@@ -314,6 +337,7 @@ export function computeLayout(inputs: LayoutInput[], opts: LayoutOptions): Layou
     id: i.id,
     score: scoreClient(i, now, maxRevenue),
     featured: i.featured,
+    emphasis: i.emphasis,
   }));
 
   // Total order: score desc, then id asc. The id tie-break is what makes the

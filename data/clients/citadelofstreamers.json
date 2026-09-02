@@ -35,5 +35,6 @@
   },
   "id": "citadelofstreamers",
   "name": "Citadel of Streamers",
-  "state": "active"
+  "state": "active",
+  "emphasis": "feature"
 }

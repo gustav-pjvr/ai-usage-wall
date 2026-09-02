@@ -35,5 +35,6 @@
   },
   "id": "pickleplay-south-africa",
   "name": "PicklePlay",
-  "state": "active"
+  "state": "active",
+  "emphasis": "feature"
 }

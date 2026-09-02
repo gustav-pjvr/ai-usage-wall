@@ -83,7 +83,10 @@ function settingsPath(): string {
 /** Coerce anything into a valid Settings object. Never throws. */
 export function normaliseSettings(raw: unknown): Settings {
   const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Partial<Settings>;
-  const layerModes: LayerMode[] = ['wallpaper', 'desktop', 'top'];
+  // 'wallpaper' was a third mode until 2026-09-02. Anything not in this list,
+  // including that value, falls back to the default, which is what makes the
+  // migration free: an old settings.json simply loads as 'desktop'.
+  const layerModes: LayerMode[] = ['desktop', 'top'];
   const tiers = ['auto', 'low', 'balanced', 'high'];
 
   return {
@@ -119,7 +122,19 @@ export async function loadSettings(): Promise<Settings> {
     // both write one, JSON.parse rejects it, and the failure is invisible: the
     // file looks perfect and every setting silently reverts to its default.
     // The client store does the same for exactly the same reason.
-    return normaliseSettings(JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text));
+    const raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as Partial<Settings>;
+    const settings = normaliseSettings(raw);
+
+    // The one removed value gets an explicit notice rather than the silent
+    // default, because a machine left on it was a machine with an invisible
+    // wall. Rewrite the file so it stops claiming a mode that no longer exists.
+    if ((raw as { layerMode?: string }).layerMode === 'wallpaper') {
+      console.warn(`[settings] layerMode 'wallpaper' is no longer supported, using '${settings.layerMode}'`);
+      await saveSettings(settings).catch((err) =>
+        console.error('[settings] could not rewrite migrated settings:', (err as Error).message),
+      );
+    }
+    return settings;
   } catch (err) {
     // A missing file is normal on first run. A file that EXISTS but will not
     // parse is not: every setting silently reverts to its default and the user

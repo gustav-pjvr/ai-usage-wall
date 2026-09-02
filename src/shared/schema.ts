@@ -112,6 +112,15 @@ export interface Client {
   links: { label: string; url: string }[];
   tags: string[];
   featured: boolean;
+  /**
+   * Editorial override on the automatic ranking.
+   *
+   * The score knows about status, revenue, recency and progress. It cannot know
+   * that a R500 favour is less interesting to look at than a product with no
+   * revenue attached to it at all. 'feature' floors the card at 'large',
+   * 'background' caps it at 'small', 'normal' leaves the score alone.
+   */
+  emphasis: 'feature' | 'normal' | 'background';
   branding: ClientBranding;
   /** Where this record came from, for the health report. */
   source: 'file' | 'vault' | 'merged';
@@ -158,6 +167,7 @@ const KNOWN_KEYS = new Set([
   'links',
   'tags',
   'featured',
+  'emphasis',
   'branding',
 ]);
 
@@ -343,6 +353,14 @@ export function validateClient(raw: unknown, fallbackId?: string): ValidationRes
     links,
     tags,
     featured: raw.featured === true,
+    // `featured: true` predates this field and still means the same thing, so
+    // an old record keeps working without being rewritten.
+    emphasis:
+      raw.emphasis === 'feature' || raw.emphasis === 'background'
+        ? raw.emphasis
+        : raw.featured === true
+          ? 'feature'
+          : 'normal',
     branding: {
       primary,
       secondary: toHex(rawBrand.secondary),

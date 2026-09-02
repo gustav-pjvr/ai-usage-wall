@@ -34,6 +34,7 @@
     "motif": "gradient"
   },
   "id": "muchbetter-world",
-  "name": "MuchBetter World",
-  "state": "active"
+  "name": "MuchBetter.World",
+  "state": "active",
+  "emphasis": "feature"
 }

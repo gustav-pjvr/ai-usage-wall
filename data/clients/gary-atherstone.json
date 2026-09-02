@@ -11,10 +11,15 @@
   "progress": null,
   "startDate": "2026-07-20",
   "endDate": null,
-  "currentPhase": "Live, custom domain pending",
+  "currentPhase": "Live on flyresume.com",
   "lastInteraction": "2026-07-30",
   "notes": "Commercial pilot based in Cape Town. Admin console lets him edit seven sections himself: contact, skills, flight hours, achievements, qualifications, experience and education. The R500 covers the domain only, the build was done at no charge.",
-  "links": [],
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://flyresume.com"
+    }
+  ],
   "tags": [
     "cv",
     "admin-console",
@@ -30,5 +35,6 @@
   },
   "id": "gary-atherstone",
   "name": "Gary Atherstone",
-  "state": "active"
+  "state": "active",
+  "emphasis": "background"
 }

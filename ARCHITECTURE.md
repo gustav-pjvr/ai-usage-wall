@@ -69,7 +69,7 @@ muchbetter-client-wall/
 │   │   ├── settings.ts      <- settings file, atomic writes
 │   │   ├── win32/
 │   │   │   ├── ffi.ts       <- koffi bindings to user32
-│   │   │   └── desktop-layer.ts  <- the three layer modes
+│   │   │   └── desktop-layer.ts  <- the two layer modes
 │   │   └── data/
 │   │       ├── store.ts     <- loading, error isolation, file watching
 │   │       ├── obsidian.ts  <- READ-ONLY vault adapter
@@ -207,20 +207,51 @@ CSS contract consumed by a card: `--c-surface --c-surface-raised --c-border --c-
 
 ## Desktop behaviour
 
-Three layer modes in `src/main/win32/desktop-layer.ts`:
+Two layer modes in `src/main/win32/desktop-layer.ts`:
 
 | Mode | Mechanism | Input | Status on this machine |
 |---|---|---|---|
 | `desktop` **(default)** | Inserted directly above `Progman`, plus `WS_EX_NOACTIVATE` and `WS_EX_TOOLWINDOW` | hover and click work when the desktop is visible | **Verified working**, by hit test rather than by z-order: 4 of 4 sampled points return our window. |
-| `wallpaper` | `SetParent` into Explorer's WorkerW | none, the desktop owns input | **Refused on this Windows 11 build.** All 14 candidate layers rejected `SetParent`. Falls back automatically. |
 | `top` | `HWND_TOPMOST` | full | Used by focus mode. |
 
-**Wallpaper mode verifies rather than assumes.** `SetParent` into another process's
-window can fail with no exception raised: stale handle after an Explorer restart,
-a shell replacement, UIPI, or the Windows 11 desktop composition simply refusing.
-The code sets the parent, **reads it back**, tries every candidate layer, and on
-total failure logs precisely what it tried and degrades to `desktop`. A silent
-failure would leave a blank desktop with a log claiming success.
+A wall that ignores the mouse is `desktop` plus `clickThrough`, not a mode of
+its own.
+
+**Wallpaper mode was removed on 2026-09-02, after being measured.** It
+`SetParent`ed the window into the WorkerW that Explorer paints the wallpaper
+into. Two separate findings killed it, and the first one is the more important:
+
+1. **The verification was reading the wrong property.** It confirmed the parent
+   with `GetParent()`, which returns the **owner** of a `WS_POPUP` window, and
+   every Electron window is `WS_POPUP`. It therefore answered NULL whatever the
+   truth was. The code reported `SetParent refused by all 15 candidate layers`
+   while the window was in fact parented into the last candidate it tried. The
+   `desktop` fallback then skipped its detach, because that was gated on
+   `GetParent` too, and z-ordered a **child** window against its own parent,
+   which means nothing. The wall vanished, and because the failing mode had
+   already been written to `settings.json`, restarting the app replayed the
+   failure. The only escape was the tray.
+
+2. **Corrected, it still painted nothing.** Parented to the real WorkerW and
+   confirmed with `GetAncestor(hwnd, GA_PARENT)`, sized to the full display in
+   physical pixels, then every window minimised and one screen pixel read with
+   GDI `CopyFromScreen`. Opaque, `transparent: true`, and `WS_POPUP` converted
+   to `WS_CHILD` all returned the wallpaper's own colour, identical to the
+   control taken with the app not running.
+
+   Unverified hypothesis, recorded so the next person does not start from
+   scratch: Chromium's native window occlusion tracker may treat a window living
+   beneath `SHELLDLL_DefView` as fully occluded and stop painting it. Testing
+   that means disabling `CalculateNativeWinOcclusion`, which is one of this
+   project's biggest idle-CPU wins, so it was not tested. It is a hypothesis,
+   not a cause.
+
+`verifyLayer()` replaces that check for the modes that remain. It tests
+conditions that are **necessary** for the wall to be on screen (top-level,
+visible, placed inside the display), so any failure proves the wall is not
+showing, which is enough to reject a mode. It does not claim to prove pixels,
+and the log line says "verified: top-level, visible, placed", never "verified
+rendering".
 
 **`HWND_BOTTOM` was wrong, and looked right.** The original implementation sank
 the window to the very bottom, which passed every check I ran: correct z-order,
@@ -340,7 +371,9 @@ The wall runs 24/7. Every effect is paid continuously.
    inherits the UA default black and vanishes on a dark surface.
 7. **Never let `.card-body` shrink.** The metrics and progress are the point of the
    card; the prose headline gives up lines first.
-8. **Verify `SetParent`, never assume it took.**
+8. **Never assume a Win32 call took.** `SetParent` and `SetWindowPos` both
+   report success for things that did not happen the way you meant. Read the
+   real property back, with the right API for that property. See 20.
 9. **`koffi` and `chokidar` must stay `external` in the esbuild config.** koffi
    loads a native binary and cannot be bundled.
 10. **Validation must never throw for a recoverable problem.** One bad client must
@@ -375,6 +408,28 @@ The wall runs 24/7. Every effect is paid continuously.
     against spaces in the profile path, and this profile has them. Write
     `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` directly via `reg.exe`,
     with the executable path quoted.
+
+20. **Never read a window's parent with `GetParent`.** For a `WS_POPUP`
+    top-level window, which every Electron window is, it returns the **owner**,
+    which is NULL, so it reports "not parented" whatever the truth is. That is
+    how wallpaper mode announced "refused by all 15 candidates" while the wall
+    sat inside `Progman`, and how the detach that would have rescued it never
+    ran. Use `GetAncestor(hwnd, GA_PARENT)` and compare against
+    `GetDesktopWindow()`, never against zero. The `GetParent` binding has been
+    deleted from `ffi.ts` so this cannot come back by autocomplete.
+21. **Never persist a layer mode the wall has not verified in.**
+    `updateSettings` applies, verifies, and only then writes; a rejected mode is
+    reverted in memory before the write, and a persisted mode that fails at
+    launch is healed to `desktop` and written back. `settings.json` mirrors
+    verified state, never requested state. The old order, write first and apply
+    second, is precisely what made restarting the app repeat the failure instead
+    of escaping it.
+22. **Never offer a layer mode whose only failure signature is "every
+    structural check passes and nothing renders."** Wallpaper mode was exactly
+    that: parented, visible, correctly sized, and blank. If it ever returns, it
+    returns with a pixel-level render probe and a countdown revert like Windows
+    display settings, and only after some machine has been **measured** painting
+    it.
 
 ---
 
@@ -431,9 +486,11 @@ handling in tests, not on the user's screen.
    it is not a remote session, the driver is healthy and no policy blocks it. The
    capability system correctly detects this and drops to the `low` tier. Override
    with `"performance": "high"` in settings if needed.
-2. **Wallpaper layer mode does not work on this Windows 11 build.** All 14
-   candidate layers refuse `SetParent`. Falls back to `desktop` automatically.
-   Kept because it works on many Windows 10 and earlier Windows 11 configurations.
+2. **Wallpaper layer mode was removed on 2026-09-02.** It never rendered on any
+   machine this project has measured, and its earlier "refused on this build"
+   diagnosis was itself an artefact of the `GetParent` bug. See "Desktop
+   behaviour". The claim that it worked on other Windows configurations was
+   never measured and should not be repeated.
 3. **Memory is ~293 MB private across 4 processes.** Reduced from 424 MB, but this
    is the honest cost of Electron plus a full-screen transparent window being
    software-composited. Expect lower with working GPU acceleration.

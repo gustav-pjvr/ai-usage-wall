@@ -633,6 +633,89 @@ body[data-perf='low'][data-background='gradient'] #stage::before {
   transition: transform 1.15s var(--ease) 0.25s;
 }
 
+/* ── Live address ───────────────────────────────────────────────────────── */
+
+/*
+ * The client's live URL, on the card face. It is the only genuinely actionable
+ * thing on a card, so it reads as an address rather than as a button: no fill,
+ * no border, the mark in the card's own accent hue and the domain in mono.
+ *
+ * It carries NO hover treatment unless `.wall-interactive` is on the body,
+ * because in click-through the wall cannot receive the click and an element
+ * that lights up under the cursor while doing nothing is a lie.
+ */
+.card-link {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: baseline;
+  gap: clamp(4px, calc(var(--card-h) * 0.018), 8px);
+  /* Shrinks before the note beside it does, but never disappears. */
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: left;
+  cursor: default;
+  color: var(--c-fg-muted);
+  transition: color 0.28s var(--ease);
+}
+
+.card-link-mark {
+  color: oklch(0.7 0.12 var(--c-hue));
+  font-size: clamp(8px, calc(var(--card-h) * 0.03), 11px);
+  line-height: 1;
+  flex: 0 0 auto;
+  transition:
+    color 0.28s var(--ease),
+    transform 0.28s var(--ease);
+}
+
+.card-link-url {
+  font-family: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: clamp(8.5px, calc(var(--card-h) * 0.033), 12px);
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition:
+    color 0.28s var(--ease),
+    text-decoration-color 0.28s var(--ease);
+}
+
+.wall-interactive .card-link {
+  cursor: pointer;
+}
+
+.wall-interactive .card-link:hover .card-link-url,
+.wall-interactive .card-link:focus-visible .card-link-url {
+  color: oklch(0.97 0.01 var(--c-hue));
+  text-decoration-color: oklch(0.7 0.12 var(--c-hue) / 0.6);
+}
+
+.wall-interactive .card-link:hover .card-link-mark {
+  color: oklch(0.82 0.15 var(--c-hue));
+  transform: translate(1px, -1px);
+}
+
+.card-link:focus-visible {
+  outline: 2px solid oklch(0.7 0.12 var(--c-hue) / 0.7);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+.card-foot-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card-foot {
   margin-top: clamp(7px, calc(var(--card-h) * 0.03), 16px);
   padding-top: clamp(6px, calc(var(--card-h) * 0.028), 13px);
@@ -651,7 +734,10 @@ body[data-perf='low'][data-background='gradient'] #stage::before {
 /* Rather than shrinking type until it is unreadable, whole rows are removed as
    cards get smaller. The card stays honest at every size. */
 .card[data-density='compact'] .metrics .metric:nth-child(n + 3),
-.card[data-density='compact'] .card-foot {
+.card[data-density='compact'] .card-foot-note,
+/* The subtitle is the first thing to go once the address has to fit as well.
+   The name, the status, the work and the address all say more than it does. */
+.card[data-density='compact'] .client-company {
   display: none;
 }
 
@@ -659,10 +745,34 @@ body[data-perf='low'][data-background='gradient'] #stage::before {
   -webkit-line-clamp: 1;
 }
 
+.card[data-density='compact'] .card-inner {
+  padding: 13px 16px;
+}
+
 .card[data-density='dense'] .metrics .metric:nth-child(n + 2),
-.card[data-density='dense'] .card-foot,
+.card[data-density='dense'] .card-foot-note,
 .card[data-density='dense'] .client-company {
   display: none;
+}
+
+/* A footer with nothing left in it should not still be taking a border and a
+   margin. Only a card with an address keeps one at these sizes. */
+.card[data-density='compact'] .card-foot:empty,
+.card[data-density='dense'] .card-foot:empty {
+  display: none;
+}
+
+/*
+ * On a small card the footer is one short address and nothing else, so it drops
+ * its rule and its padding and reads as a last line rather than as a footer.
+ * Without this it costs about 14px more than the row it replaced and the
+ * address is pushed out of the card, which is exactly what happened first time.
+ */
+.card[data-density='compact'] .card-foot,
+.card[data-density='dense'] .card-foot {
+  border-top: 0;
+  padding-top: 0;
+  margin-top: clamp(4px, calc(var(--card-h) * 0.018), 9px);
 }
 
 /* One line each, so a short card still says what the work is and where it is. */

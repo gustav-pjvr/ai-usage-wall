@@ -96,6 +96,31 @@ ok('editing one client moves no other card', moved.length === 0, `${moved.length
 ok('empty client list does not throw',
    computeLayout([], { width: 1920, height: 1080 }).cards.length === 0);
 
+// The editorial override has to beat the score in BOTH directions, or it is not
+// an override. The top-scoring client is pushed down and the bottom one pulled
+// up, and the assertion is on the resulting tier, not on the score.
+const ranked = mk(12);
+const top = ranked[0].id;
+const bottom = ranked[ranked.length - 1].id;
+const tierOf = (cards, id) => cards.find(c => c.id === id)?.tier;
+
+const plain = computeLayout(ranked, { width: 1920, height: 1080, now: NOW }).cards;
+const overridden = computeLayout(
+  ranked.map(c => c.id === top ? { ...c, emphasis: 'background' }
+            : c.id === bottom ? { ...c, emphasis: 'feature' } : c),
+  { width: 1920, height: 1080, now: NOW },
+).cards;
+
+ok("emphasis 'background' caps a strong client at small",
+   tierOf(overridden, top) === 'small', `was ${tierOf(plain, top)}, now ${tierOf(overridden, top)}`);
+ok("emphasis 'feature' floors a weak client at large or hero",
+   ['large', 'hero'].includes(tierOf(overridden, bottom)),
+   `was ${tierOf(plain, bottom)}, now ${tierOf(overridden, bottom)}`);
+ok('legacy featured:true still behaves as feature',
+   ['large', 'hero'].includes(tierOf(
+     computeLayout(ranked.map(c => c.id === bottom ? { ...c, featured: true } : c),
+                   { width: 1920, height: 1080, now: NOW }).cards, bottom)));
+
 // ── Schema: degrade, never drop ────────────────────────────────────────────
 console.log('\nschema validation');
 ok('minimal record is accepted', validateClient({ id: 'x', name: 'X' }).client !== null);

@@ -5,19 +5,28 @@
  * packs a multi-resolution Windows .ico. No image libraries and no native deps:
  * the Chromium we already ship does the drawing.
  *
- * DESIGN BRIEF (Gustav, 2026-09-02):
- *   standalone identity, "Client Wall", constellation, reads literally,
- *   multi-colour, sharp geometric, gradient depth, icon plus wordmark,
- *   two variants tuned for large and small.
+ * DESIGN BRIEF (Gustav, 2026-09-03):
+ *   a wall of clearly defined individual bricks on a WHITE background, with the
+ *   top-left corner of the wall exploding outward.
  *
- * How "constellation" was reconciled with "reads instantly" and "must work at
- * 16px": THE STARS ARE THE CLIENT TILES. Different-sized rounded squares in
- * different brand hues on a dark ground, linked by faint lines. That is
- * simultaneously a constellation and a literal picture of the wall, and squares
- * survive 16px where dots would turn to mush.
+ * How that is built:
+ *   - RUNNING BOND, the offset courses a real wall uses. It is what makes a
+ *     grid of rectangles read as "brick" rather than as "tiles", and it is the
+ *     reason alternate courses end in half bricks.
+ *   - WHITE MORTAR. The gaps are the plate showing through, so every brick is
+ *     separated by the background itself. That is what "clearly defined
+ *     individual" asks for, and it survives downscaling better than an outline.
+ *   - THE CORNER IS GENUINELY MISSING. Two bricks are removed from the wall and
+ *     the same two, plus smaller chips, fly out of that hole. Drawing shards
+ *     over an intact wall would read as debris passing in front of it.
+ *   - Shards ROTATE and shrink along a vector radiating from the corner, and
+ *     fade as they travel, so the eye reads direction rather than scatter.
  *
- * The palette is computed with the SAME oklch maths the cards use, so the logo
- * cannot drift out of sync with the product's colour system.
+ * The five client hues are carried over from the previous mark and are still
+ * computed with the same oklch maths the cards use, so the logo cannot drift
+ * out of sync with the product's colour system. They are darker here than they
+ * were on the old dark plate, because the same lightness that read as vivid on
+ * near-black is washed out on white.
  *
  * RASTERISATION NOTE, learned the hard way. Three approaches were tried:
  *   1. One BrowserWindow per icon size. Windows clamps small window sizes, so a
@@ -65,107 +74,177 @@ function oklchToHex(l, c, h) {
 
 /**
  * Five client hues held at one lightness and chroma, so they read as a family
- * rather than a clash. The same discipline the cards apply to real client brands.
+ * rather than a clash. The same discipline the cards apply to real client
+ * brands. L is 0.62 rather than the old 0.7: on a white plate the lighter tone
+ * loses its edge, and a brick has to look solid.
  */
-const HUES = { teal: 185, amber: 70, violet: 300, blue: 255, green: 150 };
-const tone = (hue, dl = 0) => oklchToHex(0.7 + dl, 0.155, hue);
+const HUES = { teal: 190, amber: 62, violet: 300, blue: 258, green: 148 };
+const ORDER = ['teal', 'blue', 'amber', 'violet', 'green'];
+const brick = (hue, dl = 0) => oklchToHex(0.62 + dl, 0.17, hue);
 
-const PLATE_TOP = oklchToHex(0.225, 0.022, 255);
-const PLATE_BOT = oklchToHex(0.145, 0.018, 255);
-const LINE = oklchToHex(0.82, 0.02, 250);
+const PLATE = '#ffffff';
+/** The plate needs an edge or it disappears on a white surface. */
+const PLATE_EDGE = oklchToHex(0.9, 0.004, 250);
 
 // ── Geometry (shared by the SVG and the canvas renderer) ───────────────────
 
 /*
- * Nodes sit inside the plate's 40..216 safe area on a 24px module with 8px
- * gaps, so every edge lands on the same rhythm. That alignment, not corner
- * sharpness, is where "sharp and geometric, precise" actually comes from.
+ * Wall metrics on the 256 plate.
+ *
+ * Course pitch and brick pitch are both derived from one mortar width, so the
+ * white gaps are identical vertically and horizontally. A wall whose horizontal
+ * mortar is thicker than its vertical mortar looks wrong before anyone can say
+ * why.
  */
-const NODES = [
-  { x: 40, y: 40, w: 88, h: 88, hue: 'teal' },
-  { x: 160, y: 40, w: 56, h: 56, hue: 'amber' },
-  { x: 160, y: 128, w: 24, h: 24, hue: 'green' },
-  { x: 40, y: 160, w: 56, h: 56, hue: 'violet' },
-  { x: 128, y: 160, w: 88, h: 56, hue: 'blue' },
-  { x: 136, y: 104, w: 24, h: 24, hue: 'green' },
-];
+const MORTAR = 5;
+const BRICK_W = 34;
+const BRICK_H = 22;
+const COLS = 5;
+/*
+ * The wall sits LOW and RIGHT on purpose. Everything above and left of it is
+ * the blast area, and a composition where the wall is centred leaves the
+ * shards nowhere to go, which reads as debris rather than as an explosion.
+ *
+ * It also has to have MASS. An earlier pass used three bricks across and four
+ * courses, and taking a corner out of that left a staircase rather than a wall
+ * with a bite in it. Twenty-two bricks read as a wall even with four missing.
+ */
+const WALL_X = 42;
+const WALL_Y = 76;
+const COURSES = 5;
+const COL_PITCH = BRICK_W + MORTAR; // 39
+const ROW_PITCH = BRICK_H + MORTAR; // 27
+const WALL_W = COLS * BRICK_W + (COLS - 1) * MORTAR; // 190
+const HALF_W = (BRICK_W - MORTAR) / 2; // 14.5, so a half brick plus mortar is half a pitch
 
-// A closed constellation figure with one interior branch, drawn behind the tiles.
-const EDGES = [
-  [0, 1],
-  [0, 5],
-  [5, 2],
-  [2, 4],
-  [4, 3],
-  [3, 0],
+const R = 4; // brick corner radius: crisp, not soft
+
+/**
+ * The bricks that are GONE. The hole is the top-left corner, so the first brick
+ * of the first course and the leading half brick of the second.
+ */
+const MISSING = new Set(['0:0', '0:1', '1:0', '1:1']);
+
+/** Build the wall in running bond. Odd courses start and end with half bricks. */
+function buildWall() {
+  const out = [];
+  let n = 0;
+  for (let row = 0; row < COURSES; row++) {
+    const y = WALL_Y + row * ROW_PITCH;
+    const offset = row % 2 === 1;
+    // Even courses: COLS full bricks. Odd courses: a half, COLS-1 fulls, a half.
+    // That is running bond, and the half bricks at the ends are what makes the
+    // vertical joints stagger instead of lining up into columns.
+    const spans = [];
+    if (offset) {
+      spans.push([WALL_X, HALF_W]);
+      for (let i = 0; i < COLS - 1; i++) spans.push([WALL_X + HALF_W + MORTAR + i * COL_PITCH, BRICK_W]);
+      spans.push([WALL_X + WALL_W - HALF_W, HALF_W]);
+    } else {
+      for (let i = 0; i < COLS; i++) spans.push([WALL_X + i * COL_PITCH, BRICK_W]);
+    }
+    spans.forEach(([x, w], col) => {
+      if (MISSING.has(`${row}:${col}`)) return;
+      out.push({ x, y, w, h: BRICK_H, hue: ORDER[(row * 2 + col) % ORDER.length], rot: 0, alpha: 1 });
+      n++;
+    });
+    // Keep the hue walk going across removed bricks so the wall's colour rhythm
+    // is the same one it would have had before the corner blew out.
+    n += spans.filter((_, col) => MISSING.has(`${row}:${col}`)).length;
+  }
+  return out;
+}
+
+const WALL = buildWall();
+
+/**
+ * The pieces in flight, ordered near to far.
+ *
+ * The first two are the bricks taken out of the wall, at full size: the eye
+ * should be able to put them back. Everything after is chipped off them, so it
+ * gets smaller, spins harder and fades as it travels. All of it radiates from
+ * the wall's own top-left corner.
+ */
+const SHARDS = [
+  // The four bricks that were in that hole a moment ago, still full size and
+  // barely turned. The eye should be able to put them back.
+  { x: 38, y: 40, w: BRICK_W, h: BRICK_H, rot: -22, hue: 'amber', alpha: 1 },
+  { x: 6, y: 56, w: BRICK_W, h: BRICK_H, rot: 27, hue: 'teal', alpha: 1 },
+  { x: 78, y: 22, w: BRICK_W, h: BRICK_H, rot: 36, hue: 'violet', alpha: 0.95 },
+  { x: 22, y: 8, w: BRICK_W - 4, h: BRICK_H - 3, rot: -42, hue: 'blue', alpha: 0.92 },
+  // Chips off those four. Smaller, spinning harder, fading as they travel.
+  { x: 122, y: 6, w: 24, h: 14, rot: 18, hue: 'green', alpha: 0.78 },
+  { x: 60, y: 76, w: 20, h: 12, rot: 56, hue: 'amber', alpha: 0.68 },
+  { x: 4, y: 118, w: 17, h: 10, rot: -64, hue: 'violet', alpha: 0.55 },
+  { x: 170, y: 22, w: 13, h: 8, rot: 30, hue: 'blue', alpha: 0.42 },
 ];
 
 /**
- * Small variant: four tiles, no plate, no constellation lines, larger relative
- * to the canvas. At 16px the lines would be sub-pixel noise and a dark plate
- * would merge into a dark taskbar, so both are dropped rather than scaled down.
- * That is what "design two variants" actually buys.
+ * Small variant, on a 30 unit canvas.
+ *
+ * Seventeen bricks and seven shards are porridge at 16px, so this is the same
+ * IDEA at the resolution that actually exists: three courses of chunky bricks,
+ * the corner missing, two chips in flight. Mortar drops to 1.5 units because
+ * below about one device pixel a gap stops separating anything.
  */
-const SMALL = [
-  { x: 2, y: 2, w: 13, h: 13, hue: 'teal' },
-  { x: 19, y: 3, w: 9, h: 9, hue: 'amber' },
-  { x: 3, y: 19, w: 9, h: 9, hue: 'violet' },
-  { x: 17, y: 17, w: 11, h: 11, hue: 'blue' },
+const SMALL_UNITS = 32;
+
+const SMALL_WALL = [
+  // Course 1. The brick at x=4 is the one that is gone: that hole IS the mark
+  // at this size, so it comes before everything else.
+  { x: 13, y: 11, w: 7, h: 5, hue: 'blue' },
+  { x: 22, y: 11, w: 7, h: 5, hue: 'amber' },
+  // Course 2, offset. Its leading half brick is missing too, so the hole is a
+  // corner rather than a single square notch.
+  { x: 8, y: 18, w: 7, h: 5, hue: 'green' },
+  { x: 17, y: 18, w: 7, h: 5, hue: 'violet' },
+  { x: 26, y: 18, w: 3, h: 5, hue: 'teal' },
+  // Course 3, whole.
+  { x: 4, y: 25, w: 7, h: 5, hue: 'amber' },
+  { x: 13, y: 25, w: 7, h: 5, hue: 'teal' },
+  { x: 22, y: 25, w: 7, h: 5, hue: 'blue' },
 ];
 
-const centre = (n) => [n.x + n.w / 2, n.y + n.h / 2];
-const nodeRadius = (n) => Math.round(Math.min(n.w, n.h) * 0.22);
+/*
+ * Two chips, and no more. At 16px each of these is about three device pixels
+ * across; a third would be a smudge next to the other two rather than a
+ * separate object, and the explosion would read as dirt on the icon.
+ */
+const SMALL_SHARDS = [
+  { x: 2, y: 3, w: 7, h: 5, rot: -25, hue: 'teal', alpha: 1 },
+  { x: 12, y: 1, w: 5, h: 3.5, rot: 24, hue: 'violet', alpha: 0.9 },
+];
 
 // ── SVG sources (the vector deliverable) ───────────────────────────────────
 
+function pieceSvg(p, radius) {
+  const rot = p.rot ? ` transform="rotate(${p.rot} ${p.x + p.w / 2} ${p.y + p.h / 2})"` : '';
+  const alpha = p.alpha != null && p.alpha < 1 ? ` fill-opacity="${p.alpha}"` : '';
+  return `  <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${radius}" fill="${brick(
+    HUES[p.hue],
+  )}"${alpha}${rot}/>`;
+}
+
 function markSvg() {
-  const grads = NODES.map(
-    (n, i) => `    <linearGradient id="g${i}" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="${tone(HUES[n.hue], 0.1)}"/>
-      <stop offset="1" stop-color="${tone(HUES[n.hue], -0.06)}"/>
-    </linearGradient>`,
-  ).join('\n');
-
-  const lines = EDGES.map(([a, b]) => {
-    const [x1, y1] = centre(NODES[a]);
-    const [x2, y2] = centre(NODES[b]);
-    return `    <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
-  }).join('\n');
-
-  const tiles = NODES.map(
-    (n, i) =>
-      `  <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${nodeRadius(n)}" fill="url(#g${i})"/>`,
-  ).join('\n');
-
+  const bricks = WALL.map((b) => pieceSvg(b, R)).join('\n');
+  const shards = SHARDS.map((s) => pieceSvg(s, R)).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <defs>
-    <linearGradient id="plate" x1="0" y1="0" x2="0.35" y2="1">
-      <stop offset="0" stop-color="${PLATE_TOP}"/>
-      <stop offset="1" stop-color="${PLATE_BOT}"/>
-    </linearGradient>
-${grads}
-  </defs>
-  <rect x="0" y="0" width="256" height="256" rx="56" fill="url(#plate)"/>
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="${PLATE}"/>
   <rect x="0.75" y="0.75" width="254.5" height="254.5" rx="55.25" fill="none"
-        stroke="#ffffff" stroke-opacity="0.10" stroke-width="1.5"/>
-  <g stroke="${LINE}" stroke-opacity="0.32" stroke-width="3" stroke-linecap="round">
-${lines}
-  </g>
-${tiles}
+        stroke="${PLATE_EDGE}" stroke-width="1.5"/>
+${bricks}
+${shards}
 </svg>
 `;
 }
 
 function markSmallSvg() {
-  const tiles = SMALL.map(
-    (n) =>
-      `  <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="${Math.max(
-        1.5,
-        Math.round(n.w * 0.22),
-      )}" fill="${tone(HUES[n.hue], 0.04)}"/>`,
-  ).join('\n');
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 30 30" width="30" height="30">
-${tiles}
+  const bricks = SMALL_WALL.map((b) => pieceSvg(b, 1)).join('\n');
+  const shards = SMALL_SHARDS.map((s) => pieceSvg(s, 1)).join('\n');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SMALL_UNITS} ${SMALL_UNITS}" width="${SMALL_UNITS}" height="${SMALL_UNITS}">
+  <rect x="0" y="0" width="${SMALL_UNITS}" height="${SMALL_UNITS}" rx="7" fill="${PLATE}"/>
+${bricks}
+${shards}
 </svg>
 `;
 }
@@ -182,7 +261,7 @@ ${inner}
   <text x="226" y="116" font-family="'Plus Jakarta Sans','Segoe UI Variable Display','Segoe UI',system-ui,sans-serif"
         font-size="62" font-weight="700" letter-spacing="-1.4" fill="#f2f5f7">Client Wall</text>
   <text x="229" y="148" font-family="'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif"
-        font-size="20" font-weight="500" letter-spacing="3.1" fill="${tone(HUES.teal)}">MUCHBETTER</text>
+        font-size="20" font-weight="500" letter-spacing="3.1" fill="${brick(HUES.teal, 0.08)}">MUCHBETTER</text>
 </svg>
 `;
 }
@@ -225,47 +304,41 @@ const PAGE_DRAW = `
   var g = c.getContext('2d');
   var s = spec.scale;
 
-  function rr(x, y, w, h, r) {
-    g.beginPath();
-    g.roundRect(x * s, y * s, w * s, h * s, r * s);
-  }
-
-  if (spec.kind === 'mark' || spec.kind === 'lockup') {
-    var ox = spec.ox || 0, oy = spec.oy || 0;
+  function piece(p) {
     g.save();
-    g.translate(ox * s, oy * s);
-
-    // Plate
-    var k = spec.plateScale || 1;
-    var pg = g.createLinearGradient(0, 0, 256 * k * s * 0.35, 256 * k * s);
-    pg.addColorStop(0, spec.plateTop); pg.addColorStop(1, spec.plateBot);
-    rr(0, 0, 256 * k, 256 * k, 56 * k); g.fillStyle = pg; g.fill();
-    rr(0.75, 0.75, 254.5 * k, 254.5 * k, 55.25 * k);
-    g.strokeStyle = 'rgba(255,255,255,0.10)'; g.lineWidth = 1.5 * s; g.stroke();
-
-    // Constellation lines, behind the tiles
-    g.strokeStyle = spec.line; g.lineWidth = 3 * s; g.lineCap = 'round';
-    g.globalAlpha = 0.32;
-    spec.edges.forEach(function (e) {
-      g.beginPath();
-      g.moveTo(e[0] * s, e[1] * s);
-      g.lineTo(e[2] * s, e[3] * s);
-      g.stroke();
-    });
-    g.globalAlpha = 1;
-
-    // Tiles
-    spec.nodes.forEach(function (n) {
-      var ng = g.createLinearGradient(n.x * s, n.y * s, (n.x + n.w) * s, (n.y + n.h) * s);
-      ng.addColorStop(0, n.c0); ng.addColorStop(1, n.c1);
-      rr(n.x, n.y, n.w, n.h, n.r); g.fillStyle = ng; g.fill();
-    });
+    g.globalAlpha = p.a == null ? 1 : p.a;
+    if (p.rot) {
+      var cx = (p.x + p.w / 2) * s, cy = (p.y + p.h / 2) * s;
+      g.translate(cx, cy);
+      g.rotate(p.rot * Math.PI / 180);
+      g.translate(-cx, -cy);
+    }
+    g.beginPath();
+    g.roundRect(p.x * s, p.y * s, p.w * s, p.h * s, p.r * s);
+    g.fillStyle = p.c;
+    g.fill();
     g.restore();
-  } else {
-    spec.nodes.forEach(function (n) {
-      rr(n.x, n.y, n.w, n.h, n.r); g.fillStyle = n.c0; g.fill();
-    });
   }
+
+  var ox = spec.ox || 0, oy = spec.oy || 0, k = spec.plateScale || 1;
+  g.save();
+  g.translate(ox * s, oy * s);
+
+  // Plate. White, with an edge so it still has a silhouette on a white surface.
+  g.beginPath();
+  g.roundRect(0, 0, spec.plate * k * s, spec.plate * k * s, spec.plateRadius * k * s);
+  g.fillStyle = spec.plateFill;
+  g.fill();
+  if (spec.plateEdge) {
+    g.beginPath();
+    g.roundRect(0.75 * s, 0.75 * s, (spec.plate * k - 1.5) * s, (spec.plate * k - 1.5) * s, (spec.plateRadius * k - 0.75) * s);
+    g.strokeStyle = spec.plateEdge;
+    g.lineWidth = 1.5 * s;
+    g.stroke();
+  }
+
+  spec.pieces.forEach(piece);
+  g.restore();
 
   if (spec.kind === 'lockup') {
     g.fillStyle = spec.titleColor;
@@ -281,25 +354,28 @@ const PAGE_DRAW = `
 })
 `;
 
+const toPiece = (p, radius) => ({
+  x: p.x,
+  y: p.y,
+  w: p.w,
+  h: p.h,
+  r: radius,
+  rot: p.rot || 0,
+  a: p.alpha == null ? 1 : p.alpha,
+  c: brick(HUES[p.hue]),
+});
+
 function markSpec(size) {
   return {
     kind: 'mark',
     width: size,
     height: size,
     scale: size / 256,
-    plateTop: PLATE_TOP,
-    plateBot: PLATE_BOT,
-    line: LINE,
-    edges: EDGES.map(([a, b]) => [...centre(NODES[a]), ...centre(NODES[b])]),
-    nodes: NODES.map((n) => ({
-      x: n.x,
-      y: n.y,
-      w: n.w,
-      h: n.h,
-      r: nodeRadius(n),
-      c0: tone(HUES[n.hue], 0.1),
-      c1: tone(HUES[n.hue], -0.06),
-    })),
+    plate: 256,
+    plateRadius: 56,
+    plateFill: PLATE,
+    plateEdge: PLATE_EDGE,
+    pieces: [...WALL, ...SHARDS].map((p) => toPiece(p, R)),
   };
 }
 
@@ -308,15 +384,14 @@ function smallSpec(size) {
     kind: 'small',
     width: size,
     height: size,
-    scale: size / 30,
-    nodes: SMALL.map((n) => ({
-      x: n.x,
-      y: n.y,
-      w: n.w,
-      h: n.h,
-      r: Math.max(1.5, Math.round(n.w * 0.22)),
-      c0: tone(HUES[n.hue], 0.04),
-    })),
+    scale: size / SMALL_UNITS,
+    plate: SMALL_UNITS,
+    plateRadius: 7,
+    plateFill: PLATE,
+    // No hairline edge at this size: 1.5 units of a 30 unit canvas is most of a
+    // device pixel at 16px and reads as a grey halo rather than as an edge.
+    plateEdge: null,
+    pieces: [...SMALL_WALL, ...SMALL_SHARDS].map((p) => toPiece(p, 1)),
   };
 }
 
@@ -340,18 +415,17 @@ function lockupSpec(scale, onDark) {
     scale,
     ox: LOCKUP.markX,
     oy: markY,
-    // Scaling is folded into the node coordinates so the page code stays a
-    // single translate.
-    nodes: base.nodes.map((n) => ({ ...n, x: n.x * k, y: n.y * k, w: n.w * k, h: n.h * k, r: n.r * k })),
-    edges: base.edges.map((e) => e.map((v) => v * k)),
     plateScale: k,
+    // Scaling is folded into the piece coordinates so the page code stays a
+    // single translate.
+    pieces: base.pieces.map((p) => ({ ...p, x: p.x * k, y: p.y * k, w: p.w * k, h: p.h * k, r: p.r * k })),
     textX: LOCKUP.textX,
     titleY: LOCKUP.titleY,
     subY: LOCKUP.subY,
     title: 'Client Wall',
     sub: 'MUCHBETTER',
     titleColor: onDark ? '#f2f5f7' : oklchToHex(0.22, 0.02, 250),
-    accent: onDark ? tone(HUES.teal) : oklchToHex(0.52, 0.13, HUES.teal),
+    accent: onDark ? brick(HUES.teal, 0.08) : brick(HUES.teal, -0.06),
   };
 }
 
@@ -385,17 +459,18 @@ async function run() {
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><meta charset="utf-8">'));
 
   /*
-   * 48 and up use the plated mark; below that it turns to porridge and the
-   * simplified four-tile variant takes over. That switch point is the entire
-   * justification for having two variants.
+   * 64 and up use the full wall. Below that the mortar falls under one device
+   * pixel and the wall turns to porridge: 48px was tried with the full wall and
+   * was measurably unreadable, so the switch point is 64, not 48. That decision
+   * is the entire justification for having two variants.
    */
   const icoSizes = [256, 128, 64, 48, 32, 24, 16];
   const images = [];
   for (const size of icoSizes) {
-    const data = await rasterise(win, size >= 48 ? markSpec(size) : smallSpec(size));
+    const data = await rasterise(win, size >= 64 ? markSpec(size) : smallSpec(size));
     await fs.writeFile(path.join(outDir, `icon-${size}.png`), data);
     images.push({ size, data });
-    say(`[logo] icon-${size}.png  ${data.length} bytes  (${size >= 48 ? 'plated' : 'simplified'})`);
+    say(`[logo] icon-${size}.png  ${data.length} bytes  (${size >= 64 ? 'full wall' : 'reduced'})`);
   }
 
   const ico = packIco(images);
@@ -423,7 +498,8 @@ async function run() {
   }
 
   win.destroy();
-  say(`[logo] palette: ${Object.entries(HUES).map(([k, h]) => `${k} ${tone(h)}`).join('  ')}`);
+  say(`[logo] bricks ${WALL.length}, shards ${SHARDS.length}`);
+  say(`[logo] palette: ${Object.entries(HUES).map(([k, h]) => `${k} ${brick(h)}`).join('  ')}`);
   await fs.writeFile(path.join(outDir, 'render.log'), log.join('\n') + '\n', 'utf8');
   app.quit();
 }

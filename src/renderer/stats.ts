@@ -596,9 +596,11 @@ export class StatsView {
      */
     const load = el('div', 'loading');
     const inner = el('div', 'loading-inner');
+    // A course of bricks with the first one knocked loose, which is the app's
+    // own mark reduced to one line of CSS shapes.
     const marks = el('div', 'loading-marks');
-    for (let i = 0; i < 4; i++) {
-      const m = el('span', 'loading-mark');
+    for (let i = 0; i < 5; i++) {
+      const m = el('span', i === 0 ? 'loading-mark is-loose' : 'loading-mark');
       m.style.setProperty('--i', String(i));
       marks.appendChild(m);
     }

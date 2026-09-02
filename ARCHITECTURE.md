@@ -318,6 +318,15 @@ The wall runs 24/7. Every effect is paid continuously.
    loads a native binary and cannot be bundled.
 10. **Validation must never throw for a recoverable problem.** One bad client must
     never cost more than one card.
+11. **Strip the UTF-8 BOM before every `JSON.parse`**, in the client store and in
+    settings alike. Notepad and PowerShell's `Set-Content -Encoding utf8` both
+    write one, `JSON.parse` rejects it, and the failure is invisible: the file
+    looks perfect and is silently ignored. This has now bitten twice.
+12. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
+    nor registers on this machine. Electron's Windows implementation is not safe
+    against spaces in the profile path, and this profile has them. Write
+    `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` directly via `reg.exe`,
+    with the executable path quoted.
 
 ---
 

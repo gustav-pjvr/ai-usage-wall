@@ -141,8 +141,8 @@ performance tier, layer mode, whether the Win32 layer is available, vault match
 count, and any clients that failed to load.
 
 **A client that fails to load still gets a card** showing the parse error, rather
-than silently disappearing. `data/clients/zz-broken-example.json` is intentionally
-malformed to demonstrate this; leave it there.
+than silently disappearing. So if you mistype something in a client file you will
+see exactly which file and which line, instead of that client quietly vanishing.
 
 Known limitations on the current machine are listed in
 [ARCHITECTURE.md](ARCHITECTURE.md#known-issues).

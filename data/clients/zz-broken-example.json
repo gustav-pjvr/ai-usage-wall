@@ -1,6 +1,0 @@
-{
-  "id": "broken-example",
-  "name": "Broken Example",
-  "revenue": 1000,
-  // JSON has no comments, so this file fails to parse on purpose
-}

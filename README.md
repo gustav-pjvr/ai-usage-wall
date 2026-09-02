@@ -1,4 +1,7 @@
-# MuchBetter Client Wall
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/lockup-on-dark.png">
+  <img src="assets/logo/lockup-on-light.png" alt="Client Wall" width="400">
+</picture>
 
 An ambient Windows desktop application that continuously displays MuchBetter's
 clients as individually branded cards. MuchBetter provides the system, each client
@@ -23,6 +26,7 @@ npm run dev        # rebuild on change
 npm test           # 42 checks on layout, colour and schema
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
+npm run logo       # regenerate the mark, icons and wordmark
 ```
 
 `npm run package` produces `release/MuchBetter Client Wall Setup 0.1.0.exe`

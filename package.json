@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node test/run.mjs",
     "package": "npm run build && electron-builder --win",
-    "package:dir": "npm run build && electron-builder --win dir"
+    "package:dir": "npm run build && electron-builder --win dir",
+    "logo": "electron scripts/logo.mjs"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
@@ -64,7 +65,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "assets/logo/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -72,7 +74,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
-      "shortcutName": "MuchBetter Client Wall"
+      "shortcutName": "MuchBetter Client Wall",
+      "installerIcon": "assets/logo/icon.ico",
+      "uninstallerIcon": "assets/logo/icon.ico"
     },
     "compression": "normal",
     "removePackageScripts": true

@@ -403,7 +403,50 @@ Verified end to end: packaged exe seeded 11 files, loaded 10 clients with the on
 intentional failure, drove the Win32 layer, and rendered identically to the dev
 build.
 
-The app has no custom icon yet, so Windows shows the default Electron icon.
+
+---
+
+## Identity
+
+The mark is a **constellation whose stars are the client tiles**: rounded squares
+of different sizes in different brand hues on a dark plate, linked by faint
+lines. That reconciles the three requirements that otherwise fight each other,
+namely "constellation", "reads instantly as its subject", and "must survive
+16px". Dots would have failed the third.
+
+`npm run logo` regenerates everything from `scripts/logo.mjs`:
+
+| Output | Use |
+|---|---|
+| `assets/logo/mark.svg` | vector master, plated variant |
+| `assets/logo/mark-small.svg` | vector master, simplified variant |
+| `assets/logo/icon.ico` | app and installer icon, 7 entries (16 to 256) |
+| `assets/tray.png` + `tray@2x.png` | tray icon, 1x and 2x |
+| `assets/logo/lockup-on-{light,dark}.png` | wordmark, 1x and 2x |
+
+Three things about it are deliberate:
+
+- **Two variants, with a switch at 48px.** At and above 48 the plated mark is
+  used; below it the simplified four-tile variant takes over. The plate merges
+  into a dark taskbar and the constellation lines become sub-pixel noise at
+  small sizes, so they are dropped rather than scaled down.
+- **The palette is computed with the same oklch maths the cards use**, from the
+  same five-hue family at one lightness and chroma. The logo cannot drift out of
+  sync with the product's colour system.
+- **Two lockups, not one.** Near-white text vanishes on a light README and dark
+  text vanishes on a dark one, and no middle value looks deliberate on both.
+
+Rasterisation draws the geometry with **Canvas 2D inside a page**, not
+`capturePage()`. Three capture-based approaches were tried and all failed on
+Windows: one window per size (Windows clamps small window sizes), one tall sheet
+cropped per size (`capturePage()` returns only the visible viewport, which came
+back 256px tall regardless of window height), and `capturePage()` with an
+explicit rect (died natively after the first tile: exit code 0, no exception,
+nothing logged). The geometry constants feed both the SVG and the canvas, so the
+vector and raster outputs cannot diverge.
+
+**`build.mjs` must never write `assets/tray.png` again.** It used to generate a
+placeholder there on every build, which silently clobbered the real logo.
 
 ---
 

@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 220" width="800" height="220">
+  <g transform="translate(26,25) scale(0.66)">
+    <defs>
+      <linearGradient id="plate" x1="0" y1="0" x2="0.35" y2="1">
+        <stop offset="0" stop-color="#151c26"/>
+        <stop offset="1" stop-color="#060a12"/>
+      </linearGradient>
+      <linearGradient id="g0" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#00ddcb"/>
+        <stop offset="1" stop-color="#00a998"/>
+      </linearGradient>
+      <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#fcaa38"/>
+        <stop offset="1" stop-color="#c67700"/>
+      </linearGradient>
+      <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#6ad987"/>
+        <stop offset="1" stop-color="#30a556"/>
+      </linearGradient>
+      <linearGradient id="g3" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#cda5ff"/>
+        <stop offset="1" stop-color="#9b73db"/>
+      </linearGradient>
+      <linearGradient id="g4" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#75c0ff"/>
+        <stop offset="1" stop-color="#438de8"/>
+      </linearGradient>
+      <linearGradient id="g5" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#6ad987"/>
+        <stop offset="1" stop-color="#30a556"/>
+      </linearGradient>
+    </defs>
+    <rect x="0" y="0" width="256" height="256" rx="56" fill="url(#plate)"/>
+    <rect x="0.75" y="0.75" width="254.5" height="254.5" rx="55.25" fill="none"
+          stroke="#ffffff" stroke-opacity="0.10" stroke-width="1.5"/>
+    <g stroke="#bbc5d1" stroke-opacity="0.32" stroke-width="3" stroke-linecap="round">
+      <line x1="84" y1="84" x2="188" y2="68"/>
+      <line x1="84" y1="84" x2="148" y2="116"/>
+      <line x1="148" y1="116" x2="172" y2="140"/>
+      <line x1="172" y1="140" x2="172" y2="188"/>
+      <line x1="172" y1="188" x2="68" y2="188"/>
+      <line x1="68" y1="188" x2="84" y2="84"/>
+    </g>
+    <rect x="40" y="40" width="88" height="88" rx="19" fill="url(#g0)"/>
+    <rect x="160" y="40" width="56" height="56" rx="12" fill="url(#g1)"/>
+    <rect x="160" y="128" width="24" height="24" rx="5" fill="url(#g2)"/>
+    <rect x="40" y="160" width="56" height="56" rx="12" fill="url(#g3)"/>
+    <rect x="128" y="160" width="88" height="56" rx="12" fill="url(#g4)"/>
+    <rect x="136" y="104" width="24" height="24" rx="5" fill="url(#g5)"/>
+  
+  </g>
+  <text x="226" y="116" font-family="'Plus Jakarta Sans','Segoe UI Variable Display','Segoe UI',system-ui,sans-serif"
+        font-size="62" font-weight="700" letter-spacing="-1.4" fill="#f2f5f7">Client Wall</text>
+  <text x="229" y="148" font-family="'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif"
+        font-size="20" font-weight="500" letter-spacing="3.1" fill="#00bcab">MUCHBETTER</text>
+</svg>

@@ -136,12 +136,19 @@ function registerAssetProtocol(): void {
 // ── Tray icon ──────────────────────────────────────────────────────────────
 
 function trayIcon(): Electron.NativeImage {
+  /*
+   * tray.png is 16px and Electron picks up tray@2x.png automatically for HiDPI
+   * displays via the @2x naming convention, so this one path covers both.
+   * The tray art is the simplified four-tile variant: the plated mark is
+   * illegible at 16px, which is the whole reason two variants exist.
+   */
   const file = path.join(bundledRoot(), 'assets', 'tray.png');
   try {
     const img = nativeImage.createFromPath(file);
     if (!img.isEmpty()) return img;
-  } catch {
-    /* fall through */
+    console.warn(`[tray] icon at ${file} is empty; run \`npm run logo\``);
+  } catch (err) {
+    console.warn(`[tray] could not load ${file}: ${(err as Error).message}`);
   }
   return nativeImage.createEmpty();
 }

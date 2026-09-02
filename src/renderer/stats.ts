@@ -390,6 +390,25 @@ export class StatsView {
     heroMeta.appendChild(el('span', 'hero-exact', ''));
     heroMeta.appendChild(el('span', 'hero-sub', 'input + output + cache, every session on this machine'));
     heroBody.appendChild(heroMeta);
+
+    /*
+     * Composition strip.
+     *
+     * Roughly 97% of that headline is cache READS, the same context re-read on
+     * every turn, and only a fraction of a percent is text Claude actually
+     * generated. The total is real, but on its own it reads as consumption.
+     * Showing what it is made of is the difference between a true number and an
+     * honest one.
+     */
+    const comp = el('div', 'hero-comp');
+    const compBar = el('div', 'comp-bar');
+    for (const part of ['cacheRead', 'cacheCreate', 'output', 'input']) {
+      const seg = el('div', `comp-seg comp-${part}`);
+      compBar.appendChild(seg);
+    }
+    comp.appendChild(compBar);
+    comp.appendChild(el('div', 'comp-legend'));
+    heroBody.appendChild(comp);
     hero.appendChild(heroBody);
     grid.appendChild(hero);
 
@@ -422,7 +441,7 @@ export class StatsView {
       ['sessions', 'Sessions', 'distinct transcripts'],
       ['prompts', 'Prompts sent', 'from history.jsonl'],
       ['days', 'Days active', 'days with any usage'],
-      ['output', 'Output tokens', 'generated'],
+      ['output', 'Generated', 'tokens Claude wrote'],
       ['thinking', 'Thinking tokens', 'extended reasoning'],
     ] as const) {
       const tile = statTile(label, hint);
@@ -524,6 +543,32 @@ export class StatsView {
 
     const exact = this.root.querySelector('.hero-exact');
     if (exact) exact.textContent = `${full(totalOf(t))} tokens`;
+
+    // Composition, so the headline cannot be mistaken for consumption.
+    const grand = totalOf(t) || 1;
+    const parts: [string, number, string][] = [
+      ['cacheRead', t.cacheRead, 'cache reads'],
+      ['cacheCreate', t.cacheCreate, 'cache writes'],
+      ['output', t.output, 'generated'],
+      ['input', t.input, 'fresh input'],
+    ];
+    for (const [key, value] of parts) {
+      const seg = this.root.querySelector<HTMLElement>(`.comp-${key}`);
+      if (seg) {
+        seg.style.setProperty('--w', `${((value / grand) * 100).toFixed(3)}%`);
+        seg.title = `${full(value)} tokens`;
+      }
+    }
+    const legend = this.root.querySelector('.comp-legend');
+    if (legend) {
+      legend.replaceChildren();
+      for (const [key, value, label] of parts) {
+        const item = el('span', `comp-key comp-key-${key}`);
+        const pct = (value / grand) * 100;
+        item.textContent = `${label} ${pct >= 0.1 ? pct.toFixed(1) : pct.toFixed(2)}%`;
+        legend.appendChild(item);
+      }
+    }
 
     const effFill = this.root.querySelector<HTMLElement>('.eff-fill');
     if (effFill) effFill.style.setProperty('--p', String(d.cacheHitRate));

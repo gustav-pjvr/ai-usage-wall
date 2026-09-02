@@ -18,7 +18,7 @@
  * release/win-unpacked. That already happened once and cost real confusion.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { exec, execFile, spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 const run = promisify(execFile);
+const runShell = promisify(exec);
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
 const VERSION = pkg.version;
@@ -61,10 +62,17 @@ async function stopApp() {
 
 async function build() {
   step(`building and packaging ${VERSION}`);
-  // npm.cmd directly rather than shell:true, which Node deprecated for args
-  // because they are concatenated rather than escaped.
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  await run(npm, ['run', 'package'], { cwd: root, maxBuffer: 1024 * 1024 * 32 });
+  /*
+   * exec with a command string, not execFile.
+   *
+   * npm on Windows is a .cmd, which Node 20+ refuses to execFile without a
+   * shell (spawn EINVAL), and passing an args array WITH shell:true is
+   * deprecated because the arguments get concatenated rather than escaped.
+   * exec takes a single string and uses a shell by design, which is the one
+   * form that is neither broken nor deprecated. There is no interpolation
+   * here, so there is nothing to escape.
+   */
+  await runShell('npm run package', { cwd: root, maxBuffer: 1024 * 1024 * 32 });
   if (!(await exists(INSTALLER))) throw new Error(`installer not produced at ${INSTALLER}`);
   const { size } = await fs.stat(INSTALLER);
   ok(`${path.basename(INSTALLER)}  ${(size / 1048576).toFixed(1)} MB`);

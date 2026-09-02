@@ -612,6 +612,21 @@ export class StatsView {
     load.appendChild(inner);
     this.root.appendChild(load);
     this.root.classList.add('is-loading');
+
+    const none = el('div', 'nodata');
+    const ni = el('div', 'loading-inner');
+    ni.appendChild(el('div', 'nodata-mark', '!'));
+    ni.appendChild(el('div', 'loading-title', 'No Claude Code data on this machine'));
+    ni.appendChild(
+      el(
+        'div',
+        'nodata-body',
+        'Claude Stats reads the transcripts Claude Code writes to ~/.claude. Nothing was found there, so there is nothing to report.',
+      ),
+    );
+    ni.appendChild(el('div', 'nodata-path', ''));
+    none.appendChild(ni);
+    this.root.appendChild(none);
   }
 
   /** Progress from the main process during a cold index. */
@@ -676,6 +691,21 @@ export class StatsView {
     } else {
       this.root.classList.add('is-loading');
     }
+
+    /*
+     * Unreadable source AND nothing cached means there is genuinely nothing to
+     * say. Showing zeros in every panel would read as "you have used Claude
+     * zero times", which is a claim, not an absence. Say the absence instead.
+     */
+    const nothing = idx.unavailable && idx.totals.requests === 0;
+    this.root.classList.toggle('is-nodata', nothing);
+    if (nothing) {
+      const pathNode = this.root.querySelector('.nodata-path');
+      if (pathNode) pathNode.textContent = idx.unavailableReason ?? '';
+    }
+
+    // Cached numbers with an unreadable source are STALE, not live. Mark them.
+    this.root.classList.toggle('is-stale-data', idx.unavailable && idx.totals.requests > 0);
 
     this.root.dataset.intensity = d.intensity > 0.66 ? 'high' : d.intensity > 0.3 ? 'mid' : 'calm';
     this.root.style.setProperty('--intensity', d.intensity.toFixed(3));

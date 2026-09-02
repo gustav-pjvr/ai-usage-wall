@@ -46,7 +46,12 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as readline from 'node:readline';
 
-export const CLAUDE_HOME = path.join(os.homedir(), '.claude');
+/**
+ * Where Claude Code keeps its data. Overridable so the "no Claude Code
+ * installed" path can actually be exercised, and so a non-default location can
+ * be pointed at without a rebuild.
+ */
+export const CLAUDE_HOME = process.env.MBW_CLAUDE_HOME || path.join(os.homedir(), '.claude');
 const PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
 

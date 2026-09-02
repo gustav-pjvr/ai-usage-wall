@@ -436,6 +436,13 @@ The wall runs 24/7. Every effect is paid continuously.
     bridge are never started, and the clients view is removed from the DOM
     rather than hidden. Verify it the way it was verified the first time, by
     grepping the unpacked build for a client name and expecting nothing.
+24. **Never render money.** Project values are confidential and the wall is a
+    full-screen desktop surface that anyone walking past, or anyone on a screen
+    share, can read. Neither the card nor the detail overlay shows a revenue
+    figure, and the money formatter has been DELETED from the renderer rather
+    than left unused, so putting one back is a conscious act rather than an
+    autocomplete. `revenue` stays in the JSON because the layout score ranks on
+    it, which is a number nobody ever sees.
 
 ---
 

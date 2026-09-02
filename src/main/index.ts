@@ -45,13 +45,61 @@ let hidden = false;
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
-const appRoot = () => (app.isPackaged ? path.dirname(app.getPath('exe')) : path.join(__dirname, '..', '..'));
+/**
+ * Two roots, and the distinction matters once packaged.
+ *
+ *  - bundledRoot is read-only shipped content (the tray icon, the seed data).
+ *    In a packaged app that is `resources/`, which lives under Program Files
+ *    and is NOT writable.
+ *  - userRoot is where client JSON actually lives, because the whole point is
+ *    that these files get hand-edited. In a packaged app that is userData.
+ *
+ * In development both collapse to the repo, so editing `data/clients/` works
+ * exactly as it does now.
+ */
+const bundledRoot = () => (app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', '..'));
+const userRoot = () => (app.isPackaged ? app.getPath('userData') : path.join(__dirname, '..', '..'));
 
 function resolveClientsDir(): string {
-  return settings.clientsDir ?? path.join(appRoot(), 'data', 'clients');
+  return settings.clientsDir ?? path.join(userRoot(), 'data', 'clients');
 }
 function resolveAssetsDir(): string {
-  return settings.assetsDir ?? path.join(appRoot(), 'assets', 'clients');
+  return settings.assetsDir ?? path.join(userRoot(), 'assets', 'clients');
+}
+
+/**
+ * First run of a packaged build: copy the shipped demonstration data into the
+ * writable location. Never overwrites, so an upgrade cannot clobber real client
+ * files, and deleting a client stays deleted.
+ */
+async function seedUserData(): Promise<void> {
+  if (!app.isPackaged) return;
+  for (const [from, to] of [
+    [path.join(bundledRoot(), 'data', 'clients'), resolveClientsDir()],
+    [path.join(bundledRoot(), 'assets', 'clients'), resolveAssetsDir()],
+  ]) {
+    try {
+      await fs.access(to);
+      continue; // already seeded, leave it alone
+    } catch {
+      /* not present, seed it */
+    }
+    try {
+      await fs.mkdir(to, { recursive: true });
+      // The assets folder is legitimately optional: a wall with no logos on
+      // file is a normal state, so an absent source is not a problem worth
+      // reporting. Create the empty target and move on.
+      const hasSource = await fs
+        .access(from)
+        .then(() => true)
+        .catch(() => false);
+      if (!hasSource) continue;
+      await fs.cp(from, to, { recursive: true, force: false, errorOnExist: false });
+      console.log(`[main] seeded ${to}`);
+    } catch (err) {
+      console.warn(`[main] could not seed ${to}: ${(err as Error).message}`);
+    }
+  }
 }
 
 // ── Asset protocol ─────────────────────────────────────────────────────────
@@ -88,7 +136,7 @@ function registerAssetProtocol(): void {
 // ── Tray icon ──────────────────────────────────────────────────────────────
 
 function trayIcon(): Electron.NativeImage {
-  const file = path.join(appRoot(), 'assets', 'tray.png');
+  const file = path.join(bundledRoot(), 'assets', 'tray.png');
   try {
     const img = nativeImage.createFromPath(file);
     if (!img.isEmpty()) return img;
@@ -557,6 +605,7 @@ if (!app.requestSingleInstanceLock()) {
 
     registerAssetProtocol();
     registerIpc();
+    await seedUserData();
     await reloadData();
     startWatching();
 

@@ -746,29 +746,53 @@
   min-width: 320px;
 }
 
-/* Four marks in the app's own palette, pulsing in sequence. */
+/*
+ * The app's own mark, reduced to one course: four bricks in the client palette
+ * with the leading one knocked loose, pulsing in sequence.
+ */
 .loading-marks {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 5px;
   margin-bottom: 4px;
 }
 
 .loading-mark {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
+  /* Rotation lives in a custom property so the keyframe can COMPOSE with it.
+     A bare `transform: rotate()` here would be overwritten by the animation,
+     which is the same trap the card entrance hit. */
+  --rot: 0deg;
+  width: 22px;
+  height: 11px;
+  border-radius: 3px;
   animation: load-pulse 1.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
-  animation-delay: calc(var(--i) * 0.14s);
+  animation-delay: calc(var(--i) * 0.12s);
+}
+
+/* The brick that left the wall: turned, lifted, and given room to have left. */
+.loading-mark.is-loose {
+  --rot: -24deg;
+  width: 17px;
+  margin-right: 9px;
+  margin-bottom: 7px;
 }
 
 .loading-mark:nth-child(1) { background: oklch(0.72 0.14 185); }
 .loading-mark:nth-child(2) { background: oklch(0.74 0.14 70); }
 .loading-mark:nth-child(3) { background: oklch(0.72 0.14 300); }
 .loading-mark:nth-child(4) { background: oklch(0.72 0.14 255); }
+.loading-mark:nth-child(5) { background: oklch(0.72 0.14 148); }
 
 @keyframes load-pulse {
-  0%, 100% { opacity: 0.25; transform: translateY(0) scale(0.88); }
-  40% { opacity: 1; transform: translateY(-5px) scale(1); }
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0) rotate(var(--rot)) scale(0.88);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-5px) rotate(var(--rot)) scale(1);
+  }
 }
 
 .loading-title {

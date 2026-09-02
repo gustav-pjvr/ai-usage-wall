@@ -722,28 +722,41 @@ it is ever wanted on a second machine, make releases public and revisit.
 
 ## Identity
 
-The mark is a **constellation whose stars are the client tiles**: rounded squares
-of different sizes in different brand hues on a dark plate, linked by faint
-lines. That reconciles the three requirements that otherwise fight each other,
-namely "constellation", "reads instantly as its subject", and "must survive
-16px". Dots would have failed the third.
+The mark is a **brick wall on white with its top-left corner blowing out**
+(Gustav's brief, 2026-09-03). Twenty-three bricks in the client hues, laid in
+running bond, with four missing from the corner and those same four, plus chips,
+in flight above and to the left of them.
+
+Three decisions carry it:
+
+- **Running bond, not a grid.** Offset courses, with half bricks closing the
+  alternate ends, are what make rectangles read as "brick" rather than "tiles".
+- **White mortar.** The gaps are the plate showing through, so every brick is
+  separated by the background itself. That is what "clearly defined individual
+  bricks" asks for, and it downscales better than an outline would.
+- **The corner is genuinely missing.** Shards drawn over an intact wall read as
+  debris passing in front of it. The four bricks in flight are the four that are
+  not in the wall, at full size and barely turned, so the eye can put them back;
+  everything smaller spins harder and fades as it travels.
 
 `npm run logo` regenerates everything from `scripts/logo.mjs`:
 
 | Output | Use |
 |---|---|
-| `assets/logo/mark.svg` | vector master, plated variant |
-| `assets/logo/mark-small.svg` | vector master, simplified variant |
+| `assets/logo/mark.svg` | vector master, full wall |
+| `assets/logo/mark-small.svg` | vector master, reduced variant |
 | `assets/logo/icon.ico` | app and installer icon, 7 entries (16 to 256) |
 | `assets/tray.png` + `tray@2x.png` | tray icon, 1x and 2x |
 | `assets/logo/lockup-on-{light,dark}.png` | wordmark, 1x and 2x |
 
 Three things about it are deliberate:
 
-- **Two variants, with a switch at 48px.** At and above 48 the plated mark is
-  used; below it the simplified four-tile variant takes over. The plate merges
-  into a dark taskbar and the constellation lines become sub-pixel noise at
-  small sizes, so they are dropped rather than scaled down.
+- **Two variants, with a switch at 64px.** At and above 64 the full wall is
+  used; below it a reduced variant of eight chunky bricks and two chips takes
+  over. 48px was tried with the full wall and measured unreadable: five courses
+  of five bricks puts the mortar under one device pixel and the wall turns to
+  porridge. The reduced variant keeps the idea (wall, missing corner, something
+  in flight) at the resolution that actually exists.
 - **The palette is computed with the same oklch maths the cards use**, from the
   same five-hue family at one lightness and chroma. The logo cannot drift out of
   sync with the product's colour system.

@@ -93,9 +93,21 @@ export function normaliseSettings(raw: unknown): Settings {
 export async function loadSettings(): Promise<Settings> {
   try {
     const text = await fs.readFile(settingsPath(), 'utf8');
-    return normaliseSettings(JSON.parse(text));
-  } catch {
-    // Missing or corrupt settings is normal on first run, not an error.
+    // Strip a UTF-8 BOM. Notepad and PowerShell's Set-Content -Encoding utf8
+    // both write one, JSON.parse rejects it, and the failure is invisible: the
+    // file looks perfect and every setting silently reverts to its default.
+    // The client store does the same for exactly the same reason.
+    return normaliseSettings(JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text));
+  } catch (err) {
+    // A missing file is normal on first run. A file that EXISTS but will not
+    // parse is not: every setting silently reverts to its default and the user
+    // has no idea why their configuration stopped applying. Say so.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      console.error(
+        `[settings] ${settingsPath()} could not be read, using defaults: ${(err as Error).message}`,
+      );
+    }
     return { ...DEFAULTS };
   }
 }

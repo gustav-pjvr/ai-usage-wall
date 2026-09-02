@@ -12,7 +12,9 @@
     "dev": "node build.mjs --watch",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "package": "npm run build && electron-builder --win",
+    "package:dir": "npm run build && electron-builder --win dir"
   },
   "dependencies": {
     "chokidar": "^4.0.3",
@@ -21,7 +23,58 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "electron": "^44.1.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "world.muchbetter.clientwall",
+    "productName": "MuchBetter Client Wall",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "node_modules/koffi/**/*",
+      "node_modules/@koromix/**/*",
+      "node_modules/chokidar/**/*",
+      "node_modules/readdirp/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "data",
+        "to": "data"
+      },
+      {
+        "from": "assets",
+        "to": "assets"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/koffi/**",
+      "**/node_modules/@koromix/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": false,
+      "createStartMenuShortcut": true,
+      "shortcutName": "MuchBetter Client Wall"
+    },
+    "compression": "normal",
+    "removePackageScripts": true
   }
 }

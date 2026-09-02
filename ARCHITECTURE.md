@@ -375,7 +375,35 @@ it is the live proof that one bad file costs one card. Do not "fix" it.
 4. **Plus Jakarta Sans is not bundled.** Falls back to Segoe UI Variable Display,
    which is a good match. Drop a woff2 at `assets/clients/fonts/PlusJakartaSans.woff2`
    to use the real face.
-5. **No packaged installer yet.** Runs from source via `npm start`.
+5. **Packaged builds ship demonstration data on first run.** Replace it with real
+   clients via the tray's "Open client data folder".
+
+---
+
+## Packaging
+
+`npm run package` produces a **per-user NSIS installer** (no admin prompt) in
+`release/`. Measured: **106.5 MB installer, 370 MB unpacked**, built in about a
+minute. Unlike the Tauri toolchain this costs roughly 0.65 GB of disk, which the
+machine can afford.
+
+Two things the packaged build has to get right, and does:
+
+- **koffi is `asarUnpack`ed.** It loads a native `.node` binary at runtime and
+  cannot be read from inside an asar archive. Verified present at
+  `resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/`.
+- **Client data lives in userData, not next to the exe.** Program Files is not
+  writable and the whole point is that these files get hand-edited. The shipped
+  data under `resources/data/` is *seeded* into
+  `%APPDATA%\MuchBetter Client Wall\data\clients` on first run and **never
+  overwritten**, so an upgrade cannot clobber real client files and a deleted
+  client stays deleted.
+
+Verified end to end: packaged exe seeded 11 files, loaded 10 clients with the one
+intentional failure, drove the Win32 layer, and rendered identically to the dev
+build.
+
+The app has no custom icon yet, so Windows shows the default Electron icon.
 
 ---
 

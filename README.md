@@ -22,7 +22,17 @@ npm run build      # bundle to dist/
 npm run dev        # rebuild on change
 npm test           # 42 checks on layout, colour and schema
 npm run typecheck  # tsc --noEmit
+npm run package    # per-user Windows installer into release/
 ```
+
+`npm run package` produces `release/MuchBetter Client Wall Setup 0.1.0.exe`
+(about 106 MB, installs per-user with no admin prompt).
+
+**In a packaged build your client files live in
+`%APPDATA%\MuchBetter Client Wall\data\clients`**, not next to the executable,
+because Program Files is not writable. The demonstration clients are copied there
+on first run and are never overwritten afterwards. The tray menu's
+"Open client data folder" always opens the right one.
 
 The wall has no taskbar button and never steals focus, so **the tray icon is the
 control surface**. Right-click it for layer mode, click-through, start-with-Windows,

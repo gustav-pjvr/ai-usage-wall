@@ -3,3 +3,5 @@ dist/
 .scratch/
 assets/tray.png
 *.log
+release/
+.pkgtest.png

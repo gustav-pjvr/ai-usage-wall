@@ -97,6 +97,15 @@
     box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/*
+ * An ID selector with `display: flex` outranks the user-agent's
+ * `[hidden] { display: none }`, so setting `.hidden = true` from JS left a
+ * 3px sliver of the bar on screen in the stats-only build. Say it explicitly.
+ */
+#mode-switch[hidden] {
+  display: none;
+}
+
 #mode-switch:hover {
   opacity: 1;
   box-shadow: 0 2px 10px rgb(0 0 0 / 0.35), 0 14px 40px rgb(0 0 0 / 0.35);

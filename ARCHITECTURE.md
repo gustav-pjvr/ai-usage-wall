@@ -430,6 +430,12 @@ The wall runs 24/7. Every effect is paid continuously.
     returns with a pixel-level render probe and a countdown revert like Windows
     display settings, and only after some machine has been **measured** painting
     it.
+23. **The stats edition must never ship, seed, read or watch client data.** It
+    is not a hidden view, it is an absent one: `data/` is left out of its
+    `extraResources`, `seedUserData` returns early, the store and the Obsidian
+    bridge are never started, and the clients view is removed from the DOM
+    rather than hidden. Verify it the way it was verified the first time, by
+    grepping the unpacked build for a client name and expecting nothing.
 
 ---
 

@@ -16,6 +16,7 @@ import { watch as watchFs, type FSWatcher } from 'node:fs';
 
 import { detectCapability, type Capability } from './capability';
 import { loadSettings, saveSettings, type Settings } from './settings';
+import { PRODUCT_NAME, isStatsOnly } from '../shared/edition';
 import { loadClients, watchClients, type StoreSnapshot } from './data/store';
 import {
   PROJECTS_DIR,
@@ -126,6 +127,12 @@ function resolveAssetsDir(): string {
  */
 async function seedUserData(): Promise<void> {
   if (!app.isPackaged) return;
+  /*
+   * The shareable build ships no client records and must never create the
+   * folder either. Seeding someone else's machine with MuchBetter's clients is
+   * the single most embarrassing thing this app could do.
+   */
+  if (isStatsOnly) return;
   for (const [from, to] of [
     [path.join(bundledRoot(), 'data', 'clients'), resolveClientsDir()],
     [path.join(bundledRoot(), 'assets', 'clients'), resolveAssetsDir()],
@@ -314,12 +321,14 @@ function refreshTrayMenu(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       {
-        label: `MuchBetter Client Wall  v${app.getVersion()}${isDev ? '  (dev)' : ''}`,
+        label: `${PRODUCT_NAME}  v${app.getVersion()}${isDev ? '  (dev)' : ''}`,
         enabled: false,
       },
-      { label: `${snapshot?.clients.length ?? 0} records loaded`, enabled: false },
+      ...(isStatsOnly
+        ? []
+        : [{ label: `${snapshot?.clients.length ?? 0} records loaded`, enabled: false } as const]),
       { type: 'separator' },
-      {
+      ...(isStatsOnly ? [] : [{
         label: 'View',
         submenu: [
           {
@@ -335,7 +344,7 @@ function refreshTrayMenu(): void {
             click: () => void updateSettings({ mode: 'clients' }),
           },
         ],
-      },
+      }]),
       { label: hidden ? 'Show wall' : 'Hide wall', click: () => toggleHidden() },
       { label: focusMode ? 'Leave focus mode' : 'Focus mode', click: () => toggleFocusMode() },
       { type: 'separator' },
@@ -377,8 +386,12 @@ function refreshTrayMenu(): void {
         click: () => void updateSettings({ startWithWindows: !settings.startWithWindows }),
       },
       { type: 'separator' },
-      { label: 'Reload clients', click: () => void reloadData() },
-      { label: 'Open client data folder', click: () => void shell.openPath(resolveClientsDir()) },
+      ...(isStatsOnly
+        ? []
+        : [
+            { label: 'Reload clients', click: () => void reloadData() },
+            { label: 'Open client data folder', click: () => void shell.openPath(resolveClientsDir()) },
+          ]),
       {
         label: 'Diagnostics overlay',
         type: 'checkbox',
@@ -902,7 +915,9 @@ function registerIpc(): void {
   ipcMain.handle('wall:reload', () => reloadData());
   ipcMain.handle('wall:getUsage', () => usageForRenderer());
   ipcMain.handle('wall:setMode', (_e, mode: 'stats' | 'clients') =>
-    updateSettings({ mode: mode === 'clients' ? 'clients' : 'stats' }),
+    // There is only one view in the shareable build, so a stale settings file
+    // or a stray renderer message can never strand it on an empty client wall.
+    updateSettings({ mode: !isStatsOnly && mode === 'clients' ? 'clients' : 'stats' }),
   );
   ipcMain.handle('wall:toggleFocus', () => {
     toggleFocusMode();
@@ -960,6 +975,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     settings = await loadSettings();
+    if (isStatsOnly && settings.mode !== 'stats') settings = { ...settings, mode: 'stats' };
     console.log(`[main] userData: ${app.getPath('userData')}`);
     console.log(`[main] clients dir: ${resolveClientsDir()}`);
     capability = detectCapability(settings.performance);
@@ -969,7 +985,10 @@ if (!app.requestSingleInstanceLock()) {
     registerAssetProtocol();
     registerIpc();
     await seedUserData();
-    await reloadData();
+    // No client store and no Obsidian bridge in the shareable build. This is
+    // not just a hidden view: nothing is read from disk, so the app cannot
+    // touch a vault or a client folder it has no business touching.
+    if (!isStatsOnly) await reloadData();
 
     /*
      * Load the cached usage index first so the dashboard has real numbers on
@@ -978,7 +997,7 @@ if (!app.requestSingleInstanceLock()) {
      */
     usage = await loadIndex(usageCacheFile());
     void refreshUsage('startup').then(startUsageWatch);
-    startWatching();
+    if (!isStatsOnly) startWatching();
 
     windows = targetDisplays().map(createWindowForDisplay);
     buildTray();

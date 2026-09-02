@@ -136,6 +136,34 @@ The first index takes about five seconds and is cached; after that it only reads
 the bytes appended since last time, triggered by a filesystem watch rather than a
 timer. Full reasoning in [ARCHITECTURE.md](ARCHITECTURE.md#claude-stats).
 
+## The shareable build
+
+There are two editions from one codebase, chosen at build time.
+
+| | Full | Stats |
+|---|---|---|
+| Build | `npm run build` | `npm run build:stats` |
+| Installer | `npm run package` to `release/` | `npm run package:stats` to `release-stats/` |
+| Installed as | MuchBetter Client Wall | Claude Stats Wall |
+| Views | Claude Stats and Clients, with a switch | Claude Stats only, no switch |
+| Client records | shipped, seeded, watched | **none, and none in the installer** |
+| Obsidian vault | read when configured | never read |
+
+**Claude Stats Wall is the one you can hand to someone else.** It reads only the
+recipient's own `~/.claude`, needs no account, no API key and no network, and
+carries no MuchBetter client data: `data/` is not in its `extraResources`, so
+there is nothing to leak even in principle. It installs alongside the full build
+under its own appId rather than upgrading over it.
+
+Two things to say when you hand it over:
+
+- **The installer is not code-signed**, so Windows SmartScreen will warn on
+  first run. "More info" then "Run anyway".
+- **Without Claude Code installed** it says "No Claude Code data on this
+  machine" and names the path it looked in, rather than showing zeros.
+
+`npm run deploy` only ever touches the FULL build, on this machine.
+
 ## Obsidian
 
 If `vaultPath` is set, the wall reads `<vault>/02-Clients/*.md` and uses it to fill

@@ -15,6 +15,18 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 const watch = process.argv.includes('--watch');
 const dist = path.join(root, 'dist');
 
+/*
+ * Edition, chosen here and baked in. `--edition=stats` produces the shareable
+ * dashboard-only build; anything else produces the full client wall. See
+ * src/shared/edition.ts for why this is a build constant and not a branch.
+ *
+ * It is substituted into BOTH bundles, which is the reason for expressing it as
+ * process.env: the renderer has no `process` at runtime, but esbuild replaces
+ * the expression with a string literal before it ever gets there.
+ */
+const editionArg = process.argv.find((a) => a.startsWith('--edition='));
+const edition = editionArg?.slice('--edition='.length) === 'stats' ? 'stats' : 'full';
+
 const common = {
   bundle: true,
   platform: 'node',
@@ -23,6 +35,7 @@ const common = {
   sourcemap: watch,
   minify: !watch,
   logLevel: 'info',
+  define: { 'process.env.MBW_EDITION': JSON.stringify(edition) },
 };
 
 const configs = [
@@ -71,11 +84,11 @@ async function run() {
     const contexts = await Promise.all(configs.map((c) => esbuild.context(c)));
     await Promise.all(contexts.map((c) => c.watch()));
     await copyStatic();
-    console.log('[build] watching');
+    console.log(`[build] watching  (${edition} edition)`);
   } else {
     await Promise.all(configs.map((c) => esbuild.build(c)));
     await copyStatic();
-    console.log('[build] done');
+    console.log(`[build] done  (${edition} edition)`);
   }
 }
 

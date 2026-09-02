@@ -16,7 +16,10 @@
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win dir",
     "logo": "electron scripts/logo.mjs",
-    "deploy": "node scripts/deploy.mjs"
+    "deploy": "node scripts/deploy.mjs",
+    "build:stats": "node build.mjs --edition=stats",
+    "start:stats": "npm run build:stats && electron .",
+    "package:stats": "npm run build:stats && electron-builder --win --config electron-builder.stats.js"
   },
   "dependencies": {
     "chokidar": "^4.0.3",

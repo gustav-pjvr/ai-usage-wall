@@ -6,3 +6,5 @@ release/
 .pkgtest.png
 scripts/_patch*.py
 assets/logo/render.log
+
+release-stats/

@@ -16,6 +16,7 @@ import { deriveBrandTokens, type BrandTokens } from '../shared/color';
 import type { Client } from '../shared/schema';
 import type { UsageIndex } from '../main/data/usage';
 import { StatsView } from './stats';
+import { isStatsOnly } from '../shared/edition';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
 
@@ -79,6 +80,13 @@ let firstRender = true;
 let mode: 'stats' | 'clients' = 'stats';
 const statsView = new StatsView();
 statsMount.appendChild(statsView.root);
+
+/*
+ * The shareable build has one view, so the second one is REMOVED rather than
+ * hidden. A hidden view is still a live DOM tree that can take input (see the
+ * card pointer-events bug), and there is nothing to put in it anyway.
+ */
+if (isStatsOnly) clientsView.remove();
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 
@@ -570,6 +578,15 @@ function render(): void {
   if (!state) return;
 
   document.body.dataset.perf = state.capability.tier;
+  // Everything past the body-level settings is the client wall, which the
+  // shareable build does not have. Laying out zero cards on every state push
+  // and every resize is work for nobody.
+  if (isStatsOnly) {
+    document.body.dataset.background = state.settings.background ?? 'gradient';
+    document.body.style.setProperty('--backdrop-opacity', String(state.settings.backgroundOpacity ?? 1));
+    renderDiagnostics(0);
+    return;
+  }
   // The backdrop is what stops the desktop wallpaper and icons showing through
   // the gaps between cards.
   document.body.dataset.background = state.settings.background ?? 'gradient';
@@ -796,15 +813,16 @@ function renderDiagnostics(pageCount: number): void {
  * CPU while nobody is looking at it.
  */
 function applyMode(next: 'stats' | 'clients', animate = true): void {
+  if (isStatsOnly) next = 'stats';
   mode = next;
   document.body.dataset.mode = next;
-  clientsView.classList.toggle('is-active', next === 'clients');
+  clientsView?.classList.toggle('is-active', next === 'clients');
   statsMount.classList.toggle('is-active', next === 'stats');
   if (!animate) {
-    clientsView.style.transition = 'none';
+    if (clientsView) clientsView.style.transition = 'none';
     statsMount.style.transition = 'none';
     requestAnimationFrame(() => {
-      clientsView.style.transition = '';
+      if (clientsView) clientsView.style.transition = '';
       statsMount.style.transition = '';
     });
   }
@@ -813,6 +831,27 @@ function applyMode(next: 'stats' | 'clients', animate = true): void {
 }
 
 function renderSwitcher(): void {
+  /*
+   * No switch with nothing to switch to. The focus-mode escape hatch still
+   * lives in this bar, so the bar itself stays in the DOM and only appears
+   * when focus mode is on: without it, focus mode would be the trap rule 17
+   * exists to prevent.
+   */
+  if (isStatsOnly) {
+    const focusedOnly = state?.focusMode === true;
+    document.body.classList.toggle('is-focus', focusedOnly);
+    switchEl.hidden = !focusedOnly;
+    let exitBtn = switchEl.querySelector<HTMLElement>('.focus-exit');
+    if (focusedOnly && !exitBtn) {
+      exitBtn = el('button', 'focus-exit', 'Exit focus  ·  Esc');
+      exitBtn.addEventListener('click', () => void window.wall.exitFocus?.());
+      switchEl.appendChild(exitBtn);
+    } else if (!focusedOnly && exitBtn) {
+      exitBtn.remove();
+    }
+    return;
+  }
+
   if (switchEl.childElementCount === 0) {
     for (const [id, label] of [
       ['stats', 'Claude Stats'],
@@ -877,7 +916,7 @@ document.addEventListener('keydown', (e) => {
     void window.wall.exitFocus?.();
   }
   // Tab flips views without reaching for the mouse.
-  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !isStatsOnly) {
     e.preventDefault();
     const next = mode === 'stats' ? 'clients' : 'stats';
     applyMode(next);

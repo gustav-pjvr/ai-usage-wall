@@ -550,9 +550,12 @@ export class StatsView {
     grid.appendChild(models);
 
     // Hour of day.
-    const hours = panel('Hour of day', 'measured', 'panel-hours');
+    const hours = panel('When you work', 'measured', 'panel-hours');
     hours.appendChild(el('div', 'chart-slot chart-hours'));
-    hours.appendChild(el('div', 'chart-legend', 'last 14 days, local time'));
+    hours.appendChild(el('div', 'hour-axis'));
+    hours.appendChild(
+      el('div', 'chart-legend', 'token throughput by hour of day, pooled across the last 14 days'),
+    );
     grid.appendChild(hours);
 
     // Projects.
@@ -786,6 +789,16 @@ export class StatsView {
       byHour[h] += totalOf(v);
       reqHour[h] += v.requests;
     }
+    const axis = this.root.querySelector('.hour-axis');
+    if (axis && axis.childElementCount === 0) {
+      for (let h = 0; h < 24; h++) {
+        const cell = el('div', 'hour-tick');
+        // Label every sixth hour: enough to orient, few enough to stay legible.
+        if (h % 6 === 0) cell.textContent = `${String(h).padStart(2, '0')}`;
+        axis.appendChild(cell);
+      }
+    }
+
     const hslot = this.root.querySelector('.chart-hours');
     if (hslot) {
       hslot.replaceChildren(
@@ -841,6 +854,13 @@ export class StatsView {
         };
       })
       .sort((a, b) => b.value - a.value);
+    const busiest = byHour.indexOf(Math.max(...byHour));
+    const hourLegend = this.root.querySelector('.panel-hours .chart-legend');
+    if (hourLegend && byHour[busiest] > 0) {
+      hourLegend.textContent =
+        `by hour of day, pooled across the last 14 days  ·  busiest ${String(busiest).padStart(2, '0')}:00`;
+    }
+
     const pslot = this.root.querySelector('.chart-projects');
     if (pslot) pslot.replaceChildren(breakdown(projects, 5, this.tip));
   }

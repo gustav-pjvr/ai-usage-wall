@@ -435,6 +435,24 @@
   color: oklch(0.55 0.015 240);
 }
 
+/* Hour ticks, laid out on the same 24 column rhythm as the bars above. */
+.hour-axis {
+  flex: 0 0 auto;
+  display: flex;
+  margin-top: 5px;
+  gap: 2px;
+}
+
+.hour-tick {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: oklch(0.5 0.012 240);
+  text-align: left;
+  letter-spacing: 0.04em;
+}
+
 /* ── Breakdown bars ─────────────────────────────────────────────────────── */
 
 .breakdown {

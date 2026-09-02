@@ -1,0 +1,540 @@
+/*
+ * Claude Stats: the command-centre view.
+ *
+ * Shares the wall's motion grammar (the 0.22/1/0.36/1 curve, fade-up reveals,
+ * slow ambient loops) but takes a deliberately more technical register:
+ * monospace numerals, hairline rules, instrument tags, a cyan/amber signal
+ * palette instead of per-client brand hues.
+ *
+ * --intensity (0..1) is written from JS off real throughput. Everything that
+ * brightens, quickens or glows reads from it, so the whole surface calms down
+ * when Claude is idle and lifts when it is working. Nothing animates on a timer
+ * for decoration alone.
+ */
+
+.stats {
+  --sig: oklch(0.78 0.14 195);
+  --sig-dim: oklch(0.62 0.1 200);
+  --warn: oklch(0.8 0.14 75);
+  --grid-line: oklch(1 0 0 / 0.045);
+  --panel-bg: oklch(0.175 0.016 245);
+  --panel-edge: oklch(1 0 0 / 0.075);
+  --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Top clearance so the floating mode switch never lands on a panel title. */
+  padding: 58px 26px 12px;
+  color: oklch(0.93 0.01 220);
+  overflow: hidden;
+}
+
+/* Faint instrument grid, lifted by activity. Static paint, no animation. */
+.stats::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 64px 64px;
+  opacity: calc(0.35 + var(--intensity, 0.2) * 0.65);
+  mask-image: radial-gradient(120% 100% at 50% 0%, black 30%, transparent 85%);
+}
+
+.stats-grid {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(12, 1fr);
+  grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* ── Panels ─────────────────────────────────────────────────────────────── */
+
+.panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-edge);
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.22);
+  opacity: 0;
+  transform: translate3d(0, 16px, 0);
+  animation: panel-in 0.62s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--pi, 0) * 45ms);
+}
+
+@keyframes panel-in {
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* A signal hairline along the top edge, brightening with activity. */
+.panel::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--sig), transparent);
+  opacity: calc(0.18 + var(--intensity, 0.2) * 0.5);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+}
+
+.panel-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: oklch(0.72 0.02 220);
+}
+
+/*
+ * Provenance tags. These are not decoration: MEASURED means the number came
+ * straight out of the transcripts, DERIVED means it was computed and the panel
+ * states the method.
+ */
+.tag {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  opacity: 0.75;
+  white-space: nowrap;
+}
+.tag-measured { color: var(--sig-dim); }
+.tag-derived { color: var(--warn); }
+.tag-unavailable { color: oklch(0.6 0.02 250); }
+
+/* ── Grid placement ─────────────────────────────────────────────────────── */
+
+.panel-hero     { grid-column: span 5; grid-row: span 1; --pi: 0; }
+.panel-live     { grid-column: span 5; grid-row: span 1; --pi: 1; }
+.panel-vel      { grid-column: span 2; grid-row: span 1; --pi: 2; }
+.panel-counters { grid-column: span 4; grid-row: span 1; --pi: 3; }
+.panel-daily    { grid-column: span 5; grid-row: span 1; --pi: 4; }
+.panel-eff      { grid-column: span 3; grid-row: span 1; --pi: 5; }
+.panel-models   { grid-column: span 4; grid-row: span 1; --pi: 6; }
+.panel-hours    { grid-column: span 4; grid-row: span 1; --pi: 7; }
+.panel-projects { grid-column: span 4; grid-row: span 1; --pi: 8; }
+
+/* ── Hero ───────────────────────────────────────────────────────────────── */
+
+.hero-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+}
+
+.hero-value {
+  font-family: var(--mono);
+  font-size: clamp(38px, 6.2vw, 92px);
+  font-weight: 700;
+  line-height: 0.92;
+  letter-spacing: -0.035em;
+  color: oklch(0.97 0.02 200);
+  text-shadow: 0 0 calc(18px + var(--intensity, 0.2) * 46px)
+    oklch(0.78 0.14 195 / calc(0.18 + var(--intensity, 0.2) * 0.4));
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-meta {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hero-exact {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--sig-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-sub {
+  font-size: 11.5px;
+  color: oklch(0.66 0.015 230);
+}
+
+/* ── Live canvas ────────────────────────────────────────────────────────── */
+
+.live-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity-canvas {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: block;
+}
+
+.live-foot {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.6 0.015 230);
+  flex: 0 0 auto;
+}
+
+.live-state {
+  color: var(--sig);
+}
+
+/* Only a genuinely live session gets the pulsing dot. */
+.stats[data-intensity='high'] .live-state::before,
+.stats[data-intensity='mid'] .live-state::before {
+  content: '';
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--sig);
+  margin-right: 6px;
+  vertical-align: middle;
+  animation: sig-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes sig-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+
+/* ── Velocity ───────────────────────────────────────────────────────────── */
+
+.vel-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+}
+
+.vel-value {
+  font-family: var(--mono);
+  font-size: clamp(24px, 2.6vw, 44px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--warn);
+  font-variant-numeric: tabular-nums;
+}
+
+.vel-unit {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: oklch(0.66 0.02 230);
+  margin-top: 6px;
+}
+
+.vel-note {
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: oklch(0.58 0.015 240);
+}
+
+/* ── Counters ───────────────────────────────────────────────────────────── */
+
+.counter-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px 14px;
+  align-content: center;
+}
+
+.stat {
+  min-width: 0;
+}
+
+.stat-value {
+  display: block;
+  font-family: var(--mono);
+  font-size: clamp(15px, 1.5vw, 24px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: oklch(0.95 0.015 210);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+}
+
+.stat-label {
+  margin-top: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: oklch(0.68 0.02 225);
+}
+
+.stat-hint {
+  font-size: 9px;
+  color: oklch(0.52 0.012 240);
+  margin-top: 1px;
+}
+
+/* ── Column charts ──────────────────────────────────────────────────────── */
+
+.chart-slot {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.cols {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.col-bar {
+  width: 100%;
+  height: var(--h);
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, var(--sig), oklch(0.45 0.09 205));
+  opacity: 0.85;
+  transform-origin: bottom;
+  animation: col-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 9ms);
+}
+
+@keyframes col-in {
+  from { transform: scaleY(0); opacity: 0; }
+  to { transform: scaleY(1); opacity: 0.85; }
+}
+
+.col:hover .col-bar {
+  opacity: 1;
+  filter: brightness(1.35);
+}
+
+.chart-legend {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.015 240);
+}
+
+/* ── Breakdown bars ─────────────────────────────────────────────────────── */
+
+.breakdown {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  /* A panel must never spill past its own box, whatever the row count. */
+  overflow: hidden;
+}
+
+.bd-row { min-width: 0; }
+
+.bd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.bd-label {
+  font-size: 11px;
+  color: oklch(0.86 0.012 225);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bd-value {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--sig-dim);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+.bd-track {
+  height: 3px;
+  border-radius: 2px;
+  background: oklch(1 0 0 / 0.07);
+  overflow: hidden;
+}
+
+.bd-fill {
+  height: 100%;
+  width: var(--w);
+  border-radius: inherit;
+  background: linear-gradient(90deg, oklch(0.55 0.11 var(--hue)), oklch(0.78 0.14 var(--hue)));
+  transform-origin: left;
+  animation: bd-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+
+@keyframes bd-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+.bd-sub {
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: oklch(0.5 0.012 240);
+}
+
+/* ── Efficiency ─────────────────────────────────────────────────────────── */
+
+.eff-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.eff-value {
+  font-family: var(--mono);
+  font-size: clamp(24px, 2.8vw, 46px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: oklch(0.9 0.13 160);
+  font-variant-numeric: tabular-nums;
+}
+
+.eff-label {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: oklch(0.68 0.02 225);
+}
+
+.eff-track {
+  margin-top: 10px;
+  height: 4px;
+  border-radius: 2px;
+  background: oklch(1 0 0 / 0.07);
+  overflow: hidden;
+}
+
+.eff-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, oklch(0.55 0.1 190), oklch(0.88 0.15 155));
+  transform: scaleX(var(--p, 0));
+  transform-origin: left;
+  transition: transform 1.1s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.eff-note {
+  margin-top: 8px;
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: oklch(0.55 0.015 240);
+}
+
+/* ── Status strip ───────────────────────────────────────────────────────── */
+
+.status-strip {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding-top: 8px;
+  border-top: 1px solid oklch(1 0 0 / 0.06);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: oklch(0.52 0.014 240);
+}
+
+.status-note { margin-left: auto; opacity: 0.75; }
+
+.stats.is-stale .status-source { color: var(--warn); }
+
+/* ── Reduced motion and low tier ────────────────────────────────────────── */
+
+[data-perf='low'] .stats::before { opacity: 0.3; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel,
+  .col-bar,
+  .bd-fill {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .live-state::before { animation: none !important; }
+  .eff-fill { transition: none; }
+}
+
+/* Narrow screens: collapse to a simpler stack rather than crushing panels. */
+@media (max-width: 1500px) {
+  .stats-grid { grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
+  .panel-hero     { grid-column: span 7; }
+  .panel-live     { grid-column: span 5; }
+  .panel-vel      { grid-column: span 3; }
+  .panel-counters { grid-column: span 5; }
+  .panel-eff      { grid-column: span 4; }
+  .panel-daily    { grid-column: span 12; }
+  .panel-models   { grid-column: span 4; }
+  .panel-hours    { grid-column: span 4; }
+  .panel-projects { grid-column: span 4; }
+}

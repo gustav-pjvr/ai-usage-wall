@@ -1,0 +1,141 @@
+/*
+ * The shell: the stage that holds both views, and the control that switches
+ * between them.
+ *
+ * Both views stay mounted and cross-fade. The client wall keeps its DOM and its
+ * card positions across a switch, so coming back to it is instant and does not
+ * replay the entrance animation.
+ */
+
+#stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.view {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  /* Scale and blur are subtle on purpose: the transition should read as one
+     surface turning over, not as two slides swapping. */
+  transform: scale(0.988);
+  filter: blur(6px);
+  transition:
+    opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.62s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+.view.is-active {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+  filter: blur(0);
+}
+
+/* Blur is expensive under software rendering, so drop it there and let the
+   fade and scale carry the transition on their own. */
+[data-perf='low'] .view {
+  filter: none;
+  transition:
+    opacity 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ── Mode switch ────────────────────────────────────────────────────────── */
+
+/*
+ * Deliberately quiet. It sits top-centre, mostly transparent, and only comes
+ * forward on hover: this wall is looked at far more often than it is operated.
+ */
+#mode-switch {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: oklch(0.19 0.014 245 / 0.72);
+  border: 1px solid oklch(1 0 0 / 0.09);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3), 0 10px 30px rgb(0 0 0 / 0.25);
+  opacity: 0.38;
+  transition:
+    opacity 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#mode-switch:hover {
+  opacity: 1;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.35), 0 14px 40px rgb(0 0 0 / 0.35);
+}
+
+.mode-btn {
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: oklch(0.72 0.02 230);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 6px 15px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mode-btn.is-on {
+  color: oklch(0.97 0.01 220);
+}
+
+.mode-btn:not(.is-on):hover {
+  color: oklch(0.88 0.02 225);
+}
+
+/* The travelling pill behind the active label. Transform only, so the movement
+   stays on the compositor. */
+.mode-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 999px;
+  background: linear-gradient(180deg, oklch(0.34 0.05 205), oklch(0.27 0.04 210));
+  border: 1px solid oklch(1 0 0 / 0.1);
+  transition: transform 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: 0;
+}
+
+#mode-switch[data-mode='clients'] .mode-thumb {
+  transform: translateX(100%);
+}
+
+/* In the stats view the thumb picks up the signal colour, so the control
+   belongs to whichever view is showing. */
+#mode-switch[data-mode='stats'] .mode-thumb {
+  background: linear-gradient(180deg, oklch(0.36 0.07 195), oklch(0.28 0.05 200));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .view,
+  .mode-thumb,
+  #mode-switch {
+    transition: none;
+  }
+  .view {
+    filter: none;
+  }
+}

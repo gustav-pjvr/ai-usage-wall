@@ -11,7 +11,11 @@ import { app } from 'electron';
 import type { LayerMode } from './win32/desktop-layer';
 import type { PerfTier } from './capability';
 
+export type WallMode = 'stats' | 'clients';
+
 export interface Settings {
+  /** Which view the wall shows. Claude Stats is the default experience. */
+  mode: WallMode;
   /** Desktop layering. 'desktop' is the interactive-but-behind-apps hybrid. */
   layerMode: LayerMode;
   /** 'auto' inspects the machine. */
@@ -50,6 +54,7 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
+  mode: 'stats',
   layerMode: 'desktop',
   performance: 'auto',
   clickThrough: false,
@@ -82,6 +87,7 @@ export function normaliseSettings(raw: unknown): Settings {
   const tiers = ['auto', 'low', 'balanced', 'high'];
 
   return {
+    mode: r.mode === 'clients' ? 'clients' : DEFAULTS.mode,
     layerMode: layerModes.includes(r.layerMode as LayerMode) ? (r.layerMode as LayerMode) : DEFAULTS.layerMode,
     performance: tiers.includes(r.performance as string) ? (r.performance as Settings['performance']) : 'auto',
     clickThrough: r.clickThrough === true,

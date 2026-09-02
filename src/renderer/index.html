@@ -13,9 +13,15 @@
     />
     <title>MuchBetter Client Wall</title>
     <link rel="stylesheet" href="styles/wall.css" />
+    <link rel="stylesheet" href="styles/stats.css" />
+    <link rel="stylesheet" href="styles/shell.css" />
   </head>
   <body>
-    <div id="wall"></div>
+    <div id="stage">
+      <div id="view-stats" class="view"></div>
+      <div id="view-clients" class="view"><div id="wall"></div></div>
+    </div>
+    <nav id="mode-switch" aria-label="View"></nav>
     <div id="detail" aria-hidden="true"></div>
     <pre id="diagnostics"></pre>
     <script src="main.js"></script>

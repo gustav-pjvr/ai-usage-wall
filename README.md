@@ -3,11 +3,16 @@
   <img src="assets/logo/lockup-on-light.png" alt="Client Wall" width="400">
 </picture>
 
-An ambient Windows desktop application that continuously displays MuchBetter's
-clients as individually branded cards. MuchBetter provides the system, each client
-provides the visual identity.
+An ambient Windows desktop application with two views, sitting below your normal
+windows. Go to the desktop and it is there.
 
-It sits below your normal windows. Go to the desktop and the wall is there.
+**Claude Stats** (the default) is a live command centre for your local Claude Code
+usage: tokens, velocity, sessions, models, daily and hourly activity, all read
+from the transcripts on this machine. **MuchBetter Clients** is a living wall of
+the work, where MuchBetter provides the system and each client provides the
+visual identity.
+
+Switch with the control at the top, or press `Tab`.
 
 ---
 
@@ -27,10 +32,18 @@ npm test           # 42 checks on layout, colour and schema
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
 npm run logo       # regenerate the mark, icons and wordmark
+npm run deploy     # build, upgrade the installed app in place, relaunch
 ```
 
-`npm run package` produces `release/MuchBetter Client Wall Setup 0.1.0.exe`
-(about 106 MB, installs per-user with no admin prompt).
+**`npm run deploy` is how the app gets updated.** It packages, silently upgrades
+the single installed copy, verifies the installed version matches, prunes old
+installers and relaunches. Never run `release/win-unpacked` directly: that is a
+build artifact, and running it is how you end up looking at a stale build while
+believing it is current.
+
+`npm run package` produces `release/MuchBetter Client Wall Setup <version>.exe`
+(about 107 MB, installs per-user with no admin prompt). Prefer `npm run deploy`,
+which also installs it.
 
 **In a packaged build your client files live in
 `%APPDATA%\MuchBetter Client Wall\data\clients`**, not next to the executable,
@@ -46,6 +59,7 @@ reload, and the diagnostics overlay.
 |---|---|
 | `Ctrl+Alt+W` | Focus mode: brings the wall above other windows and enables interaction |
 | `Ctrl+Alt+Shift+W` | Show / hide the wall |
+| `Tab` | Switch between Claude Stats and Clients |
 
 Hover a card to lift it. Click a card for the full client view. `Esc` closes it.
 
@@ -103,9 +117,24 @@ so deleting the file is safe.
 | `monitors` | `[]` | Empty means all displays |
 | `vaultPath` | `null` | Obsidian vault, read-only |
 | `useVault` | `true` | |
+| `mode` | `"stats"` | Which view opens on launch: `stats` or `clients` |
 | `debug` | `false` | Diagnostics overlay |
 
 ---
+
+## Claude Stats
+
+Everything on that view is read from `~/.claude/projects/**/*.jsonl` and
+`~/.claude/history.jsonl` on this machine. No API, no account, no network.
+
+Panels are tagged **MEASURED** (straight from the transcripts) or **DERIVED**
+(computed, with the method printed on the panel). Three things are deliberately
+missing because they cannot be known locally: **remaining quota, plan limits and
+cost.** The status strip says so rather than showing a guess.
+
+The first index takes about five seconds and is cached; after that it only reads
+the bytes appended since last time, triggered by a filesystem watch rather than a
+timer. Full reasoning in [ARCHITECTURE.md](ARCHITECTURE.md#claude-stats).
 
 ## Obsidian
 

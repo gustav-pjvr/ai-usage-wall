@@ -113,7 +113,7 @@ body {
  * composited layer and nothing per frame. Chromium cannot blur the actual
  * desktop behind a window, so an opaque surface is the honest way to hide it.
  */
-#wall::before {
+#stage::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -123,17 +123,17 @@ body {
   background: var(--backdrop-base);
 }
 
-body[data-background='none'] #wall::before {
+body[data-background='none'] #stage::before {
   display: none;
 }
 
-body[data-background='plain'] #wall::before {
+body[data-background='plain'] #stage::before {
   background: var(--backdrop-base);
 }
 
 /* Soft off-centre lifts and a vignette, echoing the cards' own brand wash so
    the wall reads as one surface the cards sit on rather than a black rectangle. */
-body[data-background='gradient'] #wall::before {
+body[data-background='gradient'] #stage::before {
   background:
     radial-gradient(120% 90% at 12% -8%, oklch(0.28 0.045 210 / 0.55), transparent 55%),
     radial-gradient(100% 80% at 92% 105%, oklch(0.26 0.05 285 / 0.45), transparent 58%),
@@ -143,8 +143,8 @@ body[data-background='gradient'] #wall::before {
 
 /* Software rendering makes several large radials measurably expensive to
    repaint, so the low tier gets a single linear pass instead. */
-[data-perf='low'] body[data-background='gradient'] #wall::before,
-body[data-perf='low'][data-background='gradient'] #wall::before {
+[data-perf='low'] body[data-background='gradient'] #stage::before,
+body[data-perf='low'][data-background='gradient'] #stage::before {
   background: linear-gradient(160deg, oklch(0.19 0.03 215), var(--backdrop-base) 60%);
 }
 

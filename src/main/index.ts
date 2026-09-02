@@ -11,6 +11,7 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, screen, shell, nativeImage } from 'electron';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { execFile } from 'node:child_process';
 
 import { detectCapability, type Capability } from './capability';
 import { loadSettings, saveSettings, type Settings } from './settings';
@@ -504,17 +505,55 @@ function registerHotkeys(): void {
  * per-user, needs no elevation, and is trivially inspectable and removable,
  * unlike a scheduled task. openAsHidden keeps the launch quiet.
  */
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+const RUN_VALUE = 'MuchBetterClientWall';
+
+/**
+ * Register (or clear) the launch-at-login entry by writing HKCU\...\Run directly.
+ *
+ * We do NOT use app.setLoginItemSettings(). It silently does nothing on this
+ * machine: it neither throws nor registers, and getLoginItemSettings() keeps
+ * reporting openAtLogin false. The cause is visible in what it reports for
+ * OTHER apps' existing entries, where an unquoted Run value under a profile
+ * path containing spaces comes back split, e.g. path "C:\\Users\\HP" with args
+ * ["865", "G10\\AppData\\..."]. Electron's Windows implementation is not
+ * space-safe, and this user profile has spaces in it.
+ *
+ * Writing the key ourselves is also just more honest: it is one value a person
+ * can see in regedit or Task Manager's Startup tab and delete by hand.
+ *
+ * Skipped in development, where registering the dev Electron binary to launch
+ * at login would be actively unhelpful.
+ */
 function applyStartup(): void {
-  try {
-    // openAsHidden is macOS-only. On Windows the wall is inherently quiet at
-    // startup: it has no taskbar button and never takes focus.
-    app.setLoginItemSettings({
-      openAtLogin: settings.startWithWindows,
-      args: ['--wall-autostart'],
-    });
-  } catch (err) {
-    console.error('[startup] could not update login item:', (err as Error).message);
+  if (process.platform !== 'win32') return;
+
+  if (!app.isPackaged) {
+    if (settings.startWithWindows) {
+      console.log('[startup] skipped: only a packaged build registers itself at login');
+    }
+    return;
   }
+
+  // Quoted so a path with spaces survives; the wall's own path certainly has them.
+  const command = `"${process.execPath}" --wall-autostart`;
+  const args = settings.startWithWindows
+    ? ['add', RUN_KEY, '/v', RUN_VALUE, '/t', 'REG_SZ', '/d', command, '/f']
+    : ['delete', RUN_KEY, '/v', RUN_VALUE, '/f'];
+
+  execFile('reg.exe', args, (err, _stdout, stderr) => {
+    if (err) {
+      // Deleting an entry that is not there is a normal no-op, not a failure.
+      if (!settings.startWithWindows && /unable to find|cannot find/i.test(stderr || '')) return;
+      console.error(`[startup] reg ${args[0]} failed: ${(stderr || err.message).trim()}`);
+      return;
+    }
+    console.log(
+      settings.startWithWindows
+        ? `[startup] registered at login: ${command}`
+        : '[startup] login entry removed',
+    );
+  });
 }
 
 function startWatching(): void {

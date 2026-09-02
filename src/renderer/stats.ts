@@ -205,7 +205,11 @@ function statTile(label: string, hint?: string): { root: HTMLElement; odo: Odome
 }
 
 /** Horizontal proportion bar with a legend, used for models and projects. */
-function breakdown(rows: { label: string; value: number; sub?: string }[], max = 6): HTMLElement {
+function breakdown(
+  rows: { label: string; value: number; sub?: string; tip?: [string, string][] }[],
+  max = 6,
+  tip?: Tooltip,
+): HTMLElement {
   const wrap = el('div', 'breakdown');
   const total = rows.reduce((s, r) => s + r.value, 0) || 1;
   const shown = rows.slice(0, max);
@@ -223,18 +227,22 @@ function breakdown(rows: { label: string; value: number; sub?: string }[], max =
     track.appendChild(fill);
     line.appendChild(track);
     if (r.sub) line.appendChild(el('div', 'bd-sub', r.sub));
+    if (tip && r.tip) tip.attach(line, r.label, r.tip);
     wrap.appendChild(line);
   }
   return wrap;
 }
 
 /** Column chart for a dated series. Bars carry their own reveal delay. */
-function columns(series: { key: string; value: number; label: string }[]): HTMLElement {
+function columns(
+  series: { key: string; value: number; label: string; tip?: [string, string][] }[],
+  tip?: Tooltip,
+): HTMLElement {
   const wrap = el('div', 'cols');
   const max = Math.max(1, ...series.map((s) => s.value));
   for (const [i, s] of series.entries()) {
     const col = el('div', 'col');
-    col.title = `${s.label}: ${full(s.value)}`;
+    if (tip && s.tip) tip.attach(col, s.label, s.tip);
     const bar = el('div', 'col-bar');
     bar.style.setProperty('--h', `${Math.max(1.5, (s.value / max) * 100).toFixed(2)}%`);
     bar.style.setProperty('--i', String(i));
@@ -242,6 +250,50 @@ function columns(series: { key: string; value: number; label: string }[]): HTMLE
     wrap.appendChild(col);
   }
   return wrap;
+}
+
+/**
+ * One tooltip for the whole view, moved and refilled on hover.
+ *
+ * Native `title` attributes were being used before: they take about a second to
+ * appear, cannot be styled, and look nothing like the rest of the surface.
+ */
+class Tooltip {
+  readonly node: HTMLElement;
+  constructor() {
+    this.node = el('div', 'tip');
+    this.node.setAttribute('role', 'tooltip');
+  }
+
+  attach(target: HTMLElement, title: string, rows: [string, string][]): void {
+    const show = () => {
+      this.node.replaceChildren();
+      this.node.appendChild(el('div', 'tip-title', title));
+      for (const [k, v] of rows) {
+        const r = el('div', 'tip-row');
+        r.appendChild(el('span', 'tip-k', k));
+        r.appendChild(el('span', 'tip-v', v));
+        this.node.appendChild(r);
+      }
+      this.node.classList.add('is-on');
+      this.position(target);
+    };
+    target.addEventListener('pointerenter', show);
+    target.addEventListener('pointermove', () => this.position(target));
+    target.addEventListener('pointerleave', () => this.node.classList.remove('is-on'));
+  }
+
+  /** Above the target, clamped inside the viewport so it never runs off-screen. */
+  private position(target: HTMLElement): void {
+    const r = target.getBoundingClientRect();
+    const t = this.node.getBoundingClientRect();
+    const margin = 8;
+    let left = r.left + r.width / 2 - t.width / 2;
+    left = Math.max(margin, Math.min(left, window.innerWidth - t.width - margin));
+    let top = r.top - t.height - 10;
+    if (top < margin) top = r.bottom + 10;
+    this.node.style.transform = `translate3d(${Math.round(left)}px, ${Math.round(top)}px, 0)`;
+  }
 }
 
 // ── The live activity canvas ───────────────────────────────────────────────
@@ -366,6 +418,7 @@ class ActivityCanvas {
 export class StatsView {
   readonly root: HTMLElement;
   private canvas = new ActivityCanvas();
+  private tip = new Tooltip();
   private odos: Record<string, Odometer> = {};
   private mounted = false;
   private visible = false;
@@ -388,7 +441,7 @@ export class StatsView {
     heroBody.appendChild(this.odos.total.node);
     const heroMeta = el('div', 'hero-meta');
     heroMeta.appendChild(el('span', 'hero-exact', ''));
-    heroMeta.appendChild(el('span', 'hero-sub', 'input + output + cache, every session on this machine'));
+    heroMeta.appendChild(el('span', 'hero-sub', 'every session on this machine'));
     heroBody.appendChild(heroMeta);
 
     /*
@@ -439,10 +492,10 @@ export class StatsView {
     for (const [key, label, hint] of [
       ['requests', 'Requests', 'assistant replies'],
       ['sessions', 'Sessions', 'distinct transcripts'],
-      ['prompts', 'Prompts sent', 'from history.jsonl'],
-      ['days', 'Days active', 'days with any usage'],
-      ['output', 'Generated', 'tokens Claude wrote'],
-      ['thinking', 'Thinking tokens', 'extended reasoning'],
+      ['prompts', 'Prompts sent', ''],
+      ['days', 'Days active', ''],
+      ['output', 'Generated', ''],
+      ['thinking', 'Thinking', ''],
     ] as const) {
       const tile = statTile(label, hint);
       this.odos[key] = tile.odo;
@@ -497,6 +550,7 @@ export class StatsView {
     strip.appendChild(el('span', 'status-item status-last', ''));
     strip.appendChild(el('span', 'status-item status-note', 'no quota or cost data exists locally, so none is shown'));
     this.root.appendChild(strip);
+    this.root.appendChild(this.tip.node);
   }
 
   setPerfTier(tier: string): void {
@@ -609,7 +663,20 @@ export class StatsView {
     const slot = this.root.querySelector('.chart-daily');
     if (slot) {
       slot.replaceChildren(
-        columns(days.map(([k, v]) => ({ key: k, value: totalOf(v), label: `${k}  ${full(v.requests)} requests` }))),
+        columns(
+          days.map(([k, v]) => ({
+            key: k,
+            value: totalOf(v),
+            label: k,
+            tip: [
+              ['total', full(totalOf(v))],
+              ['generated', full(v.output)],
+              ['thinking', full(v.thinking)],
+              ['requests', full(v.requests)],
+            ] as [string, string][],
+          })),
+          this.tip,
+        ),
       );
     }
     const legend = this.root.querySelector('.chart-daily-legend');
@@ -619,21 +686,44 @@ export class StatsView {
 
     // Models by total tokens.
     const models = Object.entries(idx.models)
-      .map(([label, v]) => ({ label, value: totalOf(v), sub: `${full(v.requests)} requests` }))
+      .map(([label, v]) => ({
+        label,
+        value: totalOf(v),
+        sub: `${full(v.requests)} requests`,
+        tip: [
+          ['total', full(totalOf(v))],
+          ['generated', full(v.output)],
+          ['thinking', full(v.thinking)],
+          ['requests', full(v.requests)],
+        ] as [string, string][],
+      }))
       .sort((a, b) => b.value - a.value);
     const mslot = this.root.querySelector('.chart-models');
-    if (mslot) mslot.replaceChildren(breakdown(models, 5));
+    if (mslot) mslot.replaceChildren(breakdown(models, 5, this.tip));
 
     // Hour of day, aggregated across the retained hourly buckets.
     const byHour = new Array(24).fill(0);
+    const reqHour = new Array(24).fill(0);
     for (const [k, v] of Object.entries(idx.hourly)) {
       const h = new Date(`${k}:00:00Z`).getHours();
       byHour[h] += totalOf(v);
+      reqHour[h] += v.requests;
     }
     const hslot = this.root.querySelector('.chart-hours');
     if (hslot) {
       hslot.replaceChildren(
-        columns(byHour.map((value, h) => ({ key: String(h), value, label: `${String(h).padStart(2, '0')}:00` }))),
+        columns(
+          byHour.map((value, h) => ({
+            key: String(h),
+            value,
+            label: `${String(h).padStart(2, '0')}:00 to ${String((h + 1) % 24).padStart(2, '0')}:00`,
+            tip: [
+              ['total', full(value)],
+              ['requests', full(reqHour[h])],
+            ] as [string, string][],
+          })),
+          this.tip,
+        ),
       );
     }
 
@@ -661,11 +751,21 @@ export class StatsView {
           (leafCounts.get(leaf.toLowerCase()) || 0) > 1 && segs.length
             ? `${segs[segs.length - 1]} / ${leaf}`
             : leaf;
-        return { label, value: totalOf(v), sub: '' };
+        return {
+          label,
+          value: totalOf(v),
+          sub: `${full(v.requests)} requests`,
+          tip: [
+            ['total', full(totalOf(v))],
+            ['generated', full(v.output)],
+            ['requests', full(v.requests)],
+            ['last used', v.lastSeen ? v.lastSeen.slice(0, 10) : 'unknown'],
+          ] as [string, string][],
+        };
       })
       .sort((a, b) => b.value - a.value);
     const pslot = this.root.querySelector('.chart-projects');
-    if (pslot) pslot.replaceChildren(breakdown(projects, 5));
+    if (pslot) pslot.replaceChildren(breakdown(projects, 5, this.tip));
   }
 
   private paintStatus(): void {
@@ -675,7 +775,13 @@ export class StatsView {
       const n = this.root.querySelector(sel);
       if (n) n.textContent = text;
     };
-    set('.status-source', idx.unavailable ? `SOURCE UNAVAILABLE  ${idx.unavailableReason ?? ''}` : `${full(Object.keys(idx.files).length)} transcripts indexed`);
+    const fileCount = (idx as unknown as { fileCount?: number }).fileCount ?? Object.keys(idx.files ?? {}).length;
+    set(
+      '.status-source',
+      idx.unavailable
+        ? `SOURCE UNAVAILABLE  ${idx.unavailableReason ?? ''}`
+        : `${full(fileCount)} transcripts indexed`,
+    );
     set('.status-scan', `scan ${idx.lastScanMs}ms`);
     set('.status-ver', idx.latest.version ? `claude code ${idx.latest.version}` : '');
     set('.status-last', `last record ${relTime(idx.latest.ts)}`);

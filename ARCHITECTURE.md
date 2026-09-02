@@ -337,9 +337,12 @@ The wall runs 24/7. Every effect is paid continuously.
     all unobtainable locally and are stated as such rather than estimated.
 13. **Never break the usage-index offset invariant.** After a refresh every
     tracked offset must equal its file size, or records get counted twice.
-14. **`npm run deploy` is the only way the app gets installed or updated.**
+14. **Never put the wall in a state the user cannot escape without Task Manager.**
+    Focus mode is topmost, fullscreen and opaque: Escape must always exit it and
+    it must always show a way out. Do not bind it to an easily-hit gesture.
+15. **`npm run deploy` is the only way the app gets installed or updated.**
     Running `release/win-unpacked` directly is what caused a stale install once.
-15. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
+16. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
     nor registers on this machine. Electron's Windows implementation is not safe
     against spaces in the profile path, and this profile has them. Write
     `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` directly via `reg.exe`,
@@ -522,6 +525,36 @@ Every panel is tagged in the UI, because the distinction is the point.
   trailing 10 minutes of record timestamps), context efficiency (cache reads over
   all context tokens).
 - **Absent on purpose:** quota, headroom and cost. The status strip says so.
+
+### Update rate
+
+The watcher fires on every transcript write, so the raw signal is roughly once a
+second during an active session. That is accurate and **restless to look at**, so
+refreshes are floored at one per **4 seconds**; nothing is missed, it just lands
+together. The status strip's relative times tick on a separate 20 s clock, and
+the canvas draws at 12 to 30 fps by tier. There is still no polling anywhere.
+
+Two things were also crossing the boundary far too often and are now fixed:
+the full index (170 KB, half of it a per-file offset map the renderer never
+reads) was sent over IPC on every refresh, and the disk cache was rewritten each
+time. The renderer gets a projection without that map, and the cache is written
+at most once a minute plus on quit.
+
+### Focus mode must never trap the user
+
+**Double-clicking the tray icon used to enter focus mode**, which makes the wall
+topmost, fullscreen, opaque and interactive. With the backdrop now opaque this
+covered the entire desktop with no visible way out, and the only escape was
+killing the process. That happened to Gustav.
+
+Three changes, and all three matter:
+- Tray double-click now shows/hides, which is what people expect anyway.
+- **Escape always leaves focus mode**, from anywhere.
+- Focus mode shows a visible "Exit focus" control and lifts the switcher to full
+  opacity, so the state announces itself.
+
+Verified after the fix: the wall reports `TOPMOST False`, `NOACTIVATE True`, with
+24 windows above it in z-order.
 
 ### Motion budget
 

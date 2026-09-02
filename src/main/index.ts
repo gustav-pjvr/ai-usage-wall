@@ -57,6 +57,25 @@ let usageWatcher: FSWatcher | null = null;
 let usageTimer: NodeJS.Timeout | null = null;
 let usageBusy = false;
 let usageDirty = false;
+let usageLastRun = 0;
+let usageLastSave = 0;
+
+/*
+ * The cache only exists to make the NEXT cold start fast, so writing it on
+ * every refresh was pure churn: a 170 KB file rewritten about once a second
+ * during an active session. It is written periodically and on quit instead.
+ */
+const USAGE_SAVE_INTERVAL_MS = 60_000;
+
+/*
+ * Floor on how often the dashboard is allowed to change.
+ *
+ * The watcher fires on every transcript write, so during an active session the
+ * numbers were updating about once a second. That is accurate but restless to
+ * look at, and the wall is meant to be glanceable. Work is coalesced into at
+ * most one refresh per interval; nothing is missed, it just lands together.
+ */
+const USAGE_MIN_INTERVAL_MS = 4000;
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -132,14 +151,31 @@ async function refreshUsage(reason: string): Promise<void> {
     usageDirty = true;
     return;
   }
+  const since = Date.now() - usageLastRun;
+  if (usageLastRun && since < USAGE_MIN_INTERVAL_MS) {
+    // Too soon. Mark dirty and let the trailing pass pick it up.
+    if (!usageDirty) {
+      usageDirty = true;
+      setTimeout(() => {
+        if (!usageDirty) return;
+        usageDirty = false;
+        void refreshUsage('coalesced');
+      }, USAGE_MIN_INTERVAL_MS - since);
+    }
+    return;
+  }
   usageBusy = true;
+  usageLastRun = Date.now();
   try {
     const result = await refreshIndex(usage);
     usage = result.index;
     if (result.rebuilt) console.log('[usage] a transcript shrank, index rebuilt from scratch');
-    await saveIndex(usageCacheFile(), usage).catch((err) =>
-      console.warn('[usage] could not write cache:', (err as Error).message),
-    );
+    if (Date.now() - usageLastSave > USAGE_SAVE_INTERVAL_MS) {
+      usageLastSave = Date.now();
+      await saveIndex(usageCacheFile(), usage).catch((err) =>
+        console.warn('[usage] could not write cache:', (err as Error).message),
+      );
+    }
     if (usage.unavailable) {
       console.warn(`[usage] source unavailable: ${usage.unavailableReason}`);
     } else {
@@ -240,7 +276,7 @@ function buildTray(): void {
     tray = new Tray(trayIcon());
     tray.setToolTip('MuchBetter Client Wall');
     refreshTrayMenu();
-    tray.on('double-click', () => toggleFocusMode());
+    tray.on('double-click', () => toggleHidden());
   } catch (err) {
     console.error('[tray] could not create tray icon:', (err as Error).message);
   }
@@ -519,10 +555,21 @@ function wallState(wall: WallWindow) {
   };
 }
 
+/**
+ * The renderer never reads the per-file offset map, and that map is half the
+ * payload: 170 KB was crossing the IPC boundary on every refresh, roughly once
+ * a second during an active session. Send a projection instead.
+ */
+function usageForRenderer(): Record<string, unknown> {
+  const { files, ...rest } = usage;
+  return { ...rest, fileCount: Object.keys(files).length };
+}
+
 function pushUsage(): void {
+  const payload = usageForRenderer();
   for (const w of windows) {
     if (w.win.isDestroyed()) continue;
-    w.win.webContents.send('wall:usage', usage);
+    w.win.webContents.send('wall:usage', payload);
   }
 }
 
@@ -706,6 +753,8 @@ function startWatching(): void {
 function quit(): void {
   if (usageTimer) clearTimeout(usageTimer);
   usageWatcher?.close();
+  // Persist whatever the periodic save has not yet flushed.
+  void saveIndex(usageCacheFile(), usage).catch(() => undefined);
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
   stopWatching?.();
   globalShortcut.unregisterAll();
@@ -722,12 +771,17 @@ function registerIpc(): void {
   });
   ipcMain.handle('wall:updateSettings', (_e, patch: Partial<Settings>) => updateSettings(patch ?? {}));
   ipcMain.handle('wall:reload', () => reloadData());
-  ipcMain.handle('wall:getUsage', () => usage);
+  ipcMain.handle('wall:getUsage', () => usageForRenderer());
   ipcMain.handle('wall:setMode', (_e, mode: 'stats' | 'clients') =>
     updateSettings({ mode: mode === 'clients' ? 'clients' : 'stats' }),
   );
   ipcMain.handle('wall:toggleFocus', () => {
     toggleFocusMode();
+  });
+  // The renderer sends this on Escape. Leaving focus mode must always be
+  // possible without hunting for the tray.
+  ipcMain.handle('wall:exitFocus', () => {
+    if (focusMode) toggleFocusMode();
   });
   ipcMain.handle('wall:openExternal', (_e, url: string) => {
     // Only ever open http(s). Client JSON is hand-edited and untrusted.

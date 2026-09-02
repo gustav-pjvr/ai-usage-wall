@@ -129,8 +129,10 @@ function relativeDays(iso: string | null): string | null {
   if (days <= 0) return 'today';
   if (days === 1) return 'yesterday';
   if (days < 30) return `${days} days ago`;
-  if (days < 365) return `${Math.round(days / 30)} months ago`;
-  return `${Math.round(days / 365)} years ago`;
+  // Singular matters: "1 months ago" is on screen all day on a wall like this.
+  const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  if (days < 365) return plural(Math.round(days / 30), 'month');
+  return plural(Math.round(days / 365), 'year');
 }
 
 /**
@@ -156,6 +158,18 @@ function monogram(name: string): string {
   const parts = words[0].split(/(?=[A-Z])/).filter((w) => w.length > 0);
   if (parts.length > 1) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   return words[0].slice(0, 2).toUpperCase();
+}
+
+/**
+ * The address a person would actually read out loud. Protocol and a leading
+ * "www." are noise on a card this size, and a trailing slash reads as a typo.
+ * The full URL is still what gets opened, and still what the tooltip shows.
+ */
+function displayUrl(url: string): string {
+  return url
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\/$/, '');
 }
 
 /** Everything from client data goes through here. Never innerHTML. */
@@ -309,11 +323,43 @@ function buildCard(client: Client): HTMLElement {
   }
   inner.appendChild(body);
 
-  // Footer
+  /*
+   * Footer, and the live address that lives in it.
+   *
+   * The address goes IN the footer rather than on a row of its own. A separate
+   * row was the first attempt and it overflowed every medium card: the card is
+   * a fixed-height flex column with a body that is not allowed to shrink, so an
+   * extra row has nowhere to come from and the footer gets clipped instead.
+   *
+   * When there is an address it takes the footer's left slot and the start date
+   * is dropped, because "Last activity 2 days ago" already carries the time
+   * information and the address is the only actionable thing on the card.
+   *
+   * A button, not an anchor: a real <a> would navigate the wall's own window if
+   * anything ever swallowed the preventDefault, and the wall has nowhere to
+   * navigate to. The main process opens it in the default browser and refuses
+   * anything that is not http(s).
+   */
   const foot = el('div', 'card-foot');
+  const primary = client.links.find((l) => /^https?:\/\//i.test(l.url));
+  if (primary) {
+    const link = el('button', 'card-link');
+    link.type = 'button';
+    link.title = primary.url;
+    link.appendChild(el('span', 'card-link-mark', '↗'));
+    link.appendChild(el('span', 'card-link-url', displayUrl(primary.url)));
+    link.addEventListener('click', (ev) => {
+      // The card opens the detail overlay. A click on the link means the site.
+      ev.stopPropagation();
+      void window.wall.openExternal(primary.url);
+    });
+    foot.appendChild(link);
+  }
+
   const last = relativeDays(client.lastInteraction);
-  foot.appendChild(el('span', undefined, last ? `Last activity ${last}` : client.projectType ?? ''));
-  if (client.startDate) foot.appendChild(el('span', undefined, formatDate(client.startDate)));
+  const note = last ? `Last activity ${last}` : (client.projectType ?? '');
+  if (note) foot.appendChild(el('span', 'card-foot-note', note));
+  if (!primary && client.startDate) foot.appendChild(el('span', 'card-foot-note', formatDate(client.startDate)));
   inner.appendChild(foot);
 
   card.appendChild(inner);
@@ -541,6 +587,7 @@ function render(): void {
       progress: c.progress,
       lastInteraction: c.lastInteraction,
       featured: c.featured,
+      emphasis: c.emphasis,
       kind: c.kind,
     })),
     { width, height, densityScale: state.settings.densityScale },

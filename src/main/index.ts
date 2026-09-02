@@ -32,11 +32,15 @@ import {
   inputReachesWall,
   ensureDpiAwareness,
   sinkToBottom,
+  verifyLayer,
   type LayerMode,
 } from './win32/desktop-layer';
 import { hwndFromBuffer, isAvailable as win32Available, unavailableReason } from './win32/ffi';
 
 const isDev = !app.isPackaged;
+
+/** The mode a failed or unknown layer setting is healed back to. */
+const DEFAULT_LAYER_MODE: LayerMode = 'desktop';
 
 interface WallWindow {
   win: BrowserWindow;
@@ -339,8 +343,11 @@ function refreshTrayMenu(): void {
         label: 'Desktop layer',
         submenu: [
           layerItem('desktop', 'Behind apps, interactive  (recommended)'),
-          layerItem('wallpaper', 'Wallpaper layer, no input'),
           layerItem('top', 'Always on top'),
+          { type: 'separator' as const },
+          // The question the removed "Wallpaper layer, no input" option was
+          // being asked to answer, pointed at the setting that answers it.
+          { label: 'For a wall that ignores the mouse, use Click-through', enabled: false },
         ],
       },
       {
@@ -445,7 +452,10 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     } catch (err) {
       console.error('[main] could not read HWND:', (err as Error).message);
     }
-    applyLayer(wall);
+    const layer = applyLayer(wall);
+    // Startup self-heal. Whatever is in settings.json, the wall that comes up
+    // is one that verified, so a bad mode can never survive a restart.
+    if (!layer.ok) healLayerMode(wall, layer.reason);
     pushState(wall);
     if (!wall.win.isDestroyed()) wall.win.webContents.send('wall:usage', usageForRenderer());
     if (usageIndexing && !wall.win.isDestroyed()) {
@@ -463,7 +473,9 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
 
   // Re-assert bottom placement only on the events that can disturb it.
   win.on('show', () => {
-    if (!focusMode && settings.layerMode === 'desktop' && wall.hwnd) sinkToBottom(wall.hwnd);
+    // effectiveMode, not settings.layerMode: what the window is actually in is
+    // what decides whether re-anchoring above Progman is the right move.
+    if (!focusMode && wall.effectiveMode === 'desktop' && wall.hwnd) sinkToBottom(wall.hwnd);
   });
 
   win.on('closed', () => {
@@ -508,60 +520,93 @@ function maybeCapture(wall: WallWindow): void {
   }, delay);
 }
 
-function applyLayer(wall: WallWindow): void {
-  if (!wall.hwnd) return;
+/**
+ * Apply a layer mode AND prove the window can still be on screen afterwards.
+ *
+ * There is deliberately no unverified variant. A layer mode that is applied but
+ * never checked is how the wall ended up invisible: the old code trusted a
+ * SetParent success that had not happened, then wrote the failing mode to disk,
+ * so every restart repeated it. Nothing reaches settings.json now until this
+ * function has said ok.
+ */
+function applyLayer(wall: WallWindow): { ok: boolean; reason?: string } {
+  if (!wall.hwnd) return { ok: false, reason: 'no HWND yet' };
   const mode: LayerMode = focusMode ? 'top' : settings.layerMode;
   const display = screen.getAllDisplays().find((d) => d.id === wall.displayId);
 
-  // WorkerW parenting needs physical pixels, not DIPs.
-  const bounds =
-    display && mode === 'wallpaper'
-      ? {
-          x: Math.round(display.bounds.x * display.scaleFactor),
-          y: Math.round(display.bounds.y * display.scaleFactor),
-          width: Math.round(display.bounds.width * display.scaleFactor),
-          height: Math.round(display.bounds.height * display.scaleFactor),
-        }
-      : undefined;
+  const result = applyLayerMode(wall.hwnd, mode);
 
-  let result = applyLayerMode(wall.hwnd, mode, bounds);
-
-  // Wallpaper mode depends on Explorer exposing a WorkerW, which not every
-  // shell configuration does. Falling back to the bottom-most desktop layer
-  // keeps the wall visible and interactive rather than leaving a blank desktop.
-  if (!result.ok && mode === 'wallpaper') {
-    console.warn(`[main] wallpaper layer unavailable (${result.reason}); falling back to 'desktop'`);
-    result = applyLayerMode(wall.hwnd, 'desktop');
-    if (result.ok) wall.effectiveMode = 'desktop';
-  } else if (result.ok) {
-    wall.effectiveMode = mode;
+  if (result.repaired && display) {
+    // It was living inside another window, so its coordinates were relative to
+    // that window. Put it back where it belongs now that it owns itself again.
+    wall.win.setBounds(display.bounds);
   }
 
-  if (!result.ok) console.warn(`[main] layer mode '${mode}' failed: ${result.reason}`);
+  if (!result.ok) {
+    console.warn(`[main] layer mode '${mode}' failed: ${result.reason}`);
+    return { ok: false, reason: result.reason };
+  }
+  wall.effectiveMode = mode;
+
+  const physical = display
+    ? {
+        x: Math.round(display.bounds.x * display.scaleFactor),
+        y: Math.round(display.bounds.y * display.scaleFactor),
+        width: Math.round(display.bounds.width * display.scaleFactor),
+        height: Math.round(display.bounds.height * display.scaleFactor),
+      }
+    : { x: 0, y: 0, width: 1, height: 1 };
+
+  const check = verifyLayer(wall.hwnd, { expectVisible: !hidden, display: physical });
 
   /*
-   * Placement is not input. Confirm Windows actually hit-tests to us at a pixel
-   * inside our own bounds, because a transparent shell layer sitting on top
-   * makes the wall look perfect while swallowing every click.
+   * Placement is not input. Ask Windows who actually owns a pixel inside our
+   * bounds. ADVISORY ONLY: any app the user has open over that point makes it
+   * false for a perfectly good reason, so it is reported, never enforced.
    */
-  if (result.ok && display && wall.hwnd) {
-    const probe = {
-      x: Math.round(display.bounds.x * display.scaleFactor),
-      y: Math.round(display.bounds.y * display.scaleFactor),
-      width: Math.round(display.bounds.width * display.scaleFactor),
-      height: Math.round(display.bounds.height * display.scaleFactor),
-    };
-    const check = inputReachesWall(wall.hwnd, probe);
-    wall.inputReachable = check.reachable;
-    console.log(
-      `[main] layer '${wall.effectiveMode}': input ${check.reachable ? 'reaches the wall' : `goes to '${check.ownerClass}'`}`,
-    );
+  let inputNote = '';
+  if (check.ok && !hidden) {
+    const probe = inputReachesWall(wall.hwnd, physical);
+    wall.inputReachable = probe.reachable;
+    inputNote = probe.reachable ? ', input reaches the wall' : `, input goes to '${probe.ownerClass}'`;
   }
 
-  // In wallpaper mode the desktop owns input, so mouse handling is moot.
-  const ignore = settings.clickThrough || mode === 'wallpaper';
-  wall.win.setIgnoreMouseEvents(ignore, { forward: true });
+  // Click-through is the only thing that suppresses mouse handling now, and
+  // focus mode is the only thing that overrides it. This used to also test the
+  // REQUESTED layer mode, which meant a mode that had fallen back still left
+  // the wall click-through.
+  wall.win.setIgnoreMouseEvents(focusMode ? false : settings.clickThrough, { forward: true });
   wall.win.setOpacity(focusMode ? 1 : settings.opacity);
+
+  if (check.ok) {
+    const r = check.rect;
+    console.log(
+      `[main] layer '${mode}' verified: top-level, ${hidden ? 'hidden as asked' : 'visible'}` +
+        `${r ? `, ${r.width}x${r.height} at ${r.x},${r.y}` : ''}${inputNote}`,
+    );
+  } else {
+    console.warn(`[main] layer '${mode}' FAILED verification: ${check.failures.join('; ')}`);
+  }
+  return { ok: check.ok, reason: check.failures.join('; ') };
+}
+
+/**
+ * Last line of defence: a persisted layer mode that cannot pass verification is
+ * replaced with the default and written back, once, so the next launch starts
+ * from a mode that works. Idempotent, because every display's window calls it.
+ */
+function healLayerMode(wall: WallWindow, reason: string | undefined): void {
+  if (settings.layerMode === DEFAULT_LAYER_MODE) {
+    console.error(
+      `[main] layer '${settings.layerMode}' failed verification (${reason}) and there is nothing safer to fall back to`,
+    );
+    return;
+  }
+  console.warn(`[main] layer '${settings.layerMode}' failed verification (${reason}); healing to '${DEFAULT_LAYER_MODE}'`);
+  settings = { ...settings, layerMode: DEFAULT_LAYER_MODE };
+  applyLayer(wall);
+  void saveSettings(settings).catch((err) => console.error('[settings] save failed:', err));
+  refreshTrayMenu();
 }
 
 function rebuildWindows(): void {
@@ -665,7 +710,15 @@ async function reloadData(): Promise<void> {
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
   const before = settings;
   settings = { ...settings, ...patch };
-  await saveSettings(settings).catch((err) => console.error('[settings] save failed:', err));
+
+  /*
+   * The write moved to the END of this function on purpose.
+   *
+   * It used to be the first thing that happened, so a layer mode that then
+   * failed to apply was already on disk, and restarting the app replayed the
+   * failure instead of escaping it. settings.json now mirrors state the wall
+   * has verified, never state that was merely requested.
+   */
 
   if (patch.startWithWindows !== undefined) applyStartup();
   if (patch.performance !== undefined) capability = detectCapability(settings.performance);
@@ -678,13 +731,33 @@ async function updateSettings(patch: Partial<Settings>): Promise<void> {
     await reloadData();
   }
 
+  let failure: string | undefined;
   if (patch.monitors !== undefined) rebuildWindows();
   else {
+    for (const w of windows) {
+      const outcome = applyLayer(w);
+      if (!outcome.ok && failure === undefined) failure = outcome.reason ?? 'unknown';
+    }
+  }
+
+  // A layer mode that cannot verify never becomes the persisted mode. Revert in
+  // memory first, re-apply the mode that was working, and only then let the
+  // write at the end of this function record it.
+  if (patch.layerMode !== undefined && failure !== undefined) {
+    console.warn(`[main] layer mode '${settings.layerMode}' rejected (${failure}); staying on '${before.layerMode}'`);
+    settings = { ...settings, layerMode: before.layerMode };
     for (const w of windows) applyLayer(w);
+    tray?.displayBalloon?.({
+      title: 'Layer mode not applied',
+      content: `${settings.layerMode} kept: the requested mode could not be verified (${failure})`,
+    });
+  } else if (before.layerMode !== settings.layerMode) {
+    console.log(`[main] layer mode -> ${settings.layerMode}`);
   }
 
   if (patch.hotkeyFocus !== undefined || patch.hotkeyToggle !== undefined) registerHotkeys();
-  if (before.layerMode !== settings.layerMode) console.log(`[main] layer mode -> ${settings.layerMode}`);
+
+  await saveSettings(settings).catch((err) => console.error('[settings] save failed:', err));
 
   refreshTrayMenu();
   pushState();
@@ -694,13 +767,9 @@ async function updateSettings(patch: Partial<Settings>): Promise<void> {
 
 function toggleFocusMode(): void {
   focusMode = !focusMode;
-  for (const w of windows) {
-    applyLayer(w);
-    // Focus mode is the only state where the wall accepts real interaction.
-    w.win.setIgnoreMouseEvents(focusMode ? false : settings.clickThrough || settings.layerMode === 'wallpaper', {
-      forward: true,
-    });
-  }
+  // applyLayer owns setIgnoreMouseEvents now, so there is no second call here
+  // to drift out of step with it.
+  for (const w of windows) applyLayer(w);
   refreshTrayMenu();
   pushState();
 }

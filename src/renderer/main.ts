@@ -28,6 +28,8 @@ interface WallState {
     layerMode: string;
     clickThrough: boolean;
     opacity: number;
+    background: 'none' | 'plain' | 'gradient';
+    backgroundOpacity: number;
   };
   capability: { tier: 'low' | 'balanced' | 'high'; cores: number; memoryGb: number; gpuAccelerated: boolean; reasons: string[] };
   focusMode: boolean;
@@ -507,6 +509,10 @@ function render(): void {
   if (!state) return;
 
   document.body.dataset.perf = state.capability.tier;
+  // The backdrop is what stops the desktop wallpaper and icons showing through
+  // the gaps between cards.
+  document.body.dataset.background = state.settings.background ?? 'gradient';
+  document.body.style.setProperty('--backdrop-opacity', String(state.settings.backgroundOpacity ?? 1));
   document.body.classList.toggle('wall-interactive', !state.settings.clickThrough || state.focusMode);
 
   const width = window.innerWidth;

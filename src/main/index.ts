@@ -191,6 +191,20 @@ function refreshTrayMenu(): void {
         ],
       },
       {
+        label: 'Background',
+        submenu: (['gradient', 'plain', 'none'] as const).map((mode) => ({
+          label:
+            mode === 'gradient'
+              ? 'Gradient  (recommended)'
+              : mode === 'plain'
+                ? 'Solid'
+                : 'None, show the wallpaper through',
+          type: 'radio' as const,
+          checked: settings.background === mode,
+          click: () => void updateSettings({ background: mode }),
+        })),
+      },
+      {
         label: 'Click-through',
         type: 'checkbox',
         checked: settings.clickThrough,

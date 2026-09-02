@@ -77,6 +77,10 @@ body {
   --c-glow: oklch(0.65 0.14 200 / 0.9);
   --c-hue: 200;
 
+  /* Backdrop base: near-black with just enough blue to sit under the cards
+     without reading as pure black. */
+  --backdrop-base: oklch(0.135 0.014 250);
+
   --shadow-card: 0 1px 2px rgb(0 0 0 / 0.22), 0 3px 6px rgb(0 0 0 / 0.2), 0 8px 18px rgb(0 0 0 / 0.18),
     0 18px 40px rgb(0 0 0 / 0.16);
   --shadow-lift: 0 2px 4px rgb(0 0 0 / 0.24), 0 8px 16px rgb(0 0 0 / 0.22), 0 20px 44px rgb(0 0 0 / 0.24),
@@ -96,6 +100,56 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
+}
+
+/*
+ * The backdrop.
+ *
+ * Without it the window is fully transparent and the desktop wallpaper, plus any
+ * icons sitting under the wall, show through every gap between cards. That reads
+ * as clutter rather than as a designed surface.
+ *
+ * It is a static paint: no animation, no blur, no filter, so it costs one
+ * composited layer and nothing per frame. Chromium cannot blur the actual
+ * desktop behind a window, so an opaque surface is the honest way to hide it.
+ */
+#wall::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--backdrop-opacity, 1);
+  background: var(--backdrop-base);
+}
+
+body[data-background='none'] #wall::before {
+  display: none;
+}
+
+body[data-background='plain'] #wall::before {
+  background: var(--backdrop-base);
+}
+
+/* Soft off-centre lifts and a vignette, echoing the cards' own brand wash so
+   the wall reads as one surface the cards sit on rather than a black rectangle. */
+body[data-background='gradient'] #wall::before {
+  background:
+    radial-gradient(120% 90% at 12% -8%, oklch(0.28 0.045 210 / 0.55), transparent 55%),
+    radial-gradient(100% 80% at 92% 105%, oklch(0.26 0.05 285 / 0.45), transparent 58%),
+    radial-gradient(140% 120% at 50% 50%, transparent 45%, oklch(0.08 0.01 250 / 0.75) 100%),
+    var(--backdrop-base);
+}
+
+/* Software rendering makes several large radials measurably expensive to
+   repaint, so the low tier gets a single linear pass instead. */
+[data-perf='low'] body[data-background='gradient'] #wall::before,
+body[data-perf='low'][data-background='gradient'] #wall::before {
+  background: linear-gradient(160deg, oklch(0.19 0.03 215), var(--backdrop-base) 60%);
+}
+
+.page {
+  z-index: 1;
 }
 
 .page {

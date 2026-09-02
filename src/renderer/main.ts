@@ -855,6 +855,7 @@ window.wall.onState((next) => {
   state = next;
   if (focusChanged) renderSwitcher();
   statsView.setPerfTier(next.capability.tier);
+  statsView.setVersion(next.appVersion);
   if (modeChanged) applyMode(next.mode);
   render();
 });
@@ -868,6 +869,7 @@ window.wall
     if (initial) {
       state = initial;
       statsView.setPerfTier(initial.capability.tier);
+      statsView.setVersion(initial.appVersion);
       // No animation on the very first paint: the view should already be there.
       applyMode(initial.mode ?? 'stats', false);
       render();

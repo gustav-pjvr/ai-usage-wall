@@ -591,7 +591,12 @@
   color: oklch(0.6 0.014 240);
 }
 
-.status-note { margin-left: auto; opacity: 0.75; }
+.status-version {
+  margin-left: auto;
+  color: oklch(0.66 0.05 200);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
 
 .stats.is-stale .status-source { color: var(--warn); }
 

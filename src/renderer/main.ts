@@ -90,17 +90,14 @@ if (isStatsOnly) clientsView.remove();
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 
-const CURRENCY_SYMBOL: Record<string, string> = { ZAR: 'R', USD: '$', EUR: '€', GBP: '£' };
-
-function formatMoney(value: number | null, currency: string): string | null {
-  if (value === null || !Number.isFinite(value)) return null;
-  const symbol = CURRENCY_SYMBOL[currency] ?? `${currency} `;
-  const abs = Math.abs(value);
-  // Compact above 100k so a hero card never wraps its headline number.
-  if (abs >= 1_000_000) return `${symbol}${(value / 1_000_000).toFixed(value % 1_000_000 === 0 ? 0 : 1)}M`;
-  if (abs >= 100_000) return `${symbol}${Math.round(value / 1000)}k`;
-  return `${symbol}${value.toLocaleString('en-ZA', { maximumFractionDigits: 0 })}`;
-}
+/*
+ * There is deliberately NO money formatter in this file any more.
+ *
+ * Deleting it is the point: a hidden call site is one autocomplete away from
+ * putting a client's project value back on a screen that half an office can
+ * read. If money ever has to be shown again, bringing the formatter back should
+ * be a conscious act with this comment in the diff.
+ */
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -302,7 +299,13 @@ function buildCard(client: Client): HTMLElement {
     m.appendChild(el('div', 'label', label));
     metrics.appendChild(m);
   };
-  addMetric(formatMoney(client.revenue, client.currency), 'Value');
+  /*
+   * NO MONEY ON THE WALL. This is a full-screen desktop surface that anyone
+   * walking past, or anyone on a screen share, can read. Project values are
+   * confidential, so they are never rendered: not on the card, not in the
+   * detail overlay. The figure stays in the JSON because the layout score uses
+   * it to rank cards, and that is a number nobody ever sees.
+   */
   addMetric(formatDuration(client.startDate, client.endDate), 'Duration');
   addMetric(client.hours != null ? `${client.hours}h` : null, 'Hours');
   addMetric(client.deliverables != null ? String(client.deliverables) : null, 'Deliverables');
@@ -470,7 +473,7 @@ function openDetail(client: Client): void {
     s.appendChild(el('div', 'label', label));
     stats.appendChild(s);
   };
-  addStat(formatMoney(client.revenue, client.currency), 'Project value');
+  // Deliberately no project value here either. See buildCard.
   addStat(client.progress != null ? `${Math.round(client.progress)}%` : null, 'Progress');
   addStat(formatDuration(client.startDate, client.endDate), 'Duration');
   addStat(client.hours != null ? `${client.hours}` : null, 'Hours logged');

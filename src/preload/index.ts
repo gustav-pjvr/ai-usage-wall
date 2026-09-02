@@ -17,6 +17,7 @@ const api = {
     return () => ipcRenderer.removeListener('wall:usage', listener);
   },
   toggleFocus: () => ipcRenderer.invoke('wall:toggleFocus'),
+  exitFocus: () => ipcRenderer.invoke('wall:exitFocus'),
   openExternal: (url: string) => ipcRenderer.invoke('wall:openExternal', url),
   onDebugOpenDetail: (cb: (id: string) => void) => {
     ipcRenderer.on('wall:debugOpenDetail', (_e, id: string) => cb(id));

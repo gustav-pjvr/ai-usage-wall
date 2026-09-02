@@ -139,3 +139,39 @@
     filter: none;
   }
 }
+
+
+/* ── Focus mode escape hatch ────────────────────────────────────────────── */
+
+/*
+ * Focus mode puts an opaque fullscreen window on top of everything. Without a
+ * visible way out it is a trap: double-clicking the tray icon used to trigger
+ * it and the only escape was killing the process. It now announces itself and
+ * offers the exit, and Escape always works.
+ */
+body.is-focus #mode-switch {
+  opacity: 1;
+  border-color: oklch(0.7 0.15 75 / 0.55);
+}
+
+.focus-exit {
+  appearance: none;
+  border: 0;
+  margin-left: 4px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: oklch(0.42 0.12 70);
+  color: oklch(0.98 0.02 80);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.focus-exit:hover {
+  background: oklch(0.52 0.14 70);
+}

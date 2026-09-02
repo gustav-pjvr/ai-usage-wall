@@ -51,6 +51,7 @@ declare global {
       openExternal(url: string): Promise<void>;
       onState(cb: (state: WallState) => void): () => void;
       onDebugOpenDetail(cb: (id: string) => void): void;
+      exitFocus(): Promise<void>;
       getUsage(): Promise<UsageIndex | null>;
       setMode(mode: string): Promise<void>;
       onUsage(cb: (usage: UsageIndex) => void): () => void;
@@ -785,6 +786,19 @@ function renderSwitcher(): void {
     b.classList.toggle('is-on', b.dataset.mode === mode);
   });
   switchEl.dataset.mode = mode;
+
+  // In focus mode the wall is on top of everything, so it says so and offers
+  // the way out rather than leaving the user to find the tray.
+  const focused = state?.focusMode === true;
+  document.body.classList.toggle('is-focus', focused);
+  let exit = switchEl.querySelector<HTMLElement>('.focus-exit');
+  if (focused && !exit) {
+    exit = el('button', 'focus-exit', 'Exit focus  ·  Esc');
+    exit.addEventListener('click', () => void window.wall.exitFocus?.());
+    switchEl.appendChild(exit);
+  } else if (!focused && exit) {
+    exit.remove();
+  }
 }
 
 // ── Wiring ─────────────────────────────────────────────────────────────────
@@ -792,7 +806,12 @@ function renderSwitcher(): void {
 document.addEventListener('pointermove', onPointerMove, { passive: true });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeDetail();
+  if (e.key === 'Escape') {
+    closeDetail();
+    // Focus mode puts an opaque fullscreen window on top of everything, so
+    // there must always be an obvious way out of it.
+    void window.wall.exitFocus?.();
+  }
   // Tab flips views without reaching for the mouse.
   if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
@@ -815,7 +834,9 @@ window.wall.onDebugOpenDetail?.((id) => {
 
 window.wall.onState((next) => {
   const modeChanged = state?.settings && next.mode !== mode;
+  const focusChanged = state?.focusMode !== next.focusMode;
   state = next;
+  if (focusChanged) renderSwitcher();
   statsView.setPerfTier(next.capability.tier);
   if (modeChanged) applyMode(next.mode);
   render();

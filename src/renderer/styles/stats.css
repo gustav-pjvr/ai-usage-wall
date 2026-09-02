@@ -103,7 +103,7 @@
 }
 
 .panel-title {
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -117,7 +117,7 @@
  */
 .tag {
   font-family: var(--mono);
-  font-size: 8.5px;
+  font-size: 9.5px;
   font-weight: 600;
   letter-spacing: 0.12em;
   padding: 2px 6px;
@@ -179,7 +179,7 @@
 }
 
 .hero-sub {
-  font-size: 11.5px;
+  font-size: 12.5px;
   color: oklch(0.66 0.015 230);
 }
 
@@ -215,10 +215,10 @@
 .comp-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
-  margin-top: 8px;
+  gap: 5px 16px;
+  margin-top: 9px;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: oklch(0.6 0.015 235);
@@ -263,7 +263,7 @@
   display: flex;
   justify-content: space-between;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: 10.5px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: oklch(0.6 0.015 230);
@@ -324,7 +324,7 @@
 
 .vel-note {
   margin-top: 8px;
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
   color: oklch(0.58 0.015 240);
 }
@@ -356,8 +356,8 @@
 }
 
 .stat-label {
-  margin-top: 3px;
-  font-size: 9.5px;
+  margin-top: 4px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -365,7 +365,7 @@
 }
 
 .stat-hint {
-  font-size: 9px;
+  font-size: 10px;
   color: oklch(0.52 0.012 240);
   margin-top: 1px;
 }
@@ -420,7 +420,7 @@
   flex: 0 0 auto;
   margin-top: 8px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10.5px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: oklch(0.55 0.015 240);
@@ -451,7 +451,7 @@
 }
 
 .bd-label {
-  font-size: 11px;
+  font-size: 12px;
   color: oklch(0.86 0.012 225);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -460,7 +460,7 @@
 
 .bd-value {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: 11.5px;
   color: var(--sig-dim);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
@@ -491,7 +491,7 @@
 .bd-sub {
   margin-top: 3px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 10px;
   color: oklch(0.5 0.012 240);
 }
 
@@ -541,7 +541,7 @@
 
 .eff-note {
   margin-top: 8px;
-  font-size: 9.5px;
+  font-size: 10.5px;
   line-height: 1.4;
   color: oklch(0.55 0.015 240);
 }
@@ -558,10 +558,10 @@
   padding-top: 8px;
   border-top: 1px solid oklch(1 0 0 / 0.06);
   font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.07em;
+  font-size: 11px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: oklch(0.52 0.014 240);
+  color: oklch(0.6 0.014 240);
 }
 
 .status-note { margin-left: auto; opacity: 0.75; }
@@ -596,4 +596,75 @@
   .panel-models   { grid-column: span 4; }
   .panel-hours    { grid-column: span 4; }
   .panel-projects { grid-column: span 4; }
+}
+
+
+/* ── Hover tooltip ──────────────────────────────────────────────────────── */
+
+/*
+ * One node for the whole view, moved with a transform. Replaces the native
+ * `title` attribute, which took about a second to appear and could not be
+ * styled to match anything else here.
+ */
+.tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  min-width: 148px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  background: oklch(0.16 0.014 245 / 0.97);
+  border: 1px solid oklch(1 0 0 / 0.14);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.4), 0 14px 40px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.tip.is-on {
+  opacity: 1;
+}
+
+.tip-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: oklch(0.96 0.01 210);
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid oklch(1 0 0 / 0.1);
+  white-space: nowrap;
+}
+
+.tip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.tip-k {
+  color: oklch(0.64 0.015 235);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.tip-v {
+  color: var(--sig);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hovering a column or a breakdown row should feel like a target. */
+.col,
+.bd-row {
+  cursor: default;
+}
+
+.bd-row:hover .bd-fill {
+  filter: brightness(1.3);
 }

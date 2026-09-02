@@ -26,6 +26,15 @@ export interface Settings {
   startWithWindows: boolean;
   /** Wall opacity in ambient mode, 0.2 to 1. */
   opacity: number;
+  /**
+   * Backdrop painted behind the cards.
+   *
+   * 'none' leaves the window transparent, so the desktop wallpaper and any icons
+   * underneath show through the gaps. 'plain' and 'gradient' cover them.
+   */
+  background: 'none' | 'plain' | 'gradient';
+  /** Backdrop opacity, 0 to 1. Below 1 the wallpaper shows through faintly. */
+  backgroundOpacity: number;
   /** Layout density multiplier. Lower packs more cards in. */
   densityScale: number;
   /** Seconds between ambient page changes when the wall paginates. */
@@ -48,6 +57,8 @@ const DEFAULTS: Settings = {
   hotkeyToggle: 'Control+Alt+Shift+W',
   startWithWindows: false,
   opacity: 1,
+  background: 'gradient',
+  backgroundOpacity: 1,
   densityScale: 1,
   pageRotateSeconds: 45,
   monitors: [],
@@ -78,6 +89,11 @@ export function normaliseSettings(raw: unknown): Settings {
     hotkeyToggle: typeof r.hotkeyToggle === 'string' && r.hotkeyToggle ? r.hotkeyToggle : DEFAULTS.hotkeyToggle,
     startWithWindows: r.startWithWindows === true,
     opacity: typeof r.opacity === 'number' ? clamp(r.opacity, 0.2, 1) : DEFAULTS.opacity,
+    background: (['none', 'plain', 'gradient'] as const).includes(r.background as never)
+      ? (r.background as Settings['background'])
+      : DEFAULTS.background,
+    backgroundOpacity:
+      typeof r.backgroundOpacity === 'number' ? clamp(r.backgroundOpacity, 0, 1) : DEFAULTS.backgroundOpacity,
     densityScale: typeof r.densityScale === 'number' ? clamp(r.densityScale, 0.6, 2) : DEFAULTS.densityScale,
     pageRotateSeconds:
       typeof r.pageRotateSeconds === 'number' ? clamp(r.pageRotateSeconds, 10, 600) : DEFAULTS.pageRotateSeconds,

@@ -1,0 +1,32 @@
+{
+  "id": "swrc",
+  "name": "SWRC",
+  "company": "Somerset West Run Crew",
+  "state": "paused",
+  "industry": "Community running",
+  "projectType": "Website",
+  "project": "Single-page club site",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-06-21",
+  "endDate": null,
+  "currentPhase": "Stale, design direction unconfirmed",
+  "lastInteraction": "2026-06-22",
+  "notes": "A community of runners in the Helderberg. All paces, all ages, every Friday at Bootlegger Coffee. Paused since June: three unconsolidated design versions exist and the client has not picked a direction. Not deployed. No contact or contract details on file.",
+  "links": [],
+  "tags": [
+    "community",
+    "paused"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#bfda38",
+    "secondary": "#e76b9c",
+    "logo": null,
+    "images": [],
+    "motif": "gradient"
+  }
+}

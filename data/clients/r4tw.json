@@ -1,0 +1,38 @@
+{
+  "id": "r4tw",
+  "name": "R4TW",
+  "company": "Run For The World",
+  "state": "active",
+  "industry": "Sport mission and non-profit",
+  "projectType": "Website rebuild",
+  "project": "Full rebuild with country ambassador event console",
+  "revenue": 37000,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": 6,
+  "progress": null,
+  "startDate": "2026-06-30",
+  "endDate": null,
+  "currentPhase": "Scope complete, build not started",
+  "lastInteraction": "2026-07-30",
+  "notes": "Global sport-mission ministry of Operation Mobilisation, working across 110+ countries around three pillars: Prayer, People, Funding. Phase 1 covers redesign, mobile-first UX, the ambassador console, SEO and a homepage world map. Target is 12 working days from scope freeze. Hosting and domain access still being pursued.",
+  "links": [
+    {
+      "label": "Current site",
+      "url": "https://r4tw.org"
+    }
+  ],
+  "tags": [
+    "rebuild",
+    "admin-console",
+    "non-profit"
+  ],
+  "featured": true,
+  "branding": {
+    "primary": null,
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "gradient"
+  }
+}

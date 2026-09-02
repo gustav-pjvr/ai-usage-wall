@@ -1,0 +1,38 @@
+{
+  "id": "pickleplay-south-africa",
+  "name": "PicklePlay",
+  "company": "PicklePlay South Africa NPC",
+  "state": "active",
+  "industry": "Non-profit and community sport",
+  "projectType": "Brochure website",
+  "project": "v1 brochure site built from client briefs",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-08-05",
+  "endDate": null,
+  "currentPhase": "Live, awaiting client content",
+  "lastInteraction": "2026-08-06",
+  "notes": "Registered non-profit using pickleball for community development, organised around four pillars: Play, Learn, Lead, Earn. Built and deployed in a single session. Donation panel is built and waiting on details. Hero photography and social accounts still outstanding. Commercial basis (paid, pro bono or favour) is still unconfirmed.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://pickleplaysouthafrica.org"
+    }
+  ],
+  "tags": [
+    "non-profit",
+    "astro",
+    "brochure"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": null,
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

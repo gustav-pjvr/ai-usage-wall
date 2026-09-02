@@ -1,0 +1,38 @@
+{
+  "id": "raham-kim",
+  "name": "Raham Kim",
+  "company": "Photographer and videographer",
+  "state": "active",
+  "industry": "Photography and video",
+  "projectType": "Portfolio website",
+  "project": "Portfolio and booking site with admin panel",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": null,
+  "endDate": null,
+  "currentPhase": "Live on rahamkim.com",
+  "lastInteraction": "2026-07-30",
+  "notes": "Freelance photographer, videographer and editor based in Stellenbosch. Migrated off Lovable onto self-hosted Supabase and Cloudflare. Note: the client record and the project record disagree on whether the domain cutover is complete. Commercial terms not on file.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://rahamkim.com"
+    }
+  ],
+  "tags": [
+    "portfolio",
+    "booking",
+    "lovable-exit"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#fa9b82",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "gradient"
+  }
+}

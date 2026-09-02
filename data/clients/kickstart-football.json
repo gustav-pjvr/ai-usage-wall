@@ -1,0 +1,37 @@
+{
+  "id": "kickstart-football",
+  "name": "Kickstart Football",
+  "company": null,
+  "state": "active",
+  "industry": null,
+  "projectType": "Website",
+  "project": "Site rebuild with gallery and enquiry forms",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-06-05",
+  "endDate": null,
+  "currentPhase": "Live on kickstartfootball.co.za",
+  "lastInteraction": "2026-07-30",
+  "notes": "Migrated off Lovable onto self-hosted Supabase, Resend and Cloudflare Workers. Note: the client record and the project record disagree on whether the migration is finished. Commercial terms not on file.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://kickstartfootball.co.za"
+    }
+  ],
+  "tags": [
+    "lovable-exit",
+    "tanstack"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#0087f8",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "grid"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "id": "snapandgoback",
+  "name": "SnapAndGoBack",
+  "company": "SnapBack field capture",
+  "state": "active",
+  "industry": "Field operations",
+  "projectType": "Progressive web app",
+  "project": "Offline-first incident capture for Table Mountain",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-04-16",
+  "endDate": null,
+  "currentPhase": "Live, offline reliability work",
+  "lastInteraction": "2026-07-30",
+  "notes": "Field-incident capture app with photo and GPS logging and a Mapbox navigation view, built to work offline. Background Sync API is the one open item. Commercial terms not on file.",
+  "links": [],
+  "tags": [
+    "pwa",
+    "offline",
+    "lovable-exit"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#b85e47",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

@@ -116,11 +116,29 @@ function relativeDays(iso: string | null): string | null {
   return `${Math.round(days / 365)} years ago`;
 }
 
+/**
+ * Initials for the logo slot and the watermark.
+ *
+ * Real client names broke the naive "first two letters" version: R4TW became
+ * "R4", PicklePlay became "PI", SnapAndGoBack became "SN". So:
+ *   - An existing short acronym is already a monogram. Keep it whole (SWRC, R4TW).
+ *   - Multiple words give first and last initials (Gary Atherstone -> GA).
+ *   - A single camelCase word is split on its capitals (PicklePlay -> PP).
+ */
 function monogram(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return '?';
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+  const trimmed = name.trim();
+  if (!trimmed) return '?';
+
+  // Already an acronym: all caps, optional digits, short enough to show as is.
+  if (/^[A-Z0-9]{2,4}$/.test(trimmed)) return trimmed;
+
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length > 1) return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+
+  // Single word: split on camelCase boundaries.
+  const parts = words[0].split(/(?=[A-Z])/).filter((w) => w.length > 0);
+  if (parts.length > 1) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return words[0].slice(0, 2).toUpperCase();
 }
 
 /** Everything from client data goes through here. Never innerHTML. */
@@ -196,11 +214,15 @@ function buildCard(client: Client): HTMLElement {
     // A missing logo file falls back to the monogram rather than a broken icon.
     img.addEventListener('error', () => {
       logo.textContent = '';
-      logo.appendChild(el('span', 'monogram', monogram(client.name)));
+      const fb = el('span', 'monogram', monogram(client.name));
+      fb.dataset.len = String(monogram(client.name).length);
+      logo.appendChild(fb);
     });
     logo.appendChild(img);
   } else {
-    logo.appendChild(el('span', 'monogram', monogram(client.name)));
+    const m = el('span', 'monogram', monogram(client.name));
+    m.dataset.len = String(monogram(client.name).length);
+    logo.appendChild(m);
   }
   head.appendChild(logo);
   inner.appendChild(head);
@@ -246,6 +268,14 @@ function buildCard(client: Client): HTMLElement {
     track.appendChild(fill);
     progress.appendChild(track);
     body.appendChild(progress);
+  } else if (client.currentPhase) {
+    // No percentage on file. Show the real phase text instead of nothing: it
+    // carries the same meaning honestly, and without it the card has a hole
+    // where the progress rule would have been.
+    const phase = el('div', 'phase');
+    phase.appendChild(el('div', 'label', 'Phase'));
+    phase.appendChild(el('div', 'phase-value', client.currentPhase));
+    body.appendChild(phase);
   }
   inner.appendChild(body);
 

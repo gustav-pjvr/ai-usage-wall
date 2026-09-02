@@ -7,9 +7,12 @@ Written 2026-09-02. Keep it current, it is the contract between sessions.
 
 ## Purpose
 
-An ambient Windows desktop application that continuously displays MuchBetter's
-clients, past and present, as individually branded cards. It is not a CRM and not
-a dashboard. It is a living showcase that happens to be genuinely useful.
+An ambient Windows desktop application with two views:
+
+1. **Claude Stats** (default) a live command centre for local Claude Code usage.
+2. **MuchBetter Clients** a living wall of the work, as individually branded cards.
+
+Neither is a CRM and neither is a spreadsheet. Both are meant to be looked at.
 
 MuchBetter provides the system. Each client provides the visual identity.
 
@@ -69,9 +72,16 @@ muchbetter-client-wall/
 │   │   │   └── desktop-layer.ts  <- the three layer modes
 │   │   └── data/
 │   │       ├── store.ts     <- loading, error isolation, file watching
-│   │       └── obsidian.ts  <- READ-ONLY vault adapter
-│   ├── preload/index.ts     <- the only bridge, 6 methods
-│   └── renderer/            <- vanilla TS + CSS
+│   │       ├── obsidian.ts  <- READ-ONLY vault adapter
+│   │       └── usage.ts     <- Claude transcript indexer, incremental
+│   ├── preload/index.ts     <- the only bridge
+│   └── renderer/
+│       ├── main.ts          <- client wall + mode switching
+│       ├── stats.ts         <- Claude Stats view
+│       └── styles/          <- wall.css, stats.css, shell.css
+├── scripts/
+│   ├── deploy.mjs           <- THE install path. build, upgrade, verify, relaunch
+│   └── logo.mjs             <- generates the mark, icons and wordmark
 └── dist/                    <- build output
 ```
 
@@ -322,7 +332,14 @@ The wall runs 24/7. Every effect is paid continuously.
     settings alike. Notepad and PowerShell's `Set-Content -Encoding utf8` both
     write one, `JSON.parse` rejects it, and the failure is invisible: the file
     looks perfect and is silently ignored. This has now bitten twice.
-12. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
+12. **Never invent a usage metric.** If a number cannot be read out of the
+    transcripts, it does not go on the dashboard. Quota, headroom and cost are
+    all unobtainable locally and are stated as such rather than estimated.
+13. **Never break the usage-index offset invariant.** After a refresh every
+    tracked offset must equal its file size, or records get counted twice.
+14. **`npm run deploy` is the only way the app gets installed or updated.**
+    Running `release/win-unpacked` directly is what caused a stale install once.
+15. **Never use `app.setLoginItemSettings()` on Windows here.** It neither throws
     nor registers on this machine. Electron's Windows implementation is not safe
     against spaces in the profile path, and this profile has them. Write
     `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` directly via `reg.exe`,
@@ -420,6 +437,104 @@ Verified end to end: packaged exe seeded 11 files, loaded 10 clients with the on
 intentional failure, drove the Win32 layer, and rendered identically to the dev
 build.
 
+
+---
+
+## Claude Stats
+
+### Where the numbers come from
+
+Claude Code writes an **append-only JSONL transcript per session** under
+`~/.claude/projects/<slugified-cwd>/<sessionId>.jsonl`. Every assistant record
+carries a real `message.usage` block: `input_tokens`, `output_tokens`,
+`cache_creation_input_tokens`, `cache_read_input_tokens`,
+`output_tokens_details.thinking_tokens`, `server_tool_use` counts, plus model,
+timestamp, `sessionId` and `cwd`. `~/.claude/history.jsonl` separately records
+every prompt submitted.
+
+That is the whole source, and it is entirely local: **no API, no authentication,
+no network, therefore no rate limits and nothing that can go down.**
+
+Measured on this machine: **419 transcripts, 961 MB, 71,962 usage records across
+51 days, 61 sessions, 8 models.**
+
+### What was ruled out, and why
+
+| Candidate | Verdict |
+|---|---|
+| Anthropic Usage / Cost Admin API | Needs an admin API key issued to an organisation. It does not cover Claude subscription usage and no such key exists here. |
+| Remaining quota, plan limits, reset times | **Not obtainable.** A limit appears only as free text inside a transcript, indistinguishable from an assistant message *discussing* rate limiting. A first attempt at counting them reported 200, which was simply its own cap: it had matched conversations about building rate limiters. The metric was removed rather than shipped wrong. |
+| Money | On a subscription, per-token pricing is not what is billed, so a currency figure would be invented. Tokens are reported instead. |
+
+### Refresh strategy, and why polling is wrong
+
+A full parse is **961 MB in 5.5 s (174 MB/s)**, so a cold index is a one-off cost
+cached to disk. The files are append-only, so every refresh afterwards reads
+**only the bytes appended since the last read**, tracked as a byte offset per
+file. That is ~100 ms.
+
+Because of that, **polling on an interval would be strictly worse on both counts**:
+there is no server to ask and no quota to spend, so a timer can only add latency
+(up to a full interval) and waste work while idle. The trigger is instead a
+**native recursive `fs.watch`** on the transcript tree, debounced 900 ms. Windows
+supports recursive watching natively, so one watcher covers all 419 files without
+chokidar walking a 960 MB tree.
+
+**The no-double-count invariant:** after a refresh every tracked `offset` equals
+that file's `size`, so no byte can be read twice. Verified: a second refresh
+added exactly the records from the one file that grew, 23 KB of live session.
+A file that *shrank* was rewritten and its aggregates cannot be reversed, so that
+case triggers a full rebuild rather than serving numbers known to be wrong.
+
+**If the source is unavailable** the index reports `unavailable` with the reason,
+the last good cached numbers stay on screen, and the status strip turns amber.
+
+### Measured vs derived
+
+Every panel is tagged in the UI, because the distinction is the point.
+
+- **MEASURED**, straight from the transcripts: total tokens, output, cache read
+  and write, thinking tokens, requests, sessions, prompts, days active, model
+  split, per-project split, daily and hourly activity, Claude Code version.
+- **DERIVED**, with the method stated on the panel: velocity (tokens/min over a
+  trailing 10 minutes of record timestamps), context efficiency (cache reads over
+  all context tokens).
+- **Absent on purpose:** quota, headroom and cost. The status strip says so.
+
+### Motion budget
+
+The activity canvas only runs while the stats view is on screen, is frame-capped
+by performance tier (12 fps on the low tier, since software rendering repaints
+the whole surface), and calms down as Claude goes idle. `--intensity`, derived
+from real throughput, drives every glow and pulse, so an idle wall is visually
+quiet *and* cheap. Chromium already stops painting entirely when other windows
+cover the wall.
+
+### Project keys are lowercased
+
+Claude Code records `cwd` with whatever drive-letter case the shell used, so the
+same folder appeared as both `C:\...` and `c:\...` and was counted as two
+projects with the same display name. Keys are lowercased for grouping and the
+original casing is kept in `display` for reading.
+
+---
+
+## Updating
+
+**`npm run deploy` is the only install path.** It builds, packages, upgrades the
+installed app in place (per-user NSIS, silent, no admin), verifies the registry
+version matches `package.json`, prunes superseded installers and relaunches.
+
+This exists because a stale installed copy while a newer build sat in
+`release/win-unpacked` already happened once and cost real confusion: data
+changes reached the running app (they live in `%APPDATA%`) while code changes did
+not. The deploy script makes that structurally impossible, and it fails loudly if
+it ever finds more than one installation.
+
+electron-updater was considered and rejected for now: the repo is private, so the
+app would have to carry a GitHub token, a real secret shipped inside a desktop
+binary for a tool with one user who is sitting at the machine that builds it. If
+it is ever wanted on a second machine, make releases public and revisit.
 
 ---
 

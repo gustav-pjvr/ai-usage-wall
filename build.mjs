@@ -59,10 +59,9 @@ const configs = [
 async function copyStatic() {
   await fs.mkdir(path.join(dist, 'renderer/styles'), { recursive: true });
   await fs.copyFile(path.join(root, 'src/renderer/index.html'), path.join(dist, 'renderer/index.html'));
-  await fs.copyFile(
-    path.join(root, 'src/renderer/styles/wall.css'),
-    path.join(dist, 'renderer/styles/wall.css'),
-  );
+  for (const css of ['wall.css', 'stats.css', 'shell.css']) {
+    await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
+  }
 }
 
 async function run() {

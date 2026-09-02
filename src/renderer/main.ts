@@ -14,6 +14,8 @@
 import { computeLayout, type PlacedCard } from '../shared/layout';
 import { deriveBrandTokens, type BrandTokens } from '../shared/color';
 import type { Client } from '../shared/schema';
+import type { UsageIndex } from '../main/data/usage';
+import { StatsView } from './stats';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
 
@@ -33,6 +35,8 @@ interface WallState {
   };
   capability: { tier: 'low' | 'balanced' | 'high'; cores: number; memoryGb: number; gpuAccelerated: boolean; reasons: string[] };
   focusMode: boolean;
+  mode: 'stats' | 'clients';
+  appVersion: string;
   display: { id: number; width: number; height: number; scaleFactor: number; isPrimary: boolean; index: number; total: number } | null;
   win32: { available: boolean; reason: string | null };
 }
@@ -47,6 +51,9 @@ declare global {
       openExternal(url: string): Promise<void>;
       onState(cb: (state: WallState) => void): () => void;
       onDebugOpenDetail(cb: (id: string) => void): void;
+      getUsage(): Promise<UsageIndex | null>;
+      setMode(mode: string): Promise<void>;
+      onUsage(cb: (usage: UsageIndex) => void): () => void;
     };
   }
 }
@@ -54,6 +61,9 @@ declare global {
 // ── State ──────────────────────────────────────────────────────────────────
 
 const wallEl = document.getElementById('wall') as HTMLDivElement;
+const statsMount = document.getElementById('view-stats') as HTMLDivElement;
+const clientsView = document.getElementById('view-clients') as HTMLDivElement;
+const switchEl = document.getElementById('mode-switch') as HTMLElement;
 const detailEl = document.getElementById('detail') as HTMLDivElement;
 const diagEl = document.getElementById('diagnostics') as HTMLPreElement;
 
@@ -64,6 +74,9 @@ const pageEls: HTMLElement[] = [];
 let currentPage = 0;
 let pageTimer: number | null = null;
 let firstRender = true;
+let mode: 'stats' | 'clients' = 'stats';
+const statsView = new StatsView();
+statsMount.appendChild(statsView.root);
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 
@@ -723,12 +736,70 @@ function renderDiagnostics(pageCount: number): void {
   if (warns) line(`warnings  ${warns}`, 'diag-warn');
 }
 
+// ── Modes ──────────────────────────────────────────────────────────────────
+
+/**
+ * Cross-fade between the two views.
+ *
+ * Both stay mounted: the client wall keeps its DOM and its card positions, so
+ * switching back does not rebuild it or restart its entrance animation. Only
+ * the stats canvas is actually stopped, because it is the one thing that costs
+ * CPU while nobody is looking at it.
+ */
+function applyMode(next: 'stats' | 'clients', animate = true): void {
+  mode = next;
+  document.body.dataset.mode = next;
+  clientsView.classList.toggle('is-active', next === 'clients');
+  statsMount.classList.toggle('is-active', next === 'stats');
+  if (!animate) {
+    clientsView.style.transition = 'none';
+    statsMount.style.transition = 'none';
+    requestAnimationFrame(() => {
+      clientsView.style.transition = '';
+      statsMount.style.transition = '';
+    });
+  }
+  statsView.setVisible(next === 'stats');
+  renderSwitcher();
+}
+
+function renderSwitcher(): void {
+  if (switchEl.childElementCount === 0) {
+    for (const [id, label] of [
+      ['stats', 'Claude Stats'],
+      ['clients', 'Clients'],
+    ] as const) {
+      const b = el('button', 'mode-btn', label);
+      b.dataset.mode = id;
+      b.addEventListener('click', () => {
+        if (mode === id) return;
+        applyMode(id);
+        void window.wall.setMode(id);
+      });
+      switchEl.appendChild(b);
+    }
+    const thumb = el('span', 'mode-thumb');
+    switchEl.appendChild(thumb);
+  }
+  switchEl.querySelectorAll<HTMLElement>('.mode-btn').forEach((b) => {
+    b.classList.toggle('is-on', b.dataset.mode === mode);
+  });
+  switchEl.dataset.mode = mode;
+}
+
 // ── Wiring ─────────────────────────────────────────────────────────────────
 
 document.addEventListener('pointermove', onPointerMove, { passive: true });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeDetail();
+  // Tab flips views without reaching for the mouse.
+  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey) {
+    e.preventDefault();
+    const next = mode === 'stats' ? 'clients' : 'stats';
+    applyMode(next);
+    void window.wall.setMode(next);
+  }
 });
 
 let resizeTimer = 0;
@@ -743,16 +814,31 @@ window.wall.onDebugOpenDetail?.((id) => {
 });
 
 window.wall.onState((next) => {
+  const modeChanged = state?.settings && next.mode !== mode;
   state = next;
+  statsView.setPerfTier(next.capability.tier);
+  if (modeChanged) applyMode(next.mode);
   render();
 });
+
+window.wall.onUsage?.((usage) => statsView.update(usage));
 
 window.wall
   .getState()
   .then((initial) => {
     if (initial) {
       state = initial;
+      statsView.setPerfTier(initial.capability.tier);
+      // No animation on the very first paint: the view should already be there.
+      applyMode(initial.mode ?? 'stats', false);
       render();
     }
   })
   .catch((err) => console.error('[renderer] initial state failed:', err));
+
+window.wall
+  .getUsage?.()
+  .then((u) => {
+    if (u) statsView.update(u);
+  })
+  .catch((err) => console.error('[renderer] initial usage failed:', err));

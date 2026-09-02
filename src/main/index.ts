@@ -12,10 +12,19 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, screen, shell,
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { watch as watchFs, type FSWatcher } from 'node:fs';
 
 import { detectCapability, type Capability } from './capability';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { loadClients, watchClients, type StoreSnapshot } from './data/store';
+import {
+  PROJECTS_DIR,
+  emptyIndex,
+  loadIndex,
+  refreshIndex,
+  saveIndex,
+  type UsageIndex,
+} from './data/usage';
 import {
   applyLayerMode,
   detach,
@@ -43,6 +52,11 @@ let snapshot: StoreSnapshot | null = null;
 let stopWatching: (() => void) | null = null;
 let focusMode = false;
 let hidden = false;
+let usage: UsageIndex = emptyIndex();
+let usageWatcher: FSWatcher | null = null;
+let usageTimer: NodeJS.Timeout | null = null;
+let usageBusy = false;
+let usageDirty = false;
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -100,6 +114,72 @@ async function seedUserData(): Promise<void> {
     } catch (err) {
       console.warn(`[main] could not seed ${to}: ${(err as Error).message}`);
     }
+  }
+}
+
+// ── Claude usage ───────────────────────────────────────────────────────────
+
+const usageCacheFile = () => path.join(app.getPath('userData'), 'usage-index.json');
+
+/**
+ * Refresh the usage index and push it to the renderer.
+ *
+ * Serialised with a busy flag: a burst of file events during an active Claude
+ * session must not start overlapping scans over the same bytes.
+ */
+async function refreshUsage(reason: string): Promise<void> {
+  if (usageBusy) {
+    usageDirty = true;
+    return;
+  }
+  usageBusy = true;
+  try {
+    const result = await refreshIndex(usage);
+    usage = result.index;
+    if (result.rebuilt) console.log('[usage] a transcript shrank, index rebuilt from scratch');
+    await saveIndex(usageCacheFile(), usage).catch((err) =>
+      console.warn('[usage] could not write cache:', (err as Error).message),
+    );
+    if (usage.unavailable) {
+      console.warn(`[usage] source unavailable: ${usage.unavailableReason}`);
+    } else {
+      console.log(
+        `[usage] ${reason}: ${usage.totals.requests.toLocaleString()} requests, ` +
+          `${Object.keys(usage.sessions).length} sessions, scan ${usage.lastScanMs}ms`,
+      );
+    }
+    pushUsage();
+  } catch (err) {
+    console.error('[usage] refresh failed:', (err as Error).message);
+  } finally {
+    usageBusy = false;
+    if (usageDirty) {
+      usageDirty = false;
+      void refreshUsage('coalesced');
+    }
+  }
+}
+
+/**
+ * Watch the transcript tree natively and recursively.
+ *
+ * Windows supports recursive fs.watch, so one watcher covers all 419 files
+ * without chokidar walking the 960 MB tree. Debounced, because a single
+ * assistant turn produces several writes.
+ */
+function startUsageWatch(): void {
+  try {
+    usageWatcher = watchFs(PROJECTS_DIR, { recursive: true, persistent: true }, () => {
+      if (usageTimer) clearTimeout(usageTimer);
+      usageTimer = setTimeout(() => {
+        usageTimer = null;
+        void refreshUsage('transcript changed');
+      }, 900);
+    });
+    usageWatcher.on('error', (err) => console.warn('[usage] watcher error:', err.message));
+    console.log('[usage] watching', PROJECTS_DIR);
+  } catch (err) {
+    console.warn('[usage] could not watch transcripts:', (err as Error).message);
   }
 }
 
@@ -177,8 +257,29 @@ function refreshTrayMenu(): void {
 
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `MuchBetter Client Wall  (${snapshot?.clients.length ?? 0} clients)`, enabled: false },
+      {
+        label: `MuchBetter Client Wall  v${app.getVersion()}${isDev ? '  (dev)' : ''}`,
+        enabled: false,
+      },
+      { label: `${snapshot?.clients.length ?? 0} records loaded`, enabled: false },
       { type: 'separator' },
+      {
+        label: 'View',
+        submenu: [
+          {
+            label: 'Claude Stats',
+            type: 'radio' as const,
+            checked: settings.mode === 'stats',
+            click: () => void updateSettings({ mode: 'stats' }),
+          },
+          {
+            label: 'MuchBetter Clients',
+            type: 'radio' as const,
+            checked: settings.mode === 'clients',
+            click: () => void updateSettings({ mode: 'clients' }),
+          },
+        ],
+      },
       { label: hidden ? 'Show wall' : 'Hide wall', click: () => toggleHidden() },
       { label: focusMode ? 'Leave focus mode' : 'Focus mode', click: () => toggleFocusMode() },
       { type: 'separator' },
@@ -400,6 +501,8 @@ function wallState(wall: WallWindow) {
     settings,
     capability,
     focusMode,
+    mode: settings.mode,
+    appVersion: app.getVersion(),
     effectiveLayerMode: wall.effectiveMode,
     display: display
       ? {
@@ -414,6 +517,13 @@ function wallState(wall: WallWindow) {
       : null,
     win32: { available: win32Available(), reason: unavailableReason() },
   };
+}
+
+function pushUsage(): void {
+  for (const w of windows) {
+    if (w.win.isDestroyed()) continue;
+    w.win.webContents.send('wall:usage', usage);
+  }
 }
 
 function pushState(wall?: WallWindow): void {
@@ -594,6 +704,8 @@ function startWatching(): void {
 }
 
 function quit(): void {
+  if (usageTimer) clearTimeout(usageTimer);
+  usageWatcher?.close();
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
   stopWatching?.();
   globalShortcut.unregisterAll();
@@ -610,6 +722,10 @@ function registerIpc(): void {
   });
   ipcMain.handle('wall:updateSettings', (_e, patch: Partial<Settings>) => updateSettings(patch ?? {}));
   ipcMain.handle('wall:reload', () => reloadData());
+  ipcMain.handle('wall:getUsage', () => usage);
+  ipcMain.handle('wall:setMode', (_e, mode: 'stats' | 'clients') =>
+    updateSettings({ mode: mode === 'clients' ? 'clients' : 'stats' }),
+  );
   ipcMain.handle('wall:toggleFocus', () => {
     toggleFocusMode();
   });
@@ -671,6 +787,14 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     await seedUserData();
     await reloadData();
+
+    /*
+     * Load the cached usage index first so the dashboard has real numbers on
+     * screen immediately, then refresh in the background. A cold index is
+     * several seconds of parsing and must never gate the window appearing.
+     */
+    usage = await loadIndex(usageCacheFile());
+    void refreshUsage('startup').then(startUsageWatch);
     startWatching();
 
     windows = targetDisplays().map(createWindowForDisplay);

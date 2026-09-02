@@ -1,7 +1,7 @@
 {
   "name": "muchbetter-client-wall",
   "productName": "MuchBetter Client Wall",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Ambient desktop client wall for MuchBetter. A living, branded showcase of client work.",
   "author": "Gustav (MuchBetter)",
   "license": "UNLICENSED",
@@ -15,7 +15,8 @@
     "test": "node test/run.mjs",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win dir",
-    "logo": "electron scripts/logo.mjs"
+    "logo": "electron scripts/logo.mjs",
+    "deploy": "node scripts/deploy.mjs"
   },
   "dependencies": {
     "chokidar": "^4.0.3",

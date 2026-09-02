@@ -301,7 +301,7 @@ function buildTray(): void {
   if (tray) return;
   try {
     tray = new Tray(trayIcon());
-    tray.setToolTip('MuchBetter Client Wall');
+    tray.setToolTip(PRODUCT_NAME);
     refreshTrayMenu();
     tray.on('double-click', () => toggleHidden());
   } catch (err) {
@@ -819,7 +819,13 @@ function registerHotkeys(): void {
  * unlike a scheduled task. openAsHidden keeps the launch quiet.
  */
 const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
-const RUN_VALUE = 'MuchBetterClientWall';
+/*
+ * Per EDITION, not per app. Both builds shared one value name, so launching the
+ * stats build with its own settings (startWithWindows off by default) deleted
+ * the full build's login entry. Two products that install side by side must not
+ * share a single registry value.
+ */
+const RUN_VALUE = isStatsOnly ? 'ClaudeStatsWall' : 'MuchBetterClientWall';
 
 /**
  * Register (or clear) the launch-at-login entry by writing HKCU\...\Run directly.

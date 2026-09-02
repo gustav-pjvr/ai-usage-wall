@@ -30,8 +30,15 @@ module.exports = {
     'node_modules/chokidar/**/*',
     'node_modules/readdirp/**/*',
   ],
-  // Only the logo. No data/clients, no assets/clients.
-  extraResources: [{ from: 'assets/logo', to: 'assets/logo' }],
+  /*
+   * The logo AND the tray art. Shipping only assets/logo left the tray icon
+   * file missing, so `new Tray()` got an empty image and there was no tray icon
+   * at all: no menu, no way to quit, no way out of focus mode. That is the trap
+   * rule 17 exists to prevent, and it would have shipped.
+   *
+   * The filter is what keeps assets/clients (client logos) out.
+   */
+  extraResources: [{ from: 'assets', to: 'assets', filter: ['**/*', '!clients/**'] }],
   asarUnpack: ['**/node_modules/koffi/**', '**/node_modules/@koromix/**'],
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],

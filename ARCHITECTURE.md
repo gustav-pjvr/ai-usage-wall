@@ -360,11 +360,19 @@ In order of preference:
 ## Current clients (demonstration data)
 
 Ten fictional clients spanning active/prospect/paused/past/archived, deliberately
-different industries, brand colours, project types and completeness. Plus
-`zz-broken-example.json`, which is **intentionally malformed** and must stay:
-it is the live proof that one bad file costs one card. Do not "fix" it.
+different industries, brand colours, project types and completeness.
 
 `okonkwo-legal` has no brand colour at all, proving the slug-hue fallback.
+
+**A deliberately malformed `zz-broken-example.json` used to ship here** to prove
+that one bad file costs one card. It did prove it, and then it turned up as a
+permanent red error card on a real desktop after the first install, which is
+clutter rather than a demonstration. Removed. The behaviour it demonstrated is
+unchanged and still covered by the schema tests: a broken client still renders a
+card naming the parse error, it just is not seeded on purpose any more.
+
+**Do not ship intentionally broken data as a default.** Demonstrate error
+handling in tests, not on the user's screen.
 
 ---
 

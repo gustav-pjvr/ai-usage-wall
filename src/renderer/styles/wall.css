@@ -338,6 +338,41 @@ body {
   font-weight: 700;
   letter-spacing: -0.04em;
   color: var(--c-accent);
+  line-height: 1;
+}
+
+/* Four-letter acronyms like NVRC and B2MX need to step down to fit the tile. */
+.monogram[data-len='3'] {
+  font-size: clamp(10px, calc(var(--card-h) * 0.044), 16px);
+}
+.monogram[data-len='4'] {
+  font-size: clamp(8px, calc(var(--card-h) * 0.034), 13px);
+  letter-spacing: -0.02em;
+}
+
+/*
+ * Phase text, shown when a client has no progress percentage on file. It sits
+ * in the same slot the progress rule would occupy and carries the same meaning.
+ */
+.phase {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.phase-value {
+  font-size: clamp(10px, calc(var(--card-h) * 0.042), 15px);
+  font-weight: 500;
+  color: var(--c-accent);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.card[data-density='dense'] .phase {
+  display: none;
 }
 
 /* ── Status ─────────────────────────────────────────────────────────────── */

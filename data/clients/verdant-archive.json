@@ -1,0 +1,31 @@
+{
+  "id": "verdant-archive",
+  "name": "Verdant",
+  "company": "Botanical archive",
+  "state": "archived",
+  "industry": "Culture",
+  "projectType": "Microsite",
+  "project": "Digitised herbarium microsite",
+  "revenue": 31000,
+  "currency": "ZAR",
+  "hours": 47,
+  "deliverables": 6,
+  "progress": 100,
+  "startDate": "2025-04-02",
+  "endDate": "2025-07-18",
+  "currentPhase": "Archived",
+  "lastInteraction": "2025-08-01",
+  "notes": null,
+  "links": [],
+  "tags": [
+    "archive",
+    "culture"
+  ],
+  "branding": {
+    "primary": "#65A30D",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

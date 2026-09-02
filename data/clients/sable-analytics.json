@@ -1,0 +1,31 @@
+{
+  "id": "sable-analytics",
+  "name": "Sable Analytics",
+  "company": "Data consultancy",
+  "state": "prospect",
+  "industry": "Data & AI",
+  "projectType": "Platform",
+  "project": "Proposed: client reporting portal",
+  "revenue": 180000,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": null,
+  "endDate": null,
+  "currentPhase": "Proposal sent",
+  "lastInteraction": "2026-08-22",
+  "notes": "Proposal sent 22 Aug. Decision expected mid-September.",
+  "links": [],
+  "tags": [
+    "prospect",
+    "platform"
+  ],
+  "branding": {
+    "primary": "#059669",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

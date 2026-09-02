@@ -1,0 +1,31 @@
+{
+  "id": "kestrel-studio",
+  "name": "Kestrel Studio",
+  "company": "Architecture practice",
+  "state": "past",
+  "industry": "Architecture",
+  "projectType": "Portfolio",
+  "project": "Portfolio site with project archive",
+  "revenue": 86000,
+  "currency": "ZAR",
+  "hours": 134,
+  "deliverables": 17,
+  "progress": 100,
+  "startDate": "2025-09-01",
+  "endDate": "2026-01-20",
+  "currentPhase": "Delivered",
+  "lastInteraction": "2026-02-02",
+  "notes": "Delivered on time. Retainer discussion parked until their Q3.",
+  "links": [],
+  "tags": [
+    "portfolio",
+    "archive"
+  ],
+  "branding": {
+    "primary": "#404040",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

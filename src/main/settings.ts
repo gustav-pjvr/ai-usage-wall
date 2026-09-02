@@ -1,0 +1,112 @@
+/**
+ * Settings: a single JSON file next to the client data, loaded once and written
+ * atomically. Deliberately small. Every key has a working default, so a deleted
+ * or corrupt settings file costs nothing.
+ */
+
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { app } from 'electron';
+
+import type { LayerMode } from './win32/desktop-layer';
+import type { PerfTier } from './capability';
+
+export interface Settings {
+  /** Desktop layering. 'desktop' is the interactive-but-behind-apps hybrid. */
+  layerMode: LayerMode;
+  /** 'auto' inspects the machine. */
+  performance: PerfTier | 'auto';
+  /** Cards ignore the mouse entirely. Useful with layerMode 'desktop'. */
+  clickThrough: boolean;
+  /** Global hotkey to toggle focus mode. Electron accelerator syntax. */
+  hotkeyFocus: string;
+  /** Global hotkey to show/hide the wall. */
+  hotkeyToggle: string;
+  /** Launch on Windows sign-in. */
+  startWithWindows: boolean;
+  /** Wall opacity in ambient mode, 0.2 to 1. */
+  opacity: number;
+  /** Layout density multiplier. Lower packs more cards in. */
+  densityScale: number;
+  /** Seconds between ambient page changes when the wall paginates. */
+  pageRotateSeconds: number;
+  /** Which monitors to render on. Empty means all. */
+  monitors: number[];
+  clientsDir: string | null;
+  assetsDir: string | null;
+  vaultPath: string | null;
+  useVault: boolean;
+  /** Show the diagnostics overlay. */
+  debug: boolean;
+}
+
+const DEFAULTS: Settings = {
+  layerMode: 'desktop',
+  performance: 'auto',
+  clickThrough: false,
+  hotkeyFocus: 'Control+Alt+W',
+  hotkeyToggle: 'Control+Alt+Shift+W',
+  startWithWindows: false,
+  opacity: 1,
+  densityScale: 1,
+  pageRotateSeconds: 45,
+  monitors: [],
+  clientsDir: null,
+  assetsDir: null,
+  vaultPath: null,
+  useVault: true,
+  debug: false,
+};
+
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+function settingsPath(): string {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+/** Coerce anything into a valid Settings object. Never throws. */
+export function normaliseSettings(raw: unknown): Settings {
+  const r = (typeof raw === 'object' && raw !== null ? raw : {}) as Partial<Settings>;
+  const layerModes: LayerMode[] = ['wallpaper', 'desktop', 'top'];
+  const tiers = ['auto', 'low', 'balanced', 'high'];
+
+  return {
+    layerMode: layerModes.includes(r.layerMode as LayerMode) ? (r.layerMode as LayerMode) : DEFAULTS.layerMode,
+    performance: tiers.includes(r.performance as string) ? (r.performance as Settings['performance']) : 'auto',
+    clickThrough: r.clickThrough === true,
+    hotkeyFocus: typeof r.hotkeyFocus === 'string' && r.hotkeyFocus ? r.hotkeyFocus : DEFAULTS.hotkeyFocus,
+    hotkeyToggle: typeof r.hotkeyToggle === 'string' && r.hotkeyToggle ? r.hotkeyToggle : DEFAULTS.hotkeyToggle,
+    startWithWindows: r.startWithWindows === true,
+    opacity: typeof r.opacity === 'number' ? clamp(r.opacity, 0.2, 1) : DEFAULTS.opacity,
+    densityScale: typeof r.densityScale === 'number' ? clamp(r.densityScale, 0.6, 2) : DEFAULTS.densityScale,
+    pageRotateSeconds:
+      typeof r.pageRotateSeconds === 'number' ? clamp(r.pageRotateSeconds, 10, 600) : DEFAULTS.pageRotateSeconds,
+    monitors: Array.isArray(r.monitors) ? r.monitors.filter((m) => Number.isInteger(m)) : [],
+    clientsDir: typeof r.clientsDir === 'string' ? r.clientsDir : null,
+    assetsDir: typeof r.assetsDir === 'string' ? r.assetsDir : null,
+    vaultPath: typeof r.vaultPath === 'string' ? r.vaultPath : null,
+    useVault: r.useVault !== false,
+    debug: r.debug === true,
+  };
+}
+
+export async function loadSettings(): Promise<Settings> {
+  try {
+    const text = await fs.readFile(settingsPath(), 'utf8');
+    return normaliseSettings(JSON.parse(text));
+  } catch {
+    // Missing or corrupt settings is normal on first run, not an error.
+    return { ...DEFAULTS };
+  }
+}
+
+/** Atomic write: temp file then rename, so a crash cannot truncate settings. */
+export async function saveSettings(settings: Settings): Promise<void> {
+  const target = settingsPath();
+  const tmp = `${target}.tmp`;
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(tmp, JSON.stringify(normaliseSettings(settings), null, 2), 'utf8');
+  await fs.rename(tmp, target);
+}
+
+export { DEFAULTS as DEFAULT_SETTINGS };

@@ -1,0 +1,32 @@
+{
+  "id": "northwind-logistics",
+  "name": "Northwind Logistics",
+  "company": "Freight & warehousing",
+  "state": "active",
+  "industry": "Logistics",
+  "projectType": "Internal tooling",
+  "project": "Fleet telemetry dashboard and driver mobile app",
+  "revenue": 245000,
+  "currency": "ZAR",
+  "hours": 380,
+  "deliverables": 31,
+  "progress": 45,
+  "startDate": "2026-02-17",
+  "endDate": null,
+  "currentPhase": "Integration",
+  "lastInteraction": "2026-08-29",
+  "notes": "Phase 2 blocked on their ERP vendor exposing a read API. Escalated 26 Aug.",
+  "links": [],
+  "tags": [
+    "dashboard",
+    "mobile",
+    "integration"
+  ],
+  "branding": {
+    "primary": "#1D4ED8",
+    "secondary": "#1E3A8A",
+    "logo": null,
+    "images": [],
+    "motif": "grid"
+  }
+}

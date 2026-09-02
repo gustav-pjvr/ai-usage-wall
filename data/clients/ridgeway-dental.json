@@ -1,0 +1,31 @@
+{
+  "id": "ridgeway-dental",
+  "name": "Ridgeway Dental",
+  "company": "Practice group",
+  "state": "paused",
+  "industry": "Healthcare",
+  "projectType": "Website",
+  "project": "Practice site and online booking",
+  "revenue": 42000,
+  "currency": "ZAR",
+  "hours": 58,
+  "deliverables": 9,
+  "progress": 55,
+  "startDate": "2026-03-11",
+  "endDate": null,
+  "currentPhase": "Awaiting content",
+  "lastInteraction": "2026-07-04",
+  "notes": "Paused pending their copywriter. Three follow-ups sent.",
+  "links": [],
+  "tags": [
+    "healthcare",
+    "booking"
+  ],
+  "branding": {
+    "primary": "#0891B2",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

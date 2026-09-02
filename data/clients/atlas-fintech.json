@@ -1,0 +1,32 @@
+{
+  "id": "atlas-fintech",
+  "name": "Atlas",
+  "company": "Atlas Payments",
+  "state": "active",
+  "industry": "Fintech",
+  "projectType": "Design system",
+  "project": "Component library and accessibility audit",
+  "revenue": 310000,
+  "currency": "ZAR",
+  "hours": 420,
+  "deliverables": 48,
+  "progress": 34,
+  "startDate": "2026-06-15",
+  "endDate": null,
+  "currentPhase": "Foundations",
+  "lastInteraction": "2026-09-02",
+  "notes": "WCAG 2.2 AA is contractual. Every component ships with an audit note.",
+  "links": [],
+  "tags": [
+    "design-system",
+    "accessibility",
+    "fintech"
+  ],
+  "branding": {
+    "primary": "#EA580C",
+    "secondary": "#9A3412",
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  }
+}

@@ -188,7 +188,9 @@ body[data-perf='low'][data-background='gradient'] #stage::before {
   --scale: 1;
   transform: translate3d(var(--x), calc(var(--y) + var(--lift)), 0) scale(var(--scale));
   will-change: transform;
-  pointer-events: auto;
+  /* Scoped to the active view. A bare `pointer-events: auto` here re-enabled
+     hit-testing on the hidden wall and stole input from the stats view. */
+  pointer-events: none;
   transition:
     transform var(--dur-hover) var(--ease),
     box-shadow var(--dur-hover) var(--ease),
@@ -287,6 +289,10 @@ body[data-perf='low'][data-background='gradient'] #stage::before {
 }
 
 /* ── Hover ──────────────────────────────────────────────────────────────── */
+
+.view.is-active .card {
+  pointer-events: auto;
+}
 
 .wall-interactive .card:hover {
   --lift: -6px;

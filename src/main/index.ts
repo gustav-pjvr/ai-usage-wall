@@ -632,6 +632,10 @@ app.commandLine.appendSwitch('disable-features', 'Translate,MediaRouter,Optimiza
 app.commandLine.appendSwitch('disable-site-isolation-trials');
 
 if (!app.requestSingleInstanceLock()) {
+  // Another instance already owns the lock, which is keyed on userData, so a
+  // packaged install and a dev run collide. Say so: exiting silently with code
+  // 0 looks exactly like a crash and wasted real debugging time.
+  console.log('[main] another instance is already running, exiting');
   app.quit();
 } else {
   // Must happen before any window exists.

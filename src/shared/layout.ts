@@ -52,6 +52,8 @@ export interface LayoutInput {
   lastInteraction: string | null;
   /** Forces the top tier regardless of score. */
   featured?: boolean;
+  /** 'client' | 'product' | 'infrastructure' | 'personal'. See schema.ts. */
+  kind?: string;
 }
 
 export interface PlacedCard {
@@ -116,6 +118,21 @@ const STATUS_WEIGHT: Record<string, number> = {
 /** Recency half-life in days. A client untouched for 45 days is worth half. */
 const RECENCY_HALF_LIFE = 45;
 
+/**
+ * Applied as a multiplier on the final score.
+ *
+ * This is a CLIENT wall that also carries the rest of the work. A live client
+ * engagement should outrank an own-product or a personal site even when the
+ * personal site was committed to more recently, so the weighting is deliberate
+ * rather than emergent from activity alone.
+ */
+const KIND_WEIGHT: Record<string, number> = {
+  client: 1,
+  product: 0.78,
+  infrastructure: 0.55,
+  personal: 0.5,
+};
+
 const TARGET_COL_PX = 200;
 const MIN_COLS = 6;
 const MAX_COLS = 16;
@@ -131,6 +148,16 @@ const DENSE_BELOW_PX = 130;
  * (name, status, metric, progress) stops fitting honestly.
  */
 const MIN_ROW_UNIT = 62;
+
+/**
+ * Ceiling for a grid row unit.
+ *
+ * Without it, a page holding only two rows stretches them to fill the screen,
+ * so a sparse last page renders 505px cards next to a 151px card on the page
+ * before it. The pages then read as two different designs. Capping the unit and
+ * centring the leftover space keeps every page in the same visual register.
+ */
+const MAX_ROW_UNIT = 150;
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -163,7 +190,8 @@ export function scoreClient(input: LayoutInput, now: Date, maxRevenue: number): 
   }
 
   const raw = W_STATUS * status + W_REVENUE * revenue + W_RECENCY * recency + W_PROGRESS * progress;
-  return Math.round(raw * 10_000) / 10_000;
+  const kind = KIND_WEIGHT[input.kind ?? 'client'] ?? 1;
+  return Math.round(raw * kind * 10_000) / 10_000;
 }
 
 /**
@@ -316,11 +344,29 @@ export function computeLayout(inputs: LayoutInput[], opts: LayoutOptions): Layou
     Math.floor((availableH + gap) / (MIN_ROW_UNIT + gap)),
   );
 
+  /*
+   * Balance the pages rather than greedily filling each one.
+   *
+   * Greedy packing puts everything it can on page 1 and leaves the remainder on
+   * a nearly empty last page, which then stretches to fill the screen. Deciding
+   * the page count first and then aiming for an even share of rows gives every
+   * page a similar density, so the rotation does not lurch between a crowded
+   * screen and a sparse one.
+   */
+  const totalUnits = allRows.reduce((sum, r) => sum + r.height, 0);
+  const pageCount = Math.max(1, Math.ceil(totalUnits / maxRowUnitsPerPage));
+  const targetUnits = Math.ceil(totalUnits / pageCount);
+
   const pages: Row[][] = [];
   let page: Row[] = [];
   let pageUnits = 0;
   for (const row of allRows) {
-    if (page.length > 0 && pageUnits + row.height > maxRowUnitsPerPage) {
+    const wouldExceedTarget = pageUnits >= targetUnits;
+    const wouldExceedMax = pageUnits + row.height > maxRowUnitsPerPage;
+    const pagesLeft = pageCount - pages.length;
+    // Never start a new page if doing so would leave fewer rows than pages.
+    const mustFill = pagesLeft <= 1;
+    if (page.length > 0 && (wouldExceedMax || (wouldExceedTarget && !mustFill))) {
       pages.push(page);
       page = [];
       pageUnits = 0;
@@ -338,10 +384,14 @@ export function computeLayout(inputs: LayoutInput[], opts: LayoutOptions): Layou
 
   pages.forEach((pageRows, pageIndex) => {
     const pageUnitTotal = pageRows.reduce((s, r) => s + r.height, 0);
-    const rowUnit = pageUnitTotal > 0 ? (availableH - gap * (pageRows.length - 1)) / pageUnitTotal : 0;
+    const fitted = pageUnitTotal > 0 ? (availableH - gap * (pageRows.length - 1)) / pageUnitTotal : 0;
+    const rowUnit = Math.min(fitted, MAX_ROW_UNIT);
     if (pageIndex === 0) rowUnitOut = rowUnit;
 
-    let y = padding;
+    // Centre whatever vertical slack the cap leaves, so a short page sits in the
+    // middle of the screen rather than hugging the top edge.
+    const usedH = pageUnitTotal * rowUnit + gap * (pageRows.length - 1);
+    let y = padding + Math.max(0, (availableH - usedH) / 2);
     let rowStart = 0;
 
     for (const row of pageRows) {

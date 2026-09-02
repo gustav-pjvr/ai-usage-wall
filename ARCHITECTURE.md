@@ -236,8 +236,8 @@ the rest. The wall has no taskbar button, so the tray is the only affordance.
 
 `src/main/data/obsidian.ts` reads `<vault>/02-Clients/*.md`.
 
-**The vault's own conventions file records that `02-Clients/b2mx.md` contains
-client banking details, deliberately vault-only.** This wall is an ambient display
+**The vault's own conventions file records that at least one client note contains
+financial details, deliberately vault-only.** This wall is an ambient display
 that anyone walking past the desk can read. Therefore:
 
 - **Only YAML frontmatter is parsed. Note bodies are never read into memory.**

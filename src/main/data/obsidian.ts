@@ -2,9 +2,9 @@
  * Obsidian vault adapter. STRICTLY READ-ONLY.
  *
  * SECURITY, and this is not theoretical:
- * The vault's own conventions file records that `02-Clients/b2mx.md` holds
- * client banking details, deliberately vault-only. This wall is an ambient
- * display that anyone walking past the desk can read. Therefore:
+ * The vault's own conventions file records that at least one client note holds
+ * financial details, deliberately vault-only. This wall is an ambient display
+ * that anyone walking past the desk can read. Therefore:
  *
  *   - We parse ONLY YAML frontmatter. Note bodies are never read into memory,
  *     never returned, and never rendered. That is a structural guarantee, not

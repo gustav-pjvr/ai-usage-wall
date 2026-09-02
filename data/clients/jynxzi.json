@@ -1,0 +1,33 @@
+{
+  "kind": "product",
+  "company": "Fan tribute site",
+  "industry": "Creator economy",
+  "projectType": "Microsite",
+  "project": "Single-page tribute site",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": null,
+  "endDate": null,
+  "currentPhase": "Live, custom domain not cut over",
+  "lastInteraction": "2026-07-19",
+  "notes": "Single-page fan and tribute site for streamer Jynxzi. Migrated off Lovable on 2026-07-13 onto Cloudflare Workers. The vault records an open question about whether this is still actively maintained or is now a finished one-off.",
+  "links": [],
+  "tags": [
+    "own-product",
+    "fan-site"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": null,
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  },
+  "id": "jynxzi",
+  "name": "Jynxzi",
+  "state": "active"
+}

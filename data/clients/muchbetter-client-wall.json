@@ -1,0 +1,39 @@
+{
+  "kind": "product",
+  "company": "This wall",
+  "industry": "Internal tooling",
+  "projectType": "Desktop application",
+  "project": "The ambient desktop wall you are looking at",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": 42,
+  "progress": null,
+  "startDate": "2026-09-02",
+  "endDate": null,
+  "currentPhase": "v0.1.0 installed and running",
+  "lastInteraction": "2026-09-02",
+  "notes": "An Electron desktop app that renders MuchBetter's work as individually branded cards on the desktop. Electron plus koffi for Win32 access, no compiler needed. 42 regression tests over the layout engine, brand-colour derivation and schema. Deliverables here counts those tests.",
+  "links": [
+    {
+      "label": "Repo",
+      "url": "https://github.com/gustav-pjvr/muchbetter-client-wall"
+    }
+  ],
+  "tags": [
+    "internal",
+    "electron",
+    "desktop"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#00bcab",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "mesh"
+  },
+  "id": "muchbetter-client-wall",
+  "name": "Client Wall",
+  "state": "active"
+}

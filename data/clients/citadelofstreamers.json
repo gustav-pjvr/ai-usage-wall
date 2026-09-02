@@ -1,0 +1,39 @@
+{
+  "kind": "product",
+  "company": "Streamer discovery platform",
+  "industry": "Creator economy",
+  "projectType": "Web platform",
+  "project": "Leaderboards, profiles and Gem of the Day",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": 327,
+  "progress": null,
+  "startDate": null,
+  "endDate": null,
+  "currentPhase": "Live and actively iterated",
+  "lastInteraction": "2026-08-31",
+  "notes": "Own-product platform for discovering Twitch streamers: leaderboards, a Gem of the Day feature, profile pages, watchlists and an agency showcase. 327 commits, the most sustained codebase in the workspace.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://citadelofstreamers.com"
+    }
+  ],
+  "tags": [
+    "own-product",
+    "twitch",
+    "tanstack"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#c9a84c",
+    "secondary": "#5b0202",
+    "logo": null,
+    "images": [],
+    "motif": "mesh"
+  },
+  "id": "citadelofstreamers",
+  "name": "Citadel of Streamers",
+  "state": "active"
+}

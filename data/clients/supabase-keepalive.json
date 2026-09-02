@@ -1,0 +1,39 @@
+{
+  "kind": "infrastructure",
+  "company": "Shared infrastructure",
+  "industry": "Infrastructure",
+  "projectType": "Cloudflare Worker",
+  "project": "Stops every free-tier Supabase project pausing",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-08-15",
+  "endDate": null,
+  "currentPhase": "Running, cron every 6 hours",
+  "lastInteraction": "2026-08-15",
+  "notes": "One Cloudflare Worker that reads every free-tier Supabase project on a six-hourly cron, backed by a daily GitHub Actions workflow in each site's own repo. Two schedulers on purpose, so neither failing alone can pause a database. Built after R4TW's database paused on 2026-08-15.",
+  "links": [
+    {
+      "label": "Health view",
+      "url": "https://supabase-keepalive.gustavpjvr.workers.dev"
+    }
+  ],
+  "tags": [
+    "infrastructure",
+    "cloudflare",
+    "cron"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#3ecf8e",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  },
+  "id": "supabase-keepalive",
+  "name": "Supabase Keep-Alive",
+  "state": "active"
+}

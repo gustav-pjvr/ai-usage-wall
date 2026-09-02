@@ -1,8 +1,6 @@
 {
-  "id": "kickstart-football",
-  "name": "Kickstart Football",
+  "kind": "client",
   "company": null,
-  "state": "active",
   "industry": null,
   "projectType": "Website",
   "project": "Site rebuild with gallery and enquiry forms",
@@ -33,5 +31,8 @@
     "logo": null,
     "images": [],
     "motif": "grid"
-  }
+  },
+  "id": "kickstart-football",
+  "name": "Kickstart Football",
+  "state": "active"
 }

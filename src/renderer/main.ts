@@ -176,6 +176,13 @@ function applyTokens(node: HTMLElement, t: BrandTokens): void {
   node.style.setProperty('--c-hue', String(t.hue));
 }
 
+const KIND_LABEL: Record<string, string> = {
+  client: 'Client',
+  product: 'Own product',
+  infrastructure: 'Infrastructure',
+  personal: 'Personal',
+};
+
 const STATE_LABEL: Record<string, string> = {
   active: 'Active',
   prospect: 'Prospect',
@@ -227,12 +234,18 @@ function buildCard(client: Client): HTMLElement {
   head.appendChild(logo);
   inner.appendChild(head);
 
-  // Status
+  // Status, plus what kind of work this is. The kind label is deliberately
+  // quiet: it disambiguates without competing with the client's own identity.
+  const statusRow = el('div', 'status-row');
   const status = el('div', 'status');
   status.dataset.state = client.state;
   status.appendChild(el('span', 'dot'));
   status.appendChild(el('span', undefined, STATE_LABEL[client.state] ?? client.state));
-  inner.appendChild(status);
+  statusRow.appendChild(status);
+  if (client.kind && client.kind !== 'client') {
+    statusRow.appendChild(el('span', 'kind', KIND_LABEL[client.kind] ?? client.kind));
+  }
+  inner.appendChild(statusRow);
 
   // Headline. Sits directly under the status so tall cards read as two
   // deliberate blocks (identity, then measurements) rather than one block and
@@ -507,6 +520,7 @@ function render(): void {
       progress: c.progress,
       lastInteraction: c.lastInteraction,
       featured: c.featured,
+      kind: c.kind,
     })),
     { width, height, densityScale: state.settings.densityScale },
   );

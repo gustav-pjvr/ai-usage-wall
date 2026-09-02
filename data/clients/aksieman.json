@@ -1,0 +1,38 @@
+{
+  "kind": "personal",
+  "company": "Jaco's personal brand",
+  "industry": "Personal brand",
+  "projectType": "One-page site",
+  "project": "Personal brand site",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-07-22",
+  "endDate": null,
+  "currentPhase": "Live, accessibility pass done",
+  "lastInteraction": "2026-08-31",
+  "notes": "Personal brand site for Jaco Janse van Rensburg. Passionate about possibilities, turning ideas into reality. One-page static site with a warm paper palette, burnt orange accent and expanded Archivo.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://aksieman.com"
+    }
+  ],
+  "tags": [
+    "personal",
+    "static"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#c2410c",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "gradient"
+  },
+  "id": "aksieman",
+  "name": "Aksieman",
+  "state": "active"
+}

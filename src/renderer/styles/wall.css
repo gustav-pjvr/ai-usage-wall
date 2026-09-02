@@ -371,17 +371,35 @@ body {
   overflow: hidden;
 }
 
-.card[data-density='dense'] .phase {
-  display: none;
-}
+/* Phase survives at every size: it is the only status detail short cards keep. */
 
 /* ── Status ─────────────────────────────────────────────────────────────── */
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: clamp(6px, calc(var(--card-h) * 0.035), 16px);
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+}
+
+/* The kind label sits beside the status as plain text, not another pill: two
+   pills side by side would read as two statuses. */
+.kind {
+  font-size: clamp(8px, calc(var(--card-h) * 0.028), 10px);
+  font-weight: 600;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--c-fg-muted);
+  opacity: 0.65;
+  white-space: nowrap;
+}
 
 .status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: clamp(6px, calc(var(--card-h) * 0.035), 16px);
   padding: 4px 9px 4px 7px;
   border-radius: 999px;
   background: oklch(1 0 0 / 0.06);
@@ -581,15 +599,24 @@ body {
   -webkit-line-clamp: 1;
 }
 
-.card[data-density='dense'] .project,
-.card[data-density='dense'] .metrics,
+.card[data-density='dense'] .metrics .metric:nth-child(n + 2),
 .card[data-density='dense'] .card-foot,
 .card[data-density='dense'] .client-company {
   display: none;
 }
 
+/* One line each, so a short card still says what the work is and where it is. */
+.card[data-density='dense'] .project {
+  -webkit-line-clamp: 1;
+  margin-top: 7px;
+}
+
+.card[data-density='dense'] .phase-value {
+  -webkit-line-clamp: 1;
+}
+
 .card[data-density='dense'] .card-inner {
-  padding: 12px 14px;
+  padding: 11px 14px;
 }
 
 .card[data-tier='small'] .metrics {

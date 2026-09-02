@@ -19,6 +19,42 @@
 
 export type ClientState = 'active' | 'prospect' | 'paused' | 'past' | 'archived';
 
+/**
+ * What KIND of work this is, which is a different axis from `state`.
+ *
+ * The wall carries client engagements alongside MuchBetter's own products,
+ * shared infrastructure and personal projects. Without this they would all read
+ * as clients, which would be a quiet lie about the business. `state` says how
+ * alive the work is; `kind` says whose it is.
+ */
+export type ClientKind = 'client' | 'product' | 'infrastructure' | 'personal';
+
+export const CLIENT_KINDS: ClientKind[] = ['client', 'product', 'infrastructure', 'personal'];
+
+const KIND_ALIASES: Record<string, ClientKind> = {
+  client: 'client',
+  customer: 'client',
+  engagement: 'client',
+  product: 'product',
+  'own-product': 'product',
+  own: 'product',
+  internal: 'product',
+  flagship: 'product',
+  infrastructure: 'infrastructure',
+  infra: 'infrastructure',
+  ops: 'infrastructure',
+  personal: 'personal',
+  side: 'personal',
+};
+
+/** Short label shown on the card. */
+export const KIND_LABEL: Record<ClientKind, string> = {
+  client: 'Client',
+  product: 'Own product',
+  infrastructure: 'Infrastructure',
+  personal: 'Personal',
+};
+
 export const CLIENT_STATES: ClientState[] = ['active', 'prospect', 'paused', 'past', 'archived'];
 
 /** Aliases accepted on input, so hand-written data and vault values both work. */
@@ -56,6 +92,7 @@ export interface ClientBranding {
 export interface Client {
   id: string;
   name: string;
+  kind: ClientKind;
   company: string | null;
   state: ClientState;
   /** Free-text status line, e.g. 'Development'. Distinct from `state`. */
@@ -105,6 +142,7 @@ const KNOWN_KEYS = new Set([
   'type',
   'currentPhase',
   'phase',
+  'kind',
   'industry',
   'projectType',
   'project',
@@ -274,9 +312,19 @@ export function validateClient(raw: unknown, fallbackId?: string): ValidationRes
     if (!KNOWN_KEYS.has(k)) extra[k] = v;
   }
 
+  // Kind defaults to 'client', which keeps every existing record valid.
+  const rawKind = (toStringOrNull(raw.kind) ?? '').toLowerCase().trim();
+  let kind: ClientKind = 'client';
+  if (rawKind) {
+    const mappedKind = KIND_ALIASES[rawKind];
+    if (mappedKind) kind = mappedKind;
+    else issues.push({ field: 'kind', message: `unknown kind '${rawKind}', treated as client`, severity: 'warn' });
+  }
+
   const client: Client = {
     id,
     name: name ?? id,
+    kind,
     company: toStringOrNull(raw.company),
     state,
     currentPhase: toStringOrNull(raw.currentPhase) ?? toStringOrNull(raw.phase),

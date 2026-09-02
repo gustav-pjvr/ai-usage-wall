@@ -1,8 +1,6 @@
 {
-  "id": "swrc",
-  "name": "SWRC",
+  "kind": "client",
   "company": "Somerset West Run Crew",
-  "state": "paused",
   "industry": "Community running",
   "projectType": "Website",
   "project": "Single-page club site",
@@ -28,5 +26,8 @@
     "logo": null,
     "images": [],
     "motif": "gradient"
-  }
+  },
+  "id": "swrc",
+  "name": "SWRC",
+  "state": "paused"
 }

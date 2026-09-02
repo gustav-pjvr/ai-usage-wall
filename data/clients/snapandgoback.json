@@ -1,8 +1,6 @@
 {
-  "id": "snapandgoback",
-  "name": "SnapAndGoBack",
+  "kind": "client",
   "company": "SnapBack field capture",
-  "state": "active",
   "industry": "Field operations",
   "projectType": "Progressive web app",
   "project": "Offline-first incident capture for Table Mountain",
@@ -29,5 +27,8 @@
     "logo": null,
     "images": [],
     "motif": "plain"
-  }
+  },
+  "id": "snapandgoback",
+  "name": "SnapAndGoBack",
+  "state": "active"
 }

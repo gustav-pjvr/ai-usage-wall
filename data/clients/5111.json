@@ -1,0 +1,38 @@
+{
+  "kind": "product",
+  "company": "For people who perform",
+  "industry": "Brand",
+  "projectType": "Brand site",
+  "project": "Brand site for 5111",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-08-06",
+  "endDate": null,
+  "currentPhase": "Live on 5111.co.za",
+  "lastInteraction": "2026-08-31",
+  "notes": "Brand site built around the 5111 idea: Five Principles. One Mission. One Team. One Outcome. Positioned for people who perform.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://5111.co.za"
+    }
+  ],
+  "tags": [
+    "brand",
+    "own-product"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#ff8a5c",
+    "secondary": "#0d0d0f",
+    "logo": null,
+    "images": [],
+    "motif": "gradient"
+  },
+  "id": "5111",
+  "name": "5111",
+  "state": "active"
+}

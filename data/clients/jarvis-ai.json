@@ -1,0 +1,34 @@
+{
+  "kind": "product",
+  "company": "Voice assistant",
+  "industry": "Internal tooling",
+  "projectType": "Python application",
+  "project": "Voice-controlled assistant with skill architecture",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-06-22",
+  "endDate": null,
+  "currentPhase": "Single commit, dormant since June",
+  "lastInteraction": "2026-06-22",
+  "notes": "Python AI assistant with wake-word detection, speech to text, text to speech and a skill-based architecture. One commit in June 2026 and nothing since. No vault note exists for it.",
+  "links": [],
+  "tags": [
+    "python",
+    "voice",
+    "dormant"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": null,
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "plain"
+  },
+  "id": "jarvis-ai",
+  "name": "Jarvis AI",
+  "state": "paused"
+}

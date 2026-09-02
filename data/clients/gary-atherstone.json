@@ -1,8 +1,6 @@
 {
-  "id": "gary-atherstone",
-  "name": "Gary Atherstone",
+  "kind": "client",
   "company": "Commercial pilot",
-  "state": "active",
   "industry": "Aviation",
   "projectType": "CV website",
   "project": "One-page pilot CV site with self-service admin",
@@ -15,7 +13,7 @@
   "endDate": null,
   "currentPhase": "Live, custom domain pending",
   "lastInteraction": "2026-07-30",
-  "notes": "Commercial pilot based in Cape Town. Admin console lets him edit seven sections himself: contact, skills, flight hours, achievements, qualifications, experience and education. The R500 covers the domain only, the build was done at no charge. Custom domain is configured but pending zone activation.",
+  "notes": "Commercial pilot based in Cape Town. Admin console lets him edit seven sections himself: contact, skills, flight hours, achievements, qualifications, experience and education. The R500 covers the domain only, the build was done at no charge.",
   "links": [],
   "tags": [
     "cv",
@@ -29,5 +27,8 @@
     "logo": null,
     "images": [],
     "motif": "plain"
-  }
+  },
+  "id": "gary-atherstone",
+  "name": "Gary Atherstone",
+  "state": "active"
 }

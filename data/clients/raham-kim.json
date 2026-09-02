@@ -1,8 +1,6 @@
 {
-  "id": "raham-kim",
-  "name": "Raham Kim",
+  "kind": "client",
   "company": "Photographer and videographer",
-  "state": "active",
   "industry": "Photography and video",
   "projectType": "Portfolio website",
   "project": "Portfolio and booking site with admin panel",
@@ -34,5 +32,8 @@
     "logo": null,
     "images": [],
     "motif": "gradient"
-  }
+  },
+  "id": "raham-kim",
+  "name": "Raham Kim",
+  "state": "active"
 }

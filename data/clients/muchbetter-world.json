@@ -1,0 +1,39 @@
+{
+  "kind": "product",
+  "company": "Flagship company site",
+  "industry": "Company site",
+  "projectType": "Website",
+  "project": "MuchBetter IT's own site and admin",
+  "revenue": null,
+  "currency": "ZAR",
+  "hours": null,
+  "deliverables": null,
+  "progress": null,
+  "startDate": "2026-06-18",
+  "endDate": null,
+  "currentPhase": "Live and healthy",
+  "lastInteraction": "2026-08-31",
+  "notes": "The flagship company website. React and TanStack Start with SSR, Supabase, Resend and Cloudflare Workers. Migrated off Lovable on 2026-07-13. Its design language is the source the client wall's own visual system was lifted from.",
+  "links": [
+    {
+      "label": "Live site",
+      "url": "https://muchbetter.world"
+    }
+  ],
+  "tags": [
+    "flagship",
+    "tanstack",
+    "supabase"
+  ],
+  "featured": false,
+  "branding": {
+    "primary": "#0f766e",
+    "secondary": null,
+    "logo": null,
+    "images": [],
+    "motif": "gradient"
+  },
+  "id": "muchbetter-world",
+  "name": "MuchBetter World",
+  "state": "active"
+}

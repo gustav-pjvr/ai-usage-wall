@@ -1,8 +1,6 @@
 {
-  "id": "r4tw",
-  "name": "R4TW",
+  "kind": "client",
   "company": "Run For The World",
-  "state": "active",
   "industry": "Sport mission and non-profit",
   "projectType": "Website rebuild",
   "project": "Full rebuild with country ambassador event console",
@@ -34,5 +32,8 @@
     "logo": null,
     "images": [],
     "motif": "gradient"
-  }
+  },
+  "id": "r4tw",
+  "name": "R4TW",
+  "state": "active"
 }

@@ -98,3 +98,15 @@ body {
   .dot { animation: none; }
   .fill { transition: none; }
 }
+
+/*
+ * `hidden` must actually hide.
+ *
+ * .toast sets `display: flex`, and an author rule beats the user agent's
+ * `[hidden] { display: none }` whatever the specificity, so setting el.hidden
+ * changed the property and nothing else. The pill sat on the wall of a build
+ * that has no updater at all.
+ */
+[hidden] {
+  display: none !important;
+}

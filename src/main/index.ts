@@ -926,17 +926,45 @@ function ensureToastWindow(): void {
   void toastWindow.loadFile(path.join(__dirname, '..', 'renderer', 'toast.html'));
 }
 
+/**
+ * How long the "ready" toast stays up before it withdraws.
+ *
+ * It has to withdraw. 'ready' persists until the user installs, which may be
+ * days, and a panel that floats above every other window for days is not a
+ * notification, it is a nuisance. The Install pill on the wall is the part that
+ * is meant to persist, because the wall is a surface you choose to look at.
+ */
+const TOAST_READY_LINGER_MS = 9_000;
+let toastLinger: NodeJS.Timeout | null = null;
+
+function hideToast(): void {
+  if (toastLinger) {
+    clearTimeout(toastLinger);
+    toastLinger = null;
+  }
+  if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
+}
+
 /** Show the toast only while there is something in flight worth showing. */
 function syncToast(u: UpdateState): void {
   const wanted = u.phase === 'downloading' || u.phase === 'ready';
   if (!wanted) {
-    if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
+    hideToast();
     return;
   }
   ensureToastWindow();
   if (!toastWindow || toastWindow.isDestroyed()) return;
   if (!toastWindow.isVisible()) toastWindow.showInactive();
   toastWindow.webContents.send('wall:update', u);
+
+  if (u.phase === 'ready') {
+    // Announce once, then withdraw and leave the pill to it.
+    if (!toastLinger) toastLinger = setTimeout(hideToast, TOAST_READY_LINGER_MS);
+  } else if (toastLinger) {
+    // A download that started again outranks a pending withdrawal.
+    clearTimeout(toastLinger);
+    toastLinger = null;
+  }
 }
 
 /** One push, every surface. Safe to call on every state change. */
@@ -1319,6 +1347,7 @@ function startWatching(): void {
 function quit(): void {
   stopUpdater();
   stopDesktopWatch();
+  if (toastLinger) clearTimeout(toastLinger);
   if (toastWindow && !toastWindow.isDestroyed()) toastWindow.destroy();
   projection.stopProjection();
   if (usageTimer) clearTimeout(usageTimer);

@@ -81,6 +81,14 @@ const configs = [
     entryPoints: [path.join(root, 'src/renderer/pair.ts')],
     outfile: path.join(dist, 'renderer/pair.js'),
   },
+  {
+    ...common,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome120',
+    entryPoints: [path.join(root, 'src/renderer/toast.ts')],
+    outfile: path.join(dist, 'renderer/toast.js'),
+  },
 ];
 
 /*
@@ -94,7 +102,8 @@ async function copyStatic() {
   await fs.mkdir(path.join(dist, 'renderer/styles'), { recursive: true });
   await fs.copyFile(path.join(root, 'src/renderer/index.html'), path.join(dist, 'renderer/index.html'));
   await fs.copyFile(path.join(root, 'src/renderer/pair.html'), path.join(dist, 'renderer/pair.html'));
-  for (const css of ['wall.css', 'stats.css', 'shell.css', 'pair.css']) {
+  await fs.copyFile(path.join(root, 'src/renderer/toast.html'), path.join(dist, 'renderer/toast.html'));
+  for (const css of ['wall.css', 'stats.css', 'shell.css', 'pair.css', 'toast.css']) {
     await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
   }
 }

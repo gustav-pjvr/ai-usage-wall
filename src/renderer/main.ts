@@ -57,6 +57,8 @@ declare global {
       setMode(mode: string): Promise<void>;
       onUsage(cb: (usage: UsageIndex) => void): () => void;
       onUsageProgress(cb: (p: { done: number; total: number; bytesDone: number; bytesTotal: number }) => void): () => void;
+      onUpdate(cb: (s: { phase: string; version?: string; percent?: number }) => void): () => void;
+      installUpdate(): Promise<void>;
     };
   }
 }
@@ -972,3 +974,45 @@ window.wall
     if (u) statsView.update(u);
   })
   .catch((err) => console.error('[renderer] initial usage failed:', err));
+
+
+/*
+ * The Install pill.
+ *
+ * An update that has downloaded itself is useless if the only way to learn
+ * about it is a tray menu nobody opens, so the wall says so directly and the
+ * click that installs happens here rather than in the floating toast. The toast
+ * cannot be clicked on purpose: it sits above other applications, and a window
+ * that intercepts a click while you are working elsewhere is worse than one
+ * that only informs.
+ *
+ * Click-through is honoured rather than worked around. When the wall is set to
+ * pass clicks through, nothing on it is clickable, links on client cards
+ * included, and this is not the feature that gets to make an exception. The
+ * pill is still shown, because knowing is useful even when the action has to
+ * come from the tray.
+ */
+function installPill(): HTMLButtonElement {
+  const pill = el('button', 'update-pill');
+  pill.type = 'button';
+  pill.hidden = true;
+  pill.append(el('span', 'update-pill-dot'), el('span', 'update-pill-label', 'Install update'));
+  pill.addEventListener('click', () => {
+    pill.disabled = true;
+    pill.querySelector('.update-pill-label')!.textContent = 'Installing';
+    void window.wall.installUpdate();
+  });
+  document.body.appendChild(pill);
+  return pill;
+}
+
+{
+  const pill = installPill();
+  window.wall.onUpdate?.((u) => {
+    const ready = u.phase === 'ready';
+    pill.hidden = !ready;
+    if (ready && !pill.disabled) {
+      pill.title = `Version ${u.version ?? ''} is downloaded and ready to install`.replace('  ', ' ');
+    }
+  });
+}

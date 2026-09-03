@@ -27,6 +27,13 @@ const api = {
   onDebugOpenDetail: (cb: (id: string) => void) => {
     ipcRenderer.on('wall:debugOpenDetail', (_e, id: string) => cb(id));
   },
+  /** Update state, pushed whenever it changes, for the Install pill. */
+  onUpdate: (cb: (s: unknown) => void) => {
+    const listener = (_e: unknown, s: unknown) => cb(s);
+    ipcRenderer.on('wall:update', listener);
+    return () => ipcRenderer.removeListener('wall:update', listener);
+  },
+  installUpdate: () => ipcRenderer.invoke('wall:installUpdate'),
   onState: (cb: (state: unknown) => void) => {
     const listener = (_e: unknown, state: unknown) => cb(state);
     ipcRenderer.on('wall:state', listener);
@@ -59,3 +66,13 @@ contextBridge.exposeInMainWorld('pair', {
 });
 
 export type WallApi = typeof api;
+
+/*
+ * The toast window's bridge. It receives update state and nothing else: it has
+ * no actions, because the thing you click is the pill on the wall.
+ */
+contextBridge.exposeInMainWorld('updateToast', {
+  onUpdate: (cb: (s: unknown) => void) => {
+    ipcRenderer.on('wall:update', (_e, s) => cb(s));
+  },
+});

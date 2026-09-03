@@ -1083,3 +1083,57 @@ body[data-perf='low'][data-background='gradient'] #stage::before {
     transition: none;
   }
 }
+
+/*
+ * Install pill. Bottom-centre, above the wall content but out of the way of it,
+ * and only present when an update is actually staged.
+ */
+.update-pill {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 16px 9px 13px;
+  border-radius: 999px;
+  border: 1px solid oklch(0.45 0.05 150);
+  background: oklch(0.22 0.02 250 / 0.94);
+  color: oklch(0.94 0.01 250);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow: 0 8px 26px oklch(0 0 0 / 0.42);
+  animation: pill-in 0.35s ease both;
+}
+
+.update-pill:hover:not(:disabled) {
+  border-color: oklch(0.62 0.1 150);
+  background: oklch(0.26 0.025 250 / 0.96);
+}
+
+.update-pill:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.update-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: oklch(0.78 0.17 145);
+  flex: 0 0 auto;
+}
+
+@keyframes pill-in {
+  from { opacity: 0; transform: translate(-50%, 8px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .update-pill { animation: none; }
+}

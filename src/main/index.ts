@@ -17,7 +17,15 @@ import { watch as watchFs, type FSWatcher } from 'node:fs';
 import { detectCapability, type Capability } from './capability';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { PRODUCT_NAME, isStatsOnly } from '../shared/edition';
-import { checkNow, installNow, startUpdater, stopUpdater, updateLabel, updateState } from './updater';
+import {
+  checkNow,
+  installNow,
+  startUpdater,
+  stopUpdater,
+  updateLabel,
+  updateState,
+  type UpdateState,
+} from './updater';
 import * as projection from './projection';
 import { loadClients, watchClients, type StoreSnapshot } from './data/store';
 import {
@@ -38,6 +46,7 @@ import {
   verifyLayer,
   type LayerMode,
 } from './win32/desktop-layer';
+import { assessPlacement, placeAboveDesktop } from './win32/desktop-watch';
 import { hwndFromBuffer, isAvailable as win32Available, readHkcuDword, unavailableReason } from './win32/ffi';
 
 const isDev = !app.isPackaged;
@@ -703,11 +712,16 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     maybeCapture(wall);
   });
 
-  // Re-assert bottom placement only on the events that can disturb it.
+  // Re-assert bottom placement on the one window event that can disturb it.
+  // Show Desktop disturbs it with no event at all; startDesktopWatch() covers that.
   win.on('show', () => {
     // effectiveMode, not settings.layerMode: what the window is actually in is
     // what decides whether re-anchoring above Progman is the right move.
     if (!focusMode && wall.effectiveMode === 'desktop' && wall.hwnd) sinkToBottom(wall.hwnd);
+  });
+
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.send('wall:update', updateState());
   });
 
   win.on('closed', () => {
@@ -847,6 +861,174 @@ function rebuildWindows(): void {
     if (!w.win.isDestroyed()) w.win.destroy();
   }
   windows = targetDisplays().map(createWindowForDisplay);
+}
+
+// ── Update notification ───────────────────────────────────────
+
+/*
+ * Two surfaces, because they answer two different questions.
+ *
+ * The TOAST floats above other applications and answers "is something
+ * happening". It appears while a download runs, cannot be focused or clicked,
+ * and hides itself once there is nothing to report. It is deliberately not the
+ * thing you act on: a window that steals a click while you are working in
+ * another app is exactly the behaviour this project keeps refusing to ship.
+ *
+ * The PILL on the wall answers "do I want this now" and is the only place the
+ * install can actually be triggered, so the decision happens on the surface the
+ * user chose to look at, in their own time.
+ *
+ * Both are driven by the same pushUpdate(), so they can never disagree.
+ */
+let toastWindow: BrowserWindow | null = null;
+
+const TOAST_W = 268;
+const TOAST_H = 88;
+const TOAST_MARGIN = 18;
+
+function ensureToastWindow(): void {
+  if (toastWindow && !toastWindow.isDestroyed()) return;
+  const area = screen.getPrimaryDisplay().workArea;
+  toastWindow = new BrowserWindow({
+    width: TOAST_W,
+    height: TOAST_H,
+    x: area.x + area.width - TOAST_W - TOAST_MARGIN,
+    y: area.y + area.height - TOAST_H - TOAST_MARGIN,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    hasShadow: false,
+    // Keeps it out of Alt+Tab, same reasoning as the wall.
+    type: 'toolbar',
+    backgroundColor: '#00000000',
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      devTools: isDev,
+    },
+  });
+  toastWindow.setMenu(null);
+  // Above other apps, but never taking a click away from them.
+  toastWindow.setAlwaysOnTop(true, 'screen-saver');
+  toastWindow.setIgnoreMouseEvents(true);
+  toastWindow.on('closed', () => {
+    toastWindow = null;
+  });
+  void toastWindow.loadFile(path.join(__dirname, '..', 'renderer', 'toast.html'));
+}
+
+/** Show the toast only while there is something in flight worth showing. */
+function syncToast(u: UpdateState): void {
+  const wanted = u.phase === 'downloading' || u.phase === 'ready';
+  if (!wanted) {
+    if (toastWindow && !toastWindow.isDestroyed()) toastWindow.hide();
+    return;
+  }
+  ensureToastWindow();
+  if (!toastWindow || toastWindow.isDestroyed()) return;
+  if (!toastWindow.isVisible()) toastWindow.showInactive();
+  toastWindow.webContents.send('wall:update', u);
+}
+
+/** One push, every surface. Safe to call on every state change. */
+function pushUpdate(): void {
+  const u = updateState();
+  for (const w of windows) {
+    if (!w.win.isDestroyed()) w.win.webContents.send('wall:update', u);
+  }
+  syncToast(u);
+}
+
+// ── Show Desktop watchdog ──────────────────────────────────────
+
+/*
+ * Show Desktop (the strip at the far right of the taskbar, or Win+D) does not
+ * touch the wall: it is a tool window with no minimise box, and on the machine
+ * where this was measured it stayed visible, placed and non-iconic through both
+ * MinimizeAll and ToggleDesktop. What moves is the DESKTOP. The shell puts it
+ * above the windows that did not minimise, the wall included, and the wall is
+ * then behind the wallpaper until the show-desktop state ends.
+ *
+ * Gustav found it on a second machine and pinned the mechanism without a
+ * debugger: the wall comes back only when you open an app and then minimise it,
+ * which is exactly the gesture that cancels the show-desktop state, and the
+ * tray icon never goes away. A painting fault would have been cured by any
+ * repaint; only that one state transition cures this.
+ *
+ * The wall gets no window message for that, so it polls. Each tick walks the
+ * Z order DOWN from the wall to the desktop host, one or two steps when all is
+ * well, and acts on exactly two findings:
+ *
+ *   - the host is not below the wall: it has been raised over it. Put the wall
+ *     directly above wherever the host is now.
+ *   - an ordinary visible window sits between the wall and the host: the wall
+ *     is above an app, which desktop mode never wants. Same placement, which
+ *     drops the wall back under that app.
+ *
+ * Edge-triggered: a situation is acted on once, keyed by what was seen. If the
+ * placement did not take, the same situation is not retried every tick, and a
+ * legitimately odd shell layout costs one SetWindowPos, not a fight. Focus
+ * mode, a non-desktop layer mode and a hidden wall are skipped outright, so the
+ * Control+Alt+W hotkey never has to compete with this.
+ */
+const DESKTOP_WATCH_MS = 250;
+let desktopWatch: NodeJS.Timeout | null = null;
+/** Per wall HWND: the last placement signature seen, acted on or not. */
+const desktopWatchSeen = new Map<number, string>();
+
+function watchDesktopOnce(): void {
+  if (focusMode || hidden) {
+    desktopWatchSeen.clear();
+    return;
+  }
+  const own = new Set<number>();
+  for (const w of windows) if (w.hwnd) own.add(w.hwnd);
+  for (const key of desktopWatchSeen.keys()) if (!own.has(key)) desktopWatchSeen.delete(key);
+
+  for (const wall of windows) {
+    if (!wall.hwnd || wall.effectiveMode !== 'desktop' || wall.win.isDestroyed()) continue;
+    try {
+      const seen = assessPlacement(wall.hwnd, own);
+      if (!seen) continue;
+      const wrong = seen.desktopAbove || seen.between.length > 0;
+      if (!wrong || desktopWatchSeen.get(wall.hwnd) === seen.signature) {
+        desktopWatchSeen.set(wall.hwnd, seen.signature);
+        continue;
+      }
+      const ok = placeAboveDesktop(wall.hwnd, seen.host);
+      console.log(
+        `[desktop-watch] ${
+          seen.desktopAbove
+            ? 'desktop was above the wall'
+            : `${seen.between.length} window(s) between the wall and the desktop`
+        }; re-placed above ${seen.hostClass} ${ok ? 'ok' : 'FAILED'}`,
+      );
+      const after = assessPlacement(wall.hwnd, own);
+      desktopWatchSeen.set(wall.hwnd, after?.signature ?? seen.signature);
+    } catch (err) {
+      console.warn('[desktop-watch] check failed:', (err as Error).message);
+    }
+  }
+}
+
+function startDesktopWatch(): void {
+  if (!win32Available() || desktopWatch) return;
+  desktopWatch = setInterval(watchDesktopOnce, DESKTOP_WATCH_MS);
+  desktopWatch.unref?.();
+}
+
+function stopDesktopWatch(): void {
+  if (desktopWatch) clearInterval(desktopWatch);
+  desktopWatch = null;
 }
 
 // ── State push ─────────────────────────────────────────────────────────────
@@ -1136,6 +1318,8 @@ function startWatching(): void {
 
 function quit(): void {
   stopUpdater();
+  stopDesktopWatch();
+  if (toastWindow && !toastWindow.isDestroyed()) toastWindow.destroy();
   projection.stopProjection();
   if (usageTimer) clearTimeout(usageTimer);
   usageWatcher?.close();
@@ -1163,6 +1347,12 @@ function registerIpc(): void {
     // or a stray renderer message can never strand it on an empty client wall.
     updateSettings({ mode: !isStatsOnly && mode === 'clients' ? 'clients' : 'stats' }),
   );
+  ipcMain.handle('wall:installUpdate', () => {
+    // Guarded on state, not on the caller: the pill is only rendered when an
+    // update is staged, but a stale renderer must not be able to quit the app.
+    if (updateState().phase === 'ready') installNow();
+  });
+
   ipcMain.handle('wall:toggleFocus', () => {
     toggleFocusMode();
   });
@@ -1318,11 +1508,13 @@ if (!app.requestSingleInstanceLock()) {
     if (!isStatsOnly) startWatching();
 
     windows = targetDisplays().map(createWindowForDisplay);
+    startDesktopWatch();
     buildTray();
     // After the tray, so a state change has a menu to refresh.
     startUpdater(
       () => {
         refreshTrayMenu();
+        pushUpdate();
         // The tooltip is the one update surface visible without opening a menu.
         const u = updateState();
         if (tray && !tray.isDestroyed()) {

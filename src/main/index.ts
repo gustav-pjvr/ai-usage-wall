@@ -364,6 +364,15 @@ function buildTray(): void {
     tray.setToolTip(PRODUCT_NAME);
     refreshTrayMenu();
     tray.on('double-click', () => toggleHidden());
+    /*
+     * Clicking the notification acts on it. The balloon is shared with the
+     * layer-mode warning, so the update state is what decides, not the click:
+     * anything other than a staged update must do nothing rather than restart
+     * the wall out from under someone dismissing an unrelated message.
+     */
+    tray.on('balloon-click', () => {
+      if (updateState().phase === 'ready') installNow();
+    });
     trayIsDark = taskbarIsDark();
     console.log(`[tray] using the ${trayIsDark ? 'dark' : 'light'} mark`);
 
@@ -1311,7 +1320,17 @@ if (!app.requestSingleInstanceLock()) {
     windows = targetDisplays().map(createWindowForDisplay);
     buildTray();
     // After the tray, so a state change has a menu to refresh.
-    startUpdater(() => refreshTrayMenu());
+    startUpdater(
+      () => {
+        refreshTrayMenu();
+        // The tooltip is the one update surface visible without opening a menu.
+        const u = updateState();
+        if (tray && !tray.isDestroyed()) {
+          tray.setToolTip(u.phase === 'ready' ? `${PRODUCT_NAME}  ·  update ready, restart to install` : PRODUCT_NAME);
+        }
+      },
+      (title, content) => tray?.displayBalloon?.({ title, content }),
+    );
     registerHotkeys();
     applyStartup();
 

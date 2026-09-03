@@ -43,6 +43,18 @@ export type UpdateState =
   | { phase: 'ready'; version: string }
   | { phase: 'error'; message: string; checkedAt: number };
 
+/**
+ * How the user is TOLD, as opposed to how the tray menu is refreshed.
+ *
+ * The updater checked, downloaded and staged an update entirely correctly and
+ * entirely invisibly: the only sign was a label inside a tray menu nobody had a
+ * reason to open. An update that installs itself is fine; an update the user
+ * cannot know about is not, because "restart when convenient" is their decision
+ * to make and they were never offered it.
+ */
+type Announce = (title: string, body: string) => void;
+let tell: Announce = () => {};
+
 let state: UpdateState = { phase: 'idle' };
 let timer: NodeJS.Timeout | null = null;
 let onChange: (s: UpdateState) => void = () => {};
@@ -63,8 +75,9 @@ function set(next: UpdateState): void {
  * Start checking. Safe to call in any edition: it returns immediately unless
  * this is a packaged stats build.
  */
-export function startUpdater(notify: (s: UpdateState) => void): void {
+export function startUpdater(notify: (s: UpdateState) => void, announce?: Announce): void {
   onChange = notify;
+  if (announce) tell = announce;
 
   if (!app.isPackaged) {
     console.log('[update] skipped: development build');
@@ -111,6 +124,10 @@ export function startUpdater(notify: (s: UpdateState) => void): void {
   autoUpdater.on('update-downloaded', (info) => {
     console.log(`[update] ${info.version} ready, will install on quit`);
     set({ phase: 'ready', version: info.version });
+    tell(
+      `${PRODUCT_NAME} ${info.version} is ready`,
+      'It installs when you next quit, or right away from the tray menu.',
+    );
   });
   autoUpdater.on('error', (err) => {
     // Offline, a proxy, or a feed that is not there yet. None of these are

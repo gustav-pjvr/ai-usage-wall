@@ -31,9 +31,21 @@ import { isStatsOnly, PRODUCT_NAME } from '../shared/edition';
 const FEED_URL = 'https://claude-stats-wall.gustavpjvr.workers.dev/updates/';
 
 /** First check after this long, so it never competes with the cold index. */
-const FIRST_CHECK_MS = 90_000;
-/** Then this often. Daily is plenty for a tool that ships occasionally. */
-const RECHECK_MS = 6 * 60 * 60 * 1000;
+const FIRST_CHECK_MS = 15_000;
+/*
+ * Then every minute, at Gustav's request, so a release reaches a running wall
+ * in about a minute instead of up to six hours.
+ *
+ * What this costs, since "will this eat into a limit somewhere" was the actual
+ * question: nothing that touches Claude. The feed is Gustav's own Cloudflare
+ * Worker in front of an R2 bucket, and a check is one conditional GET of a
+ * latest.yml a few hundred bytes long. One install is 1,440 requests a day
+ * against a free-plan allowance of 100,000 Worker requests a day and 10 million
+ * R2 reads a month, so roughly sixty installs would fit inside the Worker
+ * allowance before anything had to change. The installer itself is only fetched
+ * when the version actually moves.
+ */
+const RECHECK_MS = 60_000;
 
 export type UpdateState =
   | { phase: 'idle' }

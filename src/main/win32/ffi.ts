@@ -44,6 +44,7 @@ export const WS_EX_NOACTIVATE = 0x08000000;
 export const WS_EX_TRANSPARENT = 0x00000020;
 export const WS_EX_LAYERED = 0x00080000;
 export const WS_EX_APPWINDOW = 0x00040000;
+export const WS_EX_TOPMOST = 0x00000008;
 
 export const HWND_TOP = 0;
 export const HWND_BOTTOM = 1;
@@ -55,6 +56,10 @@ export const SWP_NOMOVE = 0x0002;
 export const SWP_NOACTIVATE = 0x0010;
 export const SWP_NOOWNERZORDER = 0x0200;
 export const SWP_SHOWWINDOW = 0x0040;
+
+/** GetWindow() commands: the window directly below / directly above in the Z order. */
+export const GW_HWNDNEXT = 2;
+export const GW_HWNDPREV = 3;
 
 /** GetAncestor flags. GA_PARENT is the real parent; GA_ROOT walks to the top. */
 export const GA_PARENT = 1;
@@ -77,6 +82,8 @@ export const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 
 interface Win32Api {
   FindWindowW(cls: string | null, win: string | null): Hwnd;
+  FindWindowExW(parent: Hwnd, after: Hwnd, cls: string | null, win: string | null): Hwnd;
+  GetWindow(h: Hwnd, cmd: number): Hwnd;
   GetClassNameW(h: Hwnd, buf: Buffer, n: number): number;
   SetParent(child: Hwnd, parent: Hwnd): Hwnd;
   /*
@@ -120,6 +127,10 @@ function build(): Win32Api | null {
 
   return {
     FindWindowW: user32.func('intptr_t __stdcall FindWindowW(const char16_t *cls, const char16_t *win)') as never,
+    FindWindowExW: user32.func(
+      'intptr_t __stdcall FindWindowExW(intptr_t parent, intptr_t after, const char16_t *cls, const char16_t *win)',
+    ) as never,
+    GetWindow: user32.func('intptr_t __stdcall GetWindow(intptr_t h, uint32_t cmd)') as never,
     GetClassNameW: user32.func('int __stdcall GetClassNameW(intptr_t h, _Out_ char16_t *buf, int n)') as never,
     SetParent: user32.func('intptr_t __stdcall SetParent(intptr_t child, intptr_t parent)') as never,
     GetAncestor: user32.func('intptr_t __stdcall GetAncestor(intptr_t h, uint32_t flags)') as never,

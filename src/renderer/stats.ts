@@ -580,11 +580,10 @@ export class StatsView {
     const liveWrap = el('div', 'live-wrap');
     liveWrap.appendChild(this.canvas.node);
     const liveFoot = el('div', 'live-foot');
-    liveFoot.appendChild(el('span', 'live-scale', 'last 20 minutes'));
     liveFoot.appendChild(el('span', 'live-state', ''));
     liveWrap.appendChild(liveFoot);
     liveWrap.appendChild(
-      el('div', 'live-explain', 'each column is 8 seconds of token throughput, newest on the right'),
+      el('div', 'live-explain', 'Tokens per 8sec column over the last 20 minutes'),
     );
     live.appendChild(liveWrap);
     grid.appendChild(live);

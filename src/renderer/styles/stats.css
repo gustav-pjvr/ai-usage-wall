@@ -263,7 +263,8 @@
 
 .live-foot {
   display: flex;
-  justify-content: space-between;
+  /* One child since the scale label went: keep the state hard right. */
+  justify-content: flex-end;
   font-family: var(--mono);
   font-size: 10.5px;
   letter-spacing: 0.08em;

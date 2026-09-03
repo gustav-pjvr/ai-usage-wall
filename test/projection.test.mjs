@@ -143,6 +143,7 @@ console.log('\nprojection wire: nothing identifying may reach the network');
   ok('no projects are sent at all', Object.keys(shy.projects).length === 0 && shy.projectsShared === false);
   ok('the totals still arrive', shy.totals.requests === 6);
   ok('and nothing leaks by another route', !JSON.stringify(shy).includes('HP 865'));
+  ok('latest.project is null when sharing is off, whatever folder is open now', shy.latest.project === null);
 
   console.log('\n  the safe direction to fail in');
   const sneaky = toWire(
@@ -157,6 +158,29 @@ console.log('\nprojection wire: nothing identifying may reach the network');
   ok('the indexing flag crosses the wire (rule 15)',
      fromWire(toWire(index, { shareProjectNames: true, sourceLabel: '', indexing: true })).indexing === true);
   ok('fromWire reintroduces no path', !JSON.stringify(back).includes('HP 865'));
+}
+
+console.log('\nthe home directory is never a label');
+{
+  const HOME = ['C:', 'Users', 'Demo User'].join('\\');
+  const homeIndex = {
+    ...index,
+    projects: {
+      [HOME.toLowerCase()]: { ...T(2), lastSeen: '2026-09-03T07:00:00.000Z', display: HOME },
+      [(HOME + '\\notes').toLowerCase()]: { ...T(1), lastSeen: '2026-09-02T07:00:00.000Z', display: HOME + '\\notes' },
+      'd:\\other\\notes': { ...T(1), lastSeen: '2026-09-01T07:00:00.000Z', display: 'D:\\other\\notes' },
+    },
+    latest: { ...index.latest, cwd: HOME },
+  };
+  // Passed in a different case from the path on purpose: index keys are
+  // lowercased and display strings are not, so the comparison must not care.
+  const w = toWire(homeIndex, { shareProjectNames: true, sourceLabel: '', indexing: false, homeDirName: 'demo user' });
+  const labels = Object.keys(w.projects).sort().join(',');
+  ok('a project run from the home folder is labelled home, not the username', w.projects.home?.requests === 2, labels);
+  ok('a username parent prefix is masked too',
+     w.projects['home / notes']?.requests === 1 && w.projects['other / notes']?.requests === 1, labels);
+  ok('latest.project is masked the same way', w.latest.project === 'home', String(w.latest.project));
+  ok('the username survives nowhere in the frame', !JSON.stringify(w).toLowerCase().includes('hp 865'));
 }
 
 console.log('\nproject labels');

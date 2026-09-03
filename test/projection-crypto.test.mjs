@@ -2,7 +2,7 @@
  * Pairing code and projection crypto.
  *
  * These assertions are the security argument, written down as things that fail
- * loudly. The two that matter most:
+ * loudly. The three that matter most:
  *
  *   "a different code derives a different key" is what makes a guessed pairing
  *   code useless even to someone who got onto the socket.
@@ -10,10 +10,15 @@
  *   "a substituted key pair does not agree with the source" is what stops a
  *   malicious relay standing in the middle of the exchange.
  *
+ *   "the lookup is NOT a plain SHA-256 of the code" is what stops that relay
+ *   recovering the code at hash speed from the lookup it stores, which would
+ *   have made the other two irrelevant.
+ *
  *   node test/projection-crypto.test.mjs
  */
 
 import * as esbuild from 'esbuild';
+import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -82,26 +87,48 @@ console.log('\npairing codes');
 console.log('\nprojection crypto');
 {
   const code = codes.generateCode(cx.randomBytes);
-  const lookup = cx.lookupOf(code);
+  const t0 = performance.now();
+  const stretched = cx.stretchCode(code);
+  const stretchMs = performance.now() - t0;
+  const lookup = cx.lookupFromStretched(stretched);
 
   ok('the relay only ever sees a short one-way digest', lookup.length === 22 && !lookup.includes(code.slice(0, 5)));
-  ok('the digest is stable', cx.lookupOf(code) === lookup);
-  ok('a different code gives a different digest', cx.lookupOf(codes.generateCode(cx.randomBytes)) !== lookup);
+  ok('the digest is stable', cx.lookupFromStretched(cx.stretchCode(code)) === lookup);
+  ok('a different code gives a different digest',
+     cx.lookupFromStretched(cx.stretchCode(codes.generateCode(cx.randomBytes))) !== lookup);
+
+  /*
+   * Regression for the lookup bypass. Version 1 sent the relay
+   * sha256('csw-lookup-v1' + code), so the relay, which stores every lookup,
+   * could test candidate codes at hash speed and pay scrypt only for the one
+   * that matched. The lookup must not be reproducible from the raw code by
+   * anything cheaper than the stretch.
+   */
+  const v1Lookup = createHash('sha256').update('csw-lookup-v1' + code).digest('base64url').slice(0, 22);
+  ok('the lookup is NOT a plain SHA-256 of the code (the version 1 bypass)', lookup !== v1Lookup);
+  const bareLookup = createHash('sha256').update(code).digest('base64url').slice(0, 22);
+  ok('nor an unprefixed SHA-256 of it', lookup !== bareLookup);
+  ok('the stretch is 32 bytes and costs real time', stretched.length === 32 && stretchMs > 10,
+     `${stretchMs.toFixed(0)} ms`);
+  console.log(`        (one scrypt took ${stretchMs.toFixed(0)} ms)`);
+  ok('the crypto version was bumped for the new schedule', cx.CRYPTO_VERSION === 2);
 
   const src = cx.newKeyPair();
   const scr = cx.newKeyPair();
-  const kSrc = cx.deriveScreenKey(src.privateKey, scr.publicKey, code, lookup);
-  const kScr = cx.deriveScreenKey(scr.privateKey, src.publicKey, code, lookup);
+  const kSrc = cx.deriveScreenKey(src.privateKey, scr.publicKey, stretched, lookup);
+  const kScr = cx.deriveScreenKey(scr.privateKey, src.publicKey, stretched, lookup);
   ok('both machines derive the same 256-bit key', kSrc.equals(kScr) && kSrc.length === 32);
 
   // The property that makes a guessed code useless even after connecting.
-  const wrongCode = cx.deriveScreenKey(scr.privateKey, src.publicKey, codes.generateCode(cx.randomBytes), lookup);
+  const wrongCode = cx.deriveScreenKey(
+    scr.privateKey, src.publicKey, cx.stretchCode(codes.generateCode(cx.randomBytes)), lookup,
+  );
   ok('a different code derives a different key', !wrongCode.equals(kScr));
 
   // The property that stops a relay standing in the middle: substituting its
   // own key gives it a key the source is not using.
   const mitm = cx.newKeyPair();
-  const kMitm = cx.deriveScreenKey(mitm.privateKey, src.publicKey, code, lookup);
+  const kMitm = cx.deriveScreenKey(mitm.privateKey, src.publicKey, stretched, lookup);
   ok('a substituted key pair does not agree with the source', !kMitm.equals(kSrc));
 
   const payload = { totals: { requests: 42 }, note: 'from the source' };
@@ -109,6 +136,7 @@ console.log('\nprojection crypto');
   const opened = cx.open(kScr, sealed);
   ok('a sealed frame opens to the same payload', JSON.stringify(opened.payload) === JSON.stringify(payload));
   ok('the sequence number survives', opened.seq === 1000);
+  ok('the frame carries the current crypto version byte', Buffer.from(sealed, 'base64')[0] === cx.CRYPTO_VERSION);
 
   ok('the wrong key cannot open it', threw(() => cx.open(cx.randomBytes(32), sealed)));
 
@@ -125,6 +153,9 @@ console.log('\nprojection crypto');
   const badver = Buffer.from(bytes);
   badver[0] = 9;
   ok('an unknown frame version is refused, not guessed at', threw(() => cx.open(kScr, badver.toString('base64'))));
+  const oldver = Buffer.from(bytes);
+  oldver[0] = 1;
+  ok('a version 1 frame is refused by the version byte', threw(() => cx.open(kScr, oldver.toString('base64'))));
   ok('a truncated frame is rejected, not misread', threw(() => cx.open(kScr, 'AAAA')));
 
   // Compression is what makes a snapshot affordable every ten seconds.

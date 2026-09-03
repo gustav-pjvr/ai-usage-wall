@@ -323,7 +323,9 @@ wall runs unchanged. Verified: adapter scanned all 7 real client notes cleanly.
 
 - `contextIsolation: true`, `nodeIntegration: false`. The renderer gets 6 preload
   methods and nothing else.
-- Strict CSP: `default-src 'none'`, no remote origins, no `connect-src`.
+- Strict CSP: `default-src 'none'` with an explicit **`connect-src 'none'`** in
+  both `index.html` and `pair.html`. The renderer cannot open a socket even if
+  something in it tried; all networking is main process (rule 27).
 - **Client assets are served over a custom `mbw-asset://` protocol**, never
   `file://`. Every request is resolved against the assets root and rejected if it
   escapes. Client JSON is hand-edited and its paths are not trusted, so a `logo`
@@ -443,6 +445,61 @@ The wall runs 24/7. Every effect is paid continuously.
     than left unused, so putting one back is a conscious act rather than an
     autocomplete. `revenue` stays in the JSON because the layout score ranks on
     it, which is a number nobody ever sees.
+25. **Projection off must mean no network object is constructed at all**, not a
+    socket that happens not to connect. `startProjection()` returns before
+    anything exists if `projection.json` is absent, and `RelaySocket` is
+    reachable only from `activate()`. An idle-but-constructed socket is how "no
+    network" quietly becomes "no traffic we looked for", and the whole public
+    claim rests on the difference. If a lazy connect or a keepalive ever appears
+    above that gate, the sentence on the website stops being true.
+26. **Never put a path, a username or a session id on the wire, and never add a
+    second serialiser.** `toWire()` is the only one, and it names every field
+    explicitly instead of spreading the index, so a field added upstream cannot
+    reach a screen by accident. Spreading it once would leak `cwd` and
+    `sessionId` on the very next refresh, silently, to a machine in another
+    building. `fromWire()` re-inserting `sessionId: null` and `cwd: null` is the
+    proof, and it is worth keeping.
+27. **The renderer keeps `connect-src 'none'`.** All networking is main process,
+    in `src/main/projection/`. The renderer draws a dashboard, and a renderer
+    that can open a socket turns every future rendering bug into a data-exfil
+    bug. Relaxing that directive, in either `index.html` or `pair.html`, is not
+    a CSP tweak, it is a change of threat model.
+28. **A screen claims liveness only from a frame it decrypted.** The relay
+    saying the source is online is not evidence that any data arrived, and
+    trusting it prints `LIVE` over numbers that stopped moving twenty minutes
+    ago, which is the one failure that makes the whole feature untrustworthy.
+    Phase wording is a pure function and is tested in
+    `test/stats-projection.test.mjs`; keep it that way.
+29. **Discard any frame whose sequence is not strictly greater than the last one
+    accepted.** Not "not equal", not "close enough". The sequence is inside the
+    GCM AAD so it cannot be edited in flight, but a relay can still replay an old
+    frame, and a replayed frame is a screen that quietly reverts to yesterday's
+    totals and looks perfectly healthy doing it.
+30. **Projection must never delay or break the local dashboard.** The wall
+    rendered before this feature existed and must render identically without it.
+    `flush()` is scheduled, never awaited by the refresh path, and a relay that
+    is down, slow or hostile is an amber pill and nothing more. The moment a
+    network round trip can stall a repaint, an outage on someone else's Worker
+    becomes a frozen desktop here.
+31. **The source's credentials file is the truth about screens; the relay is
+    rebuilt from it.** Revoke deletes the key locally FIRST and tells the relay
+    second, queueing the notification if the send fails, so revocation does not
+    depend on the relay cooperating or even being reachable. Any design where
+    the relay's screen list is authoritative means a compromised relay can
+    reinstate a screen the user removed.
+32. **Never store key material in `settings.json`.** That file is hand-edited,
+    backed up, synced, and pasted into chat windows when something goes wrong.
+    Projection keys live in `projection.json` in userData under `safeStorage`,
+    and the split exists precisely because the two files have opposite
+    handling. Note the plaintext fallback when `safeStorage` is unavailable:
+    document it, do not pretend it is not there.
+33. **Hostnames and labels never cross the relay in plaintext.** The source's
+    label and a screen's `os.hostname()` both travel inside a sealed frame, and
+    the cleartext relay protocol carries only `t`, `secret`, `lookup`, `pub`,
+    `exp`, `spaceId`, `screenId`, `to`, `from` and `ct`. A machine name is the
+    one field that would let the relay operator turn anonymous metadata into
+    "this is Gustav's laptop, and here is when he works", so it belongs under
+    the encryption and not beside it.
 
 ---
 
@@ -553,8 +610,16 @@ carries a real `message.usage` block: `input_tokens`, `output_tokens`,
 timestamp, `sessionId` and `cwd`. `~/.claude/history.jsonl` separately records
 every prompt submitted.
 
-That is the whole source, and it is entirely local: **no API, no authentication,
-no network, therefore no rate limits and nothing that can go down.**
+That is the whole source, and it is entirely local: **no API, no authentication
+and no network to read it, therefore no rate limits and nothing that can go
+down.**
+
+**The sole exception is [projection](#projection)**, which sends a copy of these
+numbers, encrypted, to a second machine the user has paired. It is off by
+default, it is opt-in behind a consent dialog, and it changes nothing about how
+the numbers are produced: the reading side of this pipeline never touches the
+network in either direction. Everything else in this section is true of a machine
+with projection off, which is every machine until someone turns it on.
 
 Measured on this machine: **419 transcripts, 961 MB, 71,962 usage records across
 51 days, 61 sessions, 8 models.**
@@ -635,7 +700,7 @@ the canvas draws at 12 to 30 fps by tier. There is still no polling anywhere.
 Two things were also crossing the boundary far too often and are now fixed:
 the full index (170 KB, half of it a per-file offset map the renderer never
 reads) was sent over IPC on every refresh, and the disk cache was rewritten each
-time. The renderer gets a projection without that map, and the cache is written
+time. The renderer gets a reduced copy without that map, and the cache is written
 at most once a minute plus on quit.
 
 ### Focus mode must never trap the user
@@ -701,6 +766,232 @@ original casing is kept in `display` for reading.
 
 ---
 
+## Projection
+
+Opt-in, off by default, and the only feature in this app that is *meant* to touch
+the network. It puts one machine's dashboard on another machine's screen: a
+**source** reads its own `~/.claude` as usual and sends an encrypted snapshot to
+each **screen** it has paired. A machine acting as a screen does not index its
+own transcripts at all.
+
+Both editions have it.
+
+### The claim, stated precisely
+
+"Nothing leaves your machine" was the pitch and it was true. It is still true
+with two qualifications, and both are structural rather than promised:
+
+1. **Off means no network object exists.** `startProjection()` loads
+   `projection.json` and returns immediately if there is none. `RelaySocket` is
+   constructed only inside `SourceProjector` and `ScreenReceiver`, which are
+   reachable only from `activate()`. There is no idle socket, no lazy connect and
+   no boolean to get wrong: the file's PRESENCE is the switch (rule 25).
+2. **On but unpaired still sends no data.** `sendTo()` returns early when there
+   is no key record for a screen, and `flush()` iterates a list that is empty.
+   Without a paired screen there is no key to encrypt for, so there is nothing
+   the source could send even if it wanted to.
+
+The connection is a third thing and is not hidden: once projection is on the
+source authenticates to the relay, and while a code is outstanding it publishes
+an offer. That is connection traffic, not dashboard data, and the difference is
+worth keeping straight in anything written for users.
+
+### Transport
+
+| Piece | What it is |
+|---|---|
+| Relay | `https://claude-stats-relay.gustavpjvr.workers.dev`, a separate Cloudflare Worker in a separate repo |
+| `SpaceRelay` | one Durable Object **per space**: holds the sockets, fans frames out |
+| `PairingDirectory` | one Durable Object **globally**: maps a code hash to a space and rate limits redemption |
+| Storage | SQLite-backed DOs. The key-value backend is paid-only and SQLite is on the free plan, so the migration MUST use `new_sqlite_classes` |
+| Sockets | **WebSocket Hibernation** (`ctx.acceptWebSocket`, never `server.accept()`) |
+
+Hibernation is what makes this affordable: the app is silent for hours at a time,
+and a hibernating object leaves memory and accrues no billable duration. The
+price is a rule the relay has to keep. **Nothing may live in an instance field
+across messages.** Per-connection state goes in the socket's attachment
+(`serializeAttachment`), everything else in `ctx.storage`, and sweeps run off
+`ctx.storage.setAlarm` because a `setTimeout` does not survive hibernation.
+
+Separate Worker and separate deploy cadence on purpose: a relay bug must never
+take the download page down.
+
+### Key schedule
+
+Per screen, derived on the two desktops and never anywhere else:
+
+```
+shared    = X25519(ourPriv, theirPub)
+stretched = scrypt(code, "csw-pair-v1", 32, N=2^15 r=8 p=1)
+key       = HKDF-SHA256(ikm  = shared || stretched,
+                        salt = lookup,
+                        info = "csw-screen-key-v1", 32)
+lookup    = base64url(sha256("csw-lookup-v1" || code))[0..22]
+```
+
+**The pairing code enters the key material twice**, once through scrypt into the
+IKM and once as the HKDF salt by way of `lookup`. A relay that substituted its
+own public key would still not arrive at the same key, because it never sees the
+code. scrypt at N=2^15 is what makes a 60-bit code expensive to grind offline;
+the relay's own rate limits (5 failed redemptions per IP, 20 globally per minute,
+in a 10 minute window) are the online half of the same job.
+
+The code is 12 characters of Crockford base32 with I, L, O and U removed so it
+can be read aloud, shown as `XXXX-XXXX-XXXX`, valid for **ten minutes**, and the
+relay independently caps the offer TTL at ten minutes rather than trusting the
+number the source sends. Maximum 8 screens per source.
+
+Frame layout, where the first 9 bytes are also the GCM AAD, so the sequence
+number is authenticated rather than merely present:
+
+```
+version(1) | seq(8, big endian) | nonce(12) | ciphertext | tag(16)
+```
+
+`seq = max(seq + 1, Date.now())`, so it is monotonic and survives a restart
+without persisting a counter. A screen discards any frame whose seq is not
+strictly greater than the last it accepted (rule 29). Ten consecutive frames it
+cannot decrypt is terminal: it says `CANNOT DECRYPT, pair again` rather than
+retrying into a wall. Payloads are `deflateRaw`ed before encryption. The relay
+bounds a frame at 512 KB, a sanity limit rather than a design target; the two
+code comments disagree on the real size (20 KB in `relay-socket.ts`, 78 KB in
+`space.js`) and neither has been re-measured.
+
+### Trust model
+
+**Trusted:** the two desktops, and the person who read twelve characters off one
+screen and typed them into the other. That is the whole trust anchor, which is
+why the code authenticates the exchange rather than merely naming it.
+
+**Not trusted:** the relay, the network, and anyone who later gets hold of the
+credentials file. The relay is treated as an active attacker that can drop,
+reorder, duplicate and observe, and each of those has an answer: it cannot read
+(it holds no key), cannot forge (a GCM tag over an AAD it cannot compute), cannot
+replay (monotonic seq), and cannot resurrect a revoked screen (the key is deleted
+locally first, rule 31).
+
+What that leaves it is **metadata**, and it is listed rather than glossed,
+because a privacy claim that quietly omits the metadata is worse than no claim.
+
+| The relay CAN see | The relay CANNOT see |
+|---|---|
+| that a machine is connected, and whether it is a source or a screen | any number, name or timestamp inside a frame |
+| its IP address. A **failed** redemption also stores the IP for ten minutes, to rate limit guessing | the source's hostname or a screen's label: both travel sealed (rule 33) |
+| the timing and size of every frame, so **when** somebody is working | what changed, or whether anything did |
+| `spaceId`, `screenId`, `pairedAt`, `lastSeen`, the two public keys, the code hash | the pairing code, and therefore the key |
+
+It **stores no frames at all**, not even the most recent one, so there is nothing
+to seize and a screen joining an idle source waits for the source instead of
+being served something stale. The only persisted keys are `sourceSecretHash`,
+`createdAt`, `spaceId`, a short-lived `offer`, and `screens` as
+`{tokenHash, pairedAt, lastSeen}`. `ct` is copied byte for byte into an envelope
+and forwarded; there is deliberately no `JSON.parse` of it anywhere in
+`space.js`.
+
+### The wire is a whitelist, not a filter
+
+`toWire()` in `src/shared/projection-wire.ts` is the ONLY serialiser (rule 26),
+and it names every field explicitly rather than spreading the index. That is the
+whole design: the failure mode becomes a field missing on a screen, which is
+visible, instead of a field leaking, which is not.
+
+**On the wire:** token totals (input, output, cache write, cache read, thinking,
+requests, web search and fetch), daily and hourly activity, model names,
+per-session start/end/requests/tokens/models, the trailing throughput series,
+prompt COUNTS by day, the Claude Code version, a transcript file COUNT, and a
+source label.
+
+**Never on the wire:** filesystem paths, the Windows username, session ids,
+prompt text, transcript text. `sessions` are re-keyed by array index so a session
+id cannot ride along, `cwd` is replaced by a label, and `unavailableReason` is a
+fixed string because the real one is an OS error that can name a path.
+`fromWire()` re-inserts `sessionId: null` and `cwd: null`, which is the receiving
+end's proof that neither travelled.
+
+**Behind a switch of its own:** project folder names, tray checkbox `Send project
+folder names`, on by default, `projects` empty on the wire when it is off. A
+folder name is the only thing here that is arguably about the work rather than
+about the usage, which is why it gets its own control. The label is the folder
+name itself, except that `labelProjects()` prefixes one parent segment when two
+projects would otherwise collide on their leaf, so "leaf only" is very slightly
+overstated and should not be written as an absolute.
+
+The source label is also on the wire, sealed, and in practice it **is** the OS
+hostname: `enableSource(label)` takes a parameter, `main/index.ts` is its only
+caller, and it passes `os.hostname()`. There is no UI to change it. The comment
+on `WireOptions.sourceLabel` claims it is never defaulted to the hostname, which
+is wrong. The behaviour is fine because the label is encrypted, but do not write
+user-facing copy from that comment, and if a label field is ever added, say so
+rather than leaving people to assume the machine is anonymous.
+
+### Credentials
+
+`projection.json` in `app.getPath('userData')`, encrypted with Electron's
+`safeStorage` (DPAPI on Windows, scoped to the logged-in user, so copying the
+file to another machine yields nothing), written atomically via `.tmp` and
+`rename`. **Never `settings.json`** (rule 32): that file is hand-edited, backed
+up, pasted into chat windows when something goes wrong and synced by whatever the
+user syncs, which is the exact opposite of where a key that decrypts a live feed
+of someone's machine belongs.
+
+Two things worth knowing:
+
+- If `safeStorage.isEncryptionAvailable()` returns false the file is written as
+  **plain JSON, silently**, and the reader tells the two apart by sniffing for a
+  leading `{`. On Windows DPAPI is effectively always there, but the fallback
+  exists, announces nothing, and should be said out loud rather than discovered.
+- `projection-last.json` beside it caches the last frame a screen decrypted, so a
+  screen shows something on launch instead of an empty wall. Same encryption
+  path, same fallback.
+
+Deleting `projection.json` turns projection off and forgets every pairing, which
+is exactly what `Stop projecting and forget all screens` does. Revoking a single
+screen deletes that screen's key locally FIRST and tells the relay second, so the
+screen is dead the moment the key is gone whether or not the relay cooperates,
+and a revocation made while the source is offline is replayed on the next
+`ready`.
+
+### The local dashboard is not allowed to care
+
+Projection is a passenger (rule 30). The source reads and renders exactly as it
+did before it existed; the projector is a listener on the same index refresh,
+`flush()` is scheduled rather than awaited, and a relay that is down, slow or
+hostile shows as an amber pill and changes nothing else.
+
+Snapshots go out **on change**, floored at one per **10 seconds**, with a content
+hash short-circuit so unchanged data sends nothing at all. Two things bypass that
+floor and both are deliberate: `pushNow()` sends a full frame when a screen
+connects, which is what makes a reconnecting screen fill in immediately instead
+of waiting for the next edit, and a 30 second encrypted beat with no payload goes
+to already-connected screens when nothing has changed, so a screen can tell
+"idle" from "gone". An idle source with no screens connected sends nothing.
+
+The status pill wording is tested as a pure function
+(`test/stats-projection.test.mjs`) because every phase must produce wording that
+is true of that phase, and `LIVE` printed over numbers that are twenty minutes
+old is precisely the failure that test exists to prevent. A screen claims
+liveness only from a frame it actually decrypted (rule 28): the relay reporting
+the source as online is not evidence that any data arrived.
+
+### Known gaps
+
+Recorded so they are not rediscovered:
+
+- **The consent dialog does not name the relay host**, although its own comment
+  says "It names the exact host". The detail text says "the relay", and
+  `relayHost()` has no call sites anywhere in `src/` or `test/`. Either wire it
+  in or fix the comment, and until then do not write "names the relay host" in
+  user-facing copy.
+- **The relay's source is not public.** `src/index.js` says "It is public for
+  exactly that reason", and as of 2026-09-03 there is no git remote, no GitHub
+  repo and no LICENSE file. Do not put "the relay's source is public" on the
+  website until it actually is: that is the one sentence a sceptical reader
+  checks first, and finding a 404 there discredits everything above it.
+- **Cosmetic:** `directory.js` says the pairing code is 50 bits. It is 60, as
+  `pairing-code.ts` says. Twelve characters over a 32-symbol alphabet.
+
+---
+
 ## Updating
 
 **`npm run deploy` is the only install path.** It builds, packages, upgrades the
@@ -713,10 +1004,21 @@ changes reached the running app (they live in `%APPDATA%`) while code changes di
 not. The deploy script makes that structurally impossible, and it fails loudly if
 it ever finds more than one installation.
 
-electron-updater was considered and rejected for now: the repo is private, so the
-app would have to carry a GitHub token, a real secret shipped inside a desktop
-binary for a tool with one user who is sitting at the machine that builds it. If
-it is ever wanted on a second machine, make releases public and revisit.
+electron-updater was considered and rejected **for the full build, and that part
+still holds**: the repo is private, so the app would have to carry a GitHub
+token, a real secret shipped inside a desktop binary for a tool with one user who
+is sitting at the machine that builds it. Two update mechanisms racing for the
+same install is also the "multiple installations" problem this project already
+solved once (rule 18).
+
+**The stats build does auto-update, and this paragraph used to deny it.** The
+objection above was about a credential, and a public R2-backed download site
+removed the credential: the app fetches a YAML feed and an installer over plain
+HTTPS, exactly as a browser would. `src/main/updater.ts` is gated on
+`app.isPackaged && isStatsOnly`, checks 90 seconds after launch and every six
+hours after that, downloads silently and installs on quit. It never touches the
+full build. Anything that says the shareable build makes no network requests is
+wrong, and was wrong before projection existed.
 
 ---
 

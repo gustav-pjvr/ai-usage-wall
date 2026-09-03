@@ -139,13 +139,23 @@ async function readEncrypted(name: string): Promise<unknown> {
   }
 }
 
+let warnedPlaintext = false;
+
 async function writeEncrypted(name: string, value: unknown): Promise<void> {
   const target = filePath(name);
   const tmp = `${target}.tmp`;
   const text = JSON.stringify(value, null, 2);
-  const body = safeStorage.isEncryptionAvailable()
-    ? safeStorage.encryptString(text)
-    : Buffer.from(text, 'utf8');
+  const encrypted = safeStorage.isEncryptionAvailable();
+  if (!encrypted && !warnedPlaintext) {
+    // Once per process, not once per write: the point is that it gets seen,
+    // and a warning on every cache write would be scrolled past instead.
+    warnedPlaintext = true;
+    console.warn(
+      '[projection] safeStorage is unavailable on this machine, so ' + FILE + ' and ' + CACHE +
+        ' are written in PLAINTEXT under userData. Anyone who can read that folder can read the projection key.',
+    );
+  }
+  const body = encrypted ? safeStorage.encryptString(text) : Buffer.from(text, 'utf8');
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(tmp, body);
   // Atomic: a crash mid-write must not leave a half key on disk.
@@ -166,19 +176,38 @@ export async function clearProjection(): Promise<void> {
   await fs.rm(filePath(CACHE), { force: true }).catch(() => {});
 }
 
-/**
- * The screen's last decrypted frame, so a restart shows something dated rather
- * than an empty wall. Written at most once a minute; it is a convenience, not a
- * record, and it is always displayed with its age.
- */
-export async function loadLastFrame(): Promise<{ payload: unknown; receivedAt: number } | null> {
-  const raw = (await readEncrypted(CACHE)) as { payload?: unknown; receivedAt?: number } | null;
-  if (!raw || typeof raw.receivedAt !== 'number' || raw.payload === undefined) return null;
-  return { payload: raw.payload, receivedAt: raw.receivedAt };
+export interface LastFrameCache {
+  /** The last frame's wire payload, or null when only a sequence has been seen. */
+  payload: unknown;
+  /** Screen-clock arrival of that payload; 0 when there is none. */
+  receivedAt: number;
+  /** The highest sequence this screen accepted; 0 when nothing ever was. */
+  seq: number;
 }
 
-export async function saveLastFrame(payload: unknown, receivedAt: number): Promise<void> {
-  await writeEncrypted(CACHE, { payload, receivedAt }).catch((err) =>
+/**
+ * The screen's last decrypted frame AND the sequence it accepted, so a restart
+ * shows something dated rather than an empty wall and, more importantly,
+ * refuses anything older than what it had already seen.
+ *
+ * The payload is a convenience and is always displayed with its age. The
+ * sequence is the replay boundary, which is why the receiver writes this after
+ * every accepted message rather than on a throttle.
+ */
+export async function loadLastFrame(): Promise<LastFrameCache | null> {
+  const raw = (await readEncrypted(CACHE)) as { payload?: unknown; receivedAt?: number; seq?: number } | null;
+  if (!raw || typeof raw !== 'object') return null;
+  const seq = typeof raw.seq === 'number' && Number.isFinite(raw.seq) && raw.seq > 0 ? raw.seq : 0;
+  const hasPayload = typeof raw.payload === 'object' && raw.payload !== null && typeof raw.receivedAt === 'number';
+  return {
+    payload: hasPayload ? raw.payload : null,
+    receivedAt: hasPayload ? (raw.receivedAt as number) : 0,
+    seq,
+  };
+}
+
+export async function saveLastFrame(payload: unknown, receivedAt: number, seq: number): Promise<void> {
+  await writeEncrypted(CACHE, { payload, receivedAt, seq }).catch((err) =>
     console.warn('[projection] could not cache the last frame:', (err as Error).message),
   );
 }

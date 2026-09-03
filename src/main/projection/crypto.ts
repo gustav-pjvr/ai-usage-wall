@@ -2,8 +2,8 @@
  * Projection cryptography. Everything here runs in the MAIN process only.
  *
  * The guarantee this file exists to provide: the relay forwards bytes it cannot
- * read. It sees two public keys and ciphertext, and it never sees the pairing
- * code, so it cannot compute the key.
+ * read. It sees two public keys, a lookup digest and ciphertext, and it never
+ * sees the pairing code, so it cannot compute the key.
  *
  * The scheme, and what each part is for:
  *
@@ -17,6 +17,14 @@
  *                       to open. To succeed it must guess the code, and scrypt
  *                       at N=2^15 makes each guess cost 32 MB and ~100 ms.
  *                       See src/shared/pairing-code.ts for the arithmetic.
+ *
+ *   the lookup          is derived from that SAME stretched code, never from
+ *                       the raw one. Version 1 gave the relay a plain SHA-256
+ *                       of the code, and the relay holds every lookup in its
+ *                       own storage: it could test candidates against SHA-256
+ *                       at GPU speed and pay scrypt only for the one that
+ *                       matched, which made the stretch decorative. Now every
+ *                       way of checking a candidate costs one scrypt.
  *
  *   per-screen keys     revoking a screen is deleting one key. No rekeying, and
  *                       no screen ever holds anything that opens another's
@@ -33,7 +41,6 @@
 
 import {
   createCipheriv,
-  createHash,
   createDecipheriv,
   createPublicKey,
   diffieHellman,
@@ -46,8 +53,13 @@ import {
 } from 'node:crypto';
 import { deflateRawSync, inflateRawSync } from 'node:zlib';
 
-/** Bump when the frame layout or the key schedule changes. */
-export const CRYPTO_VERSION = 1;
+/**
+ * Bump when the frame layout or the key schedule changes. Version 2 moved the
+ * lookup onto the stretched code and changed the key schedule with it, so a
+ * version 1 pairing cannot open version 2 frames and is refused by this byte
+ * rather than by a garbled tag.
+ */
+export const CRYPTO_VERSION = 2;
 
 /*
  * scrypt parameters. N=2^15 with r=8 needs about 32 MB per guess, which is what
@@ -55,9 +67,11 @@ export const CRYPTO_VERSION = 1;
  * has to be raised explicitly or Node refuses its own defaults.
  */
 const SCRYPT = { N: 2 ** 15, r: 8, p: 1, maxmem: 96 * 1024 * 1024 } as const;
+/* The scrypt salt is unchanged from version 1: the stretch itself was right,
+ * only what was derived from it was wrong. */
 const PAIR_SALT = 'csw-pair-v1';
-const LOOKUP_PREFIX = 'csw-lookup-v1';
-const KEY_INFO = 'csw-screen-key-v1';
+const LOOKUP_INFO = 'csw-lookup-v2';
+const KEY_INFO = 'csw-screen-key-v2';
 
 /** X25519 public keys travel as the 32 raw bytes, base64. */
 const SPKI_PREFIX = Buffer.from('302a300506032b656e032100', 'hex');
@@ -81,13 +95,30 @@ function publicFromRaw(b64: string): KeyObject {
 }
 
 /**
+ * The code, stretched: about 100 ms and 32 MB, and the ONLY place scrypt runs.
+ *
+ * Call it once per pairing and hand the result to both lookupFromStretched and
+ * deriveScreenKey. Stretching twice pays twice for the same bytes; stretching
+ * per message would stall the main process on every frame. The callers keep
+ * the result alongside the pending offer for exactly that reason.
+ */
+export function stretchCode(code: string): Buffer {
+  return scryptSync(code, PAIR_SALT, 32, SCRYPT);
+}
+
+/**
  * What the relay is told, so it can match a screen to a pending offer.
  *
- * One-way and truncated: the relay can compare it to what a redeeming screen
- * presents, and cannot walk it back into a code worth guessing.
+ * One-way and truncated, and derived from the STRETCHED code: the relay can
+ * compare it to what a redeeming screen presents, and testing a candidate code
+ * against it costs the same scrypt as testing that candidate against the key.
+ * Twenty-two base64url characters is 132 bits, more than the code carries, so
+ * the truncation loses nothing that matters.
  */
-export function lookupOf(code: string): string {
-  return createHash('sha256').update(LOOKUP_PREFIX + code).digest('base64url').slice(0, 22);
+export function lookupFromStretched(stretched: Buffer): string {
+  return Buffer.from(hkdfSync('sha256', stretched, Buffer.alloc(0), LOOKUP_INFO, 32))
+    .toString('base64url')
+    .slice(0, 22);
 }
 
 /**
@@ -101,11 +132,10 @@ export function lookupOf(code: string): string {
 export function deriveScreenKey(
   myPrivate: KeyObject,
   theirPublicB64: string,
-  code: string,
+  stretched: Buffer,
   lookup: string,
 ): Buffer {
   const shared = diffieHellman({ privateKey: myPrivate, publicKey: publicFromRaw(theirPublicB64) });
-  const stretched = scryptSync(code, PAIR_SALT, 32, SCRYPT);
   const ikm = Buffer.concat([shared, stretched]);
   return Buffer.from(hkdfSync('sha256', ikm, Buffer.from(lookup), KEY_INFO, 32));
 }

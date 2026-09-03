@@ -70,6 +70,13 @@ export interface ProjectedUsage {
   indexing: boolean;
   unavailable: boolean;
   unavailableReason?: string;
+  /**
+   * The source's all time peak tokens per minute. Two numbers and a timestamp,
+   * nothing about who or where, so it crosses safely. Sent so a screen reports
+   * the SOURCE's record rather than quietly starting a record of its own from
+   * data it is only displaying.
+   */
+  peak?: { velocity: number; at: string } | null;
 }
 
 /** Copy the eight numeric fields explicitly. A spread would carry extras. */
@@ -96,7 +103,12 @@ const mapTotals = (src: Record<string, unknown> | undefined): Record<string, Wir
 export interface WireOptions {
   /** Off means the projects panel is empty and says so, rather than guessing. */
   shareProjectNames: boolean;
-  /** What the screen calls this machine. Never defaulted to the hostname. */
+  /**
+   * What the screen calls this machine. In practice this IS the hostname:
+   * enableSource() passes os.hostname() and there is no UI to change it. This
+   * comment previously claimed the opposite, which is why it now says what the
+   * caller actually does rather than what would be preferable.
+   */
   sourceLabel: string;
   indexing: boolean;
   sentAt?: number;
@@ -224,6 +236,10 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
     // source's partial totals as final.
     indexing: Boolean(opts.indexing),
     unavailable: Boolean(idx.unavailable),
+    peak:
+      idx.peak && Number.isFinite(Number(idx.peak.velocity)) && Number(idx.peak.velocity) > 0
+        ? { velocity: Number(idx.peak.velocity), at: String(idx.peak.at) }
+        : null,
     // The real reason names the path that failed to read. It is replaced with a
     // fixed string rather than omitted, so the screen can still say something.
     ...(idx.unavailable ? { unavailableReason: 'the source cannot read its transcripts' } : {}),
@@ -252,6 +268,7 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
     lastScanMs: w.lastScanMs,
     indexing: w.indexing,
     unavailable: w.unavailable,
+    peak: w.peak ?? null,
     ...(w.unavailableReason ? { unavailableReason: w.unavailableReason } : {}),
   };
 }

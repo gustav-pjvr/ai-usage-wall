@@ -28,7 +28,7 @@ Other scripts:
 ```bash
 npm run build      # bundle to dist/
 npm run dev        # rebuild on change
-npm test           # 42 checks on layout, colour and schema
+npm test           # 143 checks: layout, colour, schema, projection, crypto, indexing
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
 npm run logo       # regenerate the mark, icons and wordmark
@@ -283,10 +283,12 @@ Four things to say when you hand it over:
 - **Without Claude Code installed** it says "No Claude Code data on this
   machine" and names the path it looked in, rather than showing zeros.
 - **It updates itself.** Unlike the full build, the stats build checks the
-  download site for a new version 90 seconds after launch and every six hours
-  after that, downloads quietly and installs on quit. It sends nothing about the
-  recipient's usage to do it, but it is a network request and saying "no network"
-  about this build is no longer true.
+  download site for a new version 15 seconds after launch and every 60 seconds
+  after that, downloads as soon as it finds one, and shows the progress in a
+  small panel above other windows. It installs when the user clicks Install
+  update on the wall, or on the next quit if they never do. It sends nothing
+  about the recipient's usage to do it, but it is a network request and saying
+  "no network" about this build is no longer true.
 - **It can project.** [Projection](#projection) ships in both editions. It is off
   by default, and a consent dialog and a pairing code stand between a fresh
   install and a single byte leaving the machine.

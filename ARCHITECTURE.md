@@ -270,9 +270,14 @@ activate, so any focused app rises above us.
 which window actually owns the pixel. Confirmed after the fix: 4 of 4 sampled
 points return the wall, where all 4 previously returned `explorer`.
 
-**No z-order polling.** `WS_EX_NOACTIVATE` means the window is never activated, so
-almost nothing raises it. Bottom is re-asserted only on display change, show, and
-mode change.
+**Z-order polling, reluctantly.** `WS_EX_NOACTIVATE` means the window is never
+activated, so almost nothing raises it, and for a long time bottom was re-asserted
+only on display change, show, and mode change. That was not enough. Show Desktop
+raises the DESKTOP over the wall and fires no event at all, leaving the wall
+correctly placed, visible, non-iconic and completely hidden behind the wallpaper.
+`src/main/win32/desktop-watch.ts` now polls the Z order every 250 ms and re-places
+the wall directly above whichever window hosts `SHELLDLL_DefView`. See
+`docs/window-layering.md`.
 
 **Multi-monitor:** one window per display, not one stretched across the virtual
 desktop. A single stretched window breaks on mixed-DPI setups (Windows scales the
@@ -281,9 +286,12 @@ monitor when one card changes. Process is marked per-monitor DPI aware v2 before
 any window exists. WorkerW coordinates are re-based onto the virtual screen origin,
 which is negative when a monitor sits left of the primary.
 
-**Startup** uses `app.setLoginItemSettings` (HKCU Run key): per-user, no elevation,
-trivially inspectable and removable. Note `openAsHidden` is macOS-only; on Windows
-the wall is inherently quiet because it has no taskbar button and never takes focus.
+**Startup** writes the HKCU Run key directly with `reg.exe`, per-user, no
+elevation, trivially inspectable and removable. It does NOT use
+`app.setLoginItemSettings`, which rule 19 below forbids on Windows; this
+paragraph used to say it did, which contradicted the rule three hundred lines
+later. `openAsHidden` is macOS-only anyway; on Windows the wall is inherently
+quiet because it has no taskbar button and never takes focus.
 
 **Hotkeys:** `Ctrl+Alt+W` focus mode, `Ctrl+Alt+Shift+W` show/hide. Tray icon owns
 the rest. The wall has no taskbar button, so the tray is the only affordance.
@@ -825,8 +833,14 @@ shared    = X25519(ourPriv, theirPub)
 stretched = scrypt(code, "csw-pair-v1", 32, N=2^15 r=8 p=1)
 key       = HKDF-SHA256(ikm  = shared || stretched,
                         salt = lookup,
-                        info = "csw-screen-key-v1", 32)
-lookup    = base64url(sha256("csw-lookup-v1" || code))[0..22]
+                        info = "csw-screen-key-v2", 32)
+lookup    = base64url(HKDF-SHA256(ikm = stretched, salt = "",
+                        info = "csw-lookup-v2", 32))[0..22]
+
+NOTE: version 1 computed the lookup as base64url(sha256("csw-lookup-v1" || code)),
+a plain hash of the CODE rather than of the stretched output. That let a hostile
+relay test candidates at hash speed and pay scrypt only once, for the match, which
+made every other protection here moot. See docs/projection-crypto.md.
 ```
 
 **The pairing code enters the key material twice**, once through scrypt into the
@@ -977,16 +991,12 @@ the source as online is not evidence that any data arrived.
 
 Recorded so they are not rediscovered:
 
-- **The consent dialog does not name the relay host**, although its own comment
-  says "It names the exact host". The detail text says "the relay", and
-  `relayHost()` has no call sites anywhere in `src/` or `test/`. Either wire it
-  in or fix the comment, and until then do not write "names the relay host" in
-  user-facing copy.
-- **The relay's source is not public.** `src/index.js` says "It is public for
-  exactly that reason", and as of 2026-09-03 there is no git remote, no GitHub
-  repo and no LICENSE file. Do not put "the relay's source is public" on the
-  website until it actually is: that is the one sentence a sceptical reader
-  checks first, and finding a 404 there discredits everything above it.
+- **RESOLVED 2026-09-03: the consent dialog now names the relay host.** It took
+  `relayHost()`, which existed and had no callers, and passed it the relay the
+  dialog is actually asking about. The comment had claimed this for some time
+  before the code did it.
+- **RESOLVED 2026-09-03: the relay's source is public**, at
+  `github.com/gustav-pjvr/claude-stats-relay`, MIT licensed.
 - **Cosmetic:** `directory.js` says the pairing code is 50 bits. It is 60, as
   `pairing-code.ts` says. Twelve characters over a 32-symbol alphabet.
 

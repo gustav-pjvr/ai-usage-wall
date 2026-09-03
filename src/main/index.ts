@@ -8,7 +8,7 @@
  * when one card changes.
  */
 
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, screen, shell, nativeImage } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, screen, shell, nativeImage, nativeTheme } from 'electron';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { execFile } from 'node:child_process';
@@ -36,7 +36,7 @@ import {
   verifyLayer,
   type LayerMode,
 } from './win32/desktop-layer';
-import { hwndFromBuffer, isAvailable as win32Available, unavailableReason } from './win32/ffi';
+import { hwndFromBuffer, isAvailable as win32Available, readHkcuDword, unavailableReason } from './win32/ffi';
 
 const isDev = !app.isPackaged;
 
@@ -55,6 +55,9 @@ interface WallWindow {
 
 let windows: WallWindow[] = [];
 let tray: Tray | null = null;
+/** Which tray art is currently installed, so a no-op theme event costs nothing. */
+let trayIsDark = false;
+let themeTimer: NodeJS.Timeout | null = null;
 let settings: Settings;
 let capability: Capability;
 let snapshot: StoreSnapshot | null = null;
@@ -279,14 +282,69 @@ function registerAssetProtocol(): void {
 
 // ── Tray icon ──────────────────────────────────────────────────────────────
 
+/**
+ * Is the TASKBAR dark? Not the same question as "is the app theme dark".
+ *
+ * Windows keeps two independent settings under Themes\Personalize:
+ * `AppsUseLightTheme` for application chrome and `SystemUsesLightTheme` for the
+ * taskbar and the tray. A user can run light apps on a dark taskbar, and many
+ * do. Electron's `nativeTheme.shouldUseDarkColors` reports the APP one, so
+ * using it to pick a TRAY icon is picking the icon by the wrong setting, and it
+ * is wrong precisely for the people who mix the two.
+ *
+ * Read synchronously: this runs once at startup and once per theme change, and
+ * the tray icon must not flash the wrong art while a promise resolves.
+ */
+function taskbarIsDark(): boolean {
+  if (process.platform !== 'win32') return nativeTheme.shouldUseDarkColors;
+  const v = readHkcuDword(THEME_KEY, 'SystemUsesLightTheme');
+  // Absent means light, which is the Windows default when the value was never
+  // written. Unreadable means fall back to the app theme, which is at least a
+  // related answer rather than a guess.
+  if (v === null) return nativeTheme.shouldUseDarkColors;
+  return v === 0;
+}
+
+/**
+ * Watch for the taskbar theme changing.
+ *
+ * `nativeTheme.on('updated')` is NOT sufficient on its own, and this was tested
+ * rather than assumed: flipping SystemUsesLightTheme, even with a
+ * WM_SETTINGCHANGE / ImmersiveColorSet broadcast, did not raise the event.
+ * Electron's nativeTheme tracks the APP theme, so a taskbar-only change is
+ * invisible to it.
+ *
+ * So the event is kept for the common case (Settings changes both at once, and
+ * that path is instant) and a slow poll covers the taskbar-only case. The poll
+ * is affordable ONLY because the read is an in-process RegGetValueW rather than
+ * a reg.exe spawn: it is a few microseconds every half minute.
+ */
+// String.raw, because a registry path is the one string where every separator
+// is a backslash and a plain quoted literal silently eats all of them.
+const THEME_KEY = String.raw`Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`;
+const THEME_POLL_MS = 30_000;
+
+function syncTrayTheme(reason: string): void {
+  if (!tray || tray.isDestroyed()) return;
+  const dark = taskbarIsDark();
+  if (dark === trayIsDark) return;
+  trayIsDark = dark;
+  tray.setImage(trayIcon());
+  console.log(`[tray] taskbar theme changed (${reason}), switched to the ${dark ? 'dark' : 'light'} mark`);
+}
+
 function trayIcon(): Electron.NativeImage {
   /*
    * tray.png is 16px and Electron picks up tray@2x.png automatically for HiDPI
-   * displays via the @2x naming convention, so this one path covers both.
-   * The tray art is the simplified four-tile variant: the plated mark is
-   * illegible at 16px, which is the whole reason two variants exist.
+   * displays via the @2x naming convention, so one path covers both.
+   *
+   * Two sets exist, one per taskbar theme: the mark's plate is white in the
+   * light set and near-black in the dark set. A single white chip on a dark
+   * taskbar is a glaring rectangle, and a single dark chip on a light one
+   * disappears, so the art is chosen rather than compromised.
    */
-  const file = path.join(bundledRoot(), 'assets', 'tray.png');
+  const dark = taskbarIsDark();
+  const file = path.join(bundledRoot(), 'assets', dark ? 'tray-dark.png' : 'tray.png');
   try {
     const img = nativeImage.createFromPath(file);
     if (!img.isEmpty()) return img;
@@ -304,6 +362,12 @@ function buildTray(): void {
     tray.setToolTip(PRODUCT_NAME);
     refreshTrayMenu();
     tray.on('double-click', () => toggleHidden());
+    trayIsDark = taskbarIsDark();
+    console.log(`[tray] using the ${trayIsDark ? 'dark' : 'light'} mark`);
+
+    nativeTheme.on('updated', () => syncTrayTheme('app theme event'));
+    themeTimer = setInterval(() => syncTrayTheme('poll'), THEME_POLL_MS);
+    themeTimer.unref?.();
   } catch (err) {
     console.error('[tray] could not create tray icon:', (err as Error).message);
   }

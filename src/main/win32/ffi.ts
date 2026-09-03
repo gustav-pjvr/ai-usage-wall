@@ -60,6 +60,16 @@ export const SWP_SHOWWINDOW = 0x0040;
 export const GA_PARENT = 1;
 export const GA_ROOT = 2;
 
+/*
+ * HKEY_CURRENT_USER is ((HKEY)(ULONG_PTR)((LONG)0x80000001)), i.e. the 32-bit
+ * constant SIGN-EXTENDED to pointer width. Writing 0x80000001 directly gives
+ * the wrong 64-bit value and every lookup fails with ERROR_INVALID_HANDLE, so
+ * it is spelled as the negative number it actually is.
+ */
+export const HKEY_CURRENT_USER = -2147483647;
+/** RRF_RT_REG_DWORD: refuse to coerce anything that is not a DWORD. */
+export const RRF_RT_REG_DWORD = 0x00000010;
+
 /** DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 */
 export const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 
@@ -87,6 +97,15 @@ interface Win32Api {
   WindowFromPoint(point: { x: number; y: number }): Hwnd;
   GetForegroundWindow(): Hwnd;
   SetProcessDpiAwarenessContext(ctx: number): boolean;
+  RegGetValueW(
+    key: number,
+    subKey: string | null,
+    value: string | null,
+    flags: number,
+    type: number[] | null,
+    data: Buffer,
+    size: number[],
+  ): number;
 }
 
 let api: Win32Api | null = null;
@@ -95,6 +114,7 @@ function build(): Win32Api | null {
   if (!koffi || process.platform !== 'win32') return null;
   const k = koffi;
   const user32 = k.load('user32.dll');
+  const advapi32 = k.load('advapi32.dll');
   k.struct('POINT', { x: 'int32_t', y: 'int32_t' });
   k.struct('RECT', { left: 'int32_t', top: 'int32_t', right: 'int32_t', bottom: 'int32_t' });
 
@@ -116,6 +136,9 @@ function build(): Win32Api | null {
     WindowFromPoint: user32.func('intptr_t __stdcall WindowFromPoint(POINT p)') as never,
     GetForegroundWindow: user32.func('intptr_t __stdcall GetForegroundWindow()') as never,
     SetProcessDpiAwarenessContext: user32.func('bool __stdcall SetProcessDpiAwarenessContext(intptr_t ctx)') as never,
+    RegGetValueW: advapi32.func(
+      'long __stdcall RegGetValueW(intptr_t key, const char16_t *sub, const char16_t *val, uint32_t flags, _Out_ uint32_t *type, _Out_ void *data, _Inout_ uint32_t *size)',
+    ) as never,
   };
 }
 
@@ -132,6 +155,27 @@ export function hwndFromBuffer(buf: Buffer): Hwnd {
     throw new Error(`HWND ${raw} exceeds safe integer range`);
   }
   return Number(raw);
+}
+
+/**
+ * Read a REG_DWORD from HKCU. Returns null when the value is absent or unreadable.
+ *
+ * This exists so a value that has to be re-read periodically costs microseconds
+ * rather than a `reg.exe` process spawn. Shelling out was fine for a one-off at
+ * startup and is not fine on a timer.
+ */
+export function readHkcuDword(subKey: string, value: string): number | null {
+  const w = win32();
+  if (!w) return null;
+  try {
+    const data = Buffer.alloc(4);
+    const size = [4];
+    const rc = w.RegGetValueW(HKEY_CURRENT_USER, subKey, value, RRF_RT_REG_DWORD, null, data, size);
+    if (rc !== 0) return null; // ERROR_SUCCESS is 0; anything else means "no answer"
+    return data.readUInt32LE(0);
+  } catch {
+    return null;
+  }
 }
 
 /** Read a window's class name. Returns '' on failure. */

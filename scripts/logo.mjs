@@ -80,11 +80,47 @@ function oklchToHex(l, c, h) {
  */
 const HUES = { teal: 190, amber: 62, violet: 300, blue: 258, green: 148 };
 const ORDER = ['teal', 'blue', 'amber', 'violet', 'green'];
-const brick = (hue, dl = 0) => oklchToHex(0.62 + dl, 0.17, hue);
 
-const PLATE = '#ffffff';
-/** The plate needs an edge or it disappears on a white surface. */
-const PLATE_EDGE = oklchToHex(0.9, 0.004, 250);
+/*
+ * TWO THEMES, one geometry.
+ *
+ * The plate flips and the bricks change lightness, but not a single coordinate
+ * moves. That is the whole point: they have to be recognisably the same mark,
+ * so only the palette is allowed to vary.
+ *
+ * The brick lightness is NOT the same number in both. 0.62 is solid on white
+ * and muddy on near-black; 0.74 is vivid on near-black and washed out on white.
+ * Using one value for both would mean picking which theme to disappoint.
+ */
+const THEMES = {
+  light: {
+    plate: '#ffffff',
+    // Without an edge the plate has no silhouette on a white surface.
+    plateEdge: oklchToHex(0.9, 0.004, 250),
+    brickL: 0.62,
+    brickC: 0.17,
+    minAlpha: 0.4,
+  },
+  dark: {
+    // The wall's own backdrop colour, so the icon looks like it belongs to the
+    // app rather than to the taskbar it happens to be sitting on.
+    plate: oklchToHex(0.17, 0.015, 250),
+    plateEdge: oklchToHex(0.34, 0.012, 250),
+    brickL: 0.74,
+    brickC: 0.16,
+    /*
+     * A fading shard fades TOWARDS THE PLATE, so the same alpha does not cost
+     * the same visibility in both themes. At 0.42 the furthest chips were still
+     * readable against white and had all but vanished against near-black, so
+     * the dark theme lifts the floor. The trajectory still reads: the shards
+     * shrink and spin as well as fade, and those two do the work here.
+     */
+    minAlpha: 0.58,
+  },
+};
+
+let THEME = THEMES.light;
+const brick = (hue, dl = 0) => oklchToHex(THEME.brickL + dl, THEME.brickC, hue);
 
 // ── Geometry (shared by the SVG and the canvas renderer) ───────────────────
 
@@ -219,7 +255,8 @@ const SMALL_SHARDS = [
 
 function pieceSvg(p, radius) {
   const rot = p.rot ? ` transform="rotate(${p.rot} ${p.x + p.w / 2} ${p.y + p.h / 2})"` : '';
-  const alpha = p.alpha != null && p.alpha < 1 ? ` fill-opacity="${p.alpha}"` : '';
+  const a = p.alpha == null ? 1 : Math.max(p.alpha, THEME.minAlpha);
+  const alpha = a < 1 ? ` fill-opacity="${a}"` : '';
   return `  <rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${radius}" fill="${brick(
     HUES[p.hue],
   )}"${alpha}${rot}/>`;
@@ -229,9 +266,9 @@ function markSvg() {
   const bricks = WALL.map((b) => pieceSvg(b, R)).join('\n');
   const shards = SHARDS.map((s) => pieceSvg(s, R)).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect x="0" y="0" width="256" height="256" rx="56" fill="${PLATE}"/>
+  <rect x="0" y="0" width="256" height="256" rx="56" fill="${THEME.plate}"/>
   <rect x="0.75" y="0.75" width="254.5" height="254.5" rx="55.25" fill="none"
-        stroke="${PLATE_EDGE}" stroke-width="1.5"/>
+        stroke="${THEME.plateEdge}" stroke-width="1.5"/>
 ${bricks}
 ${shards}
 </svg>
@@ -242,7 +279,7 @@ function markSmallSvg() {
   const bricks = SMALL_WALL.map((b) => pieceSvg(b, 1)).join('\n');
   const shards = SMALL_SHARDS.map((s) => pieceSvg(s, 1)).join('\n');
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SMALL_UNITS} ${SMALL_UNITS}" width="${SMALL_UNITS}" height="${SMALL_UNITS}">
-  <rect x="0" y="0" width="${SMALL_UNITS}" height="${SMALL_UNITS}" rx="7" fill="${PLATE}"/>
+  <rect x="0" y="0" width="${SMALL_UNITS}" height="${SMALL_UNITS}" rx="7" fill="${THEME.plate}"/>
 ${bricks}
 ${shards}
 </svg>
@@ -361,7 +398,7 @@ const toPiece = (p, radius) => ({
   h: p.h,
   r: radius,
   rot: p.rot || 0,
-  a: p.alpha == null ? 1 : p.alpha,
+  a: p.alpha == null ? 1 : Math.max(p.alpha, THEME.minAlpha),
   c: brick(HUES[p.hue]),
 });
 
@@ -373,8 +410,8 @@ function markSpec(size) {
     scale: size / 256,
     plate: 256,
     plateRadius: 56,
-    plateFill: PLATE,
-    plateEdge: PLATE_EDGE,
+    plateFill: THEME.plate,
+    plateEdge: THEME.plateEdge,
     pieces: [...WALL, ...SHARDS].map((p) => toPiece(p, R)),
   };
 }
@@ -387,7 +424,7 @@ function smallSpec(size) {
     scale: size / SMALL_UNITS,
     plate: SMALL_UNITS,
     plateRadius: 7,
-    plateFill: PLATE,
+    plateFill: THEME.plate,
     // No hairline edge at this size: 1.5 units of a 30 unit canvas is most of a
     // device pixel at 16px and reads as a grey halo rather than as an edge.
     plateEdge: null,
@@ -448,58 +485,78 @@ const say = (line) => {
   console.log(line);
 };
 
-async function run() {
-  await fs.mkdir(outDir, { recursive: true });
+/*
+ * Everything is emitted TWICE, once per theme. The light set keeps the plain
+ * names because it is what the .ico and the docs use; the dark set is suffixed.
+ *
+ * 64 and up use the full wall. Below that the mortar falls under one device
+ * pixel and the wall turns to porridge: 48px was tried with the full wall and
+ * was measurably unreadable, so the switch point is 64, not 48. That decision
+ * is the entire justification for having two size variants.
+ */
+const ICO_SIZES = [256, 128, 64, 48, 32, 24, 16];
 
-  await fs.writeFile(path.join(outDir, 'mark.svg'), markSvg(), 'utf8');
-  await fs.writeFile(path.join(outDir, 'mark-small.svg'), markSmallSvg(), 'utf8');
-  await fs.writeFile(path.join(outDir, 'lockup.svg'), lockupSvg(), 'utf8');
+async function emitTheme(win, theme, suffix) {
+  THEME = THEMES[theme];
 
-  const win = new BrowserWindow({ width: 400, height: 300, show: false });
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><meta charset="utf-8">'));
+  await fs.writeFile(path.join(outDir, `mark${suffix}.svg`), markSvg(), 'utf8');
+  await fs.writeFile(path.join(outDir, `mark-small${suffix}.svg`), markSmallSvg(), 'utf8');
 
-  /*
-   * 64 and up use the full wall. Below that the mortar falls under one device
-   * pixel and the wall turns to porridge: 48px was tried with the full wall and
-   * was measurably unreadable, so the switch point is 64, not 48. That decision
-   * is the entire justification for having two variants.
-   */
-  const icoSizes = [256, 128, 64, 48, 32, 24, 16];
   const images = [];
-  for (const size of icoSizes) {
+  for (const size of ICO_SIZES) {
     const data = await rasterise(win, size >= 64 ? markSpec(size) : smallSpec(size));
-    await fs.writeFile(path.join(outDir, `icon-${size}.png`), data);
+    await fs.writeFile(path.join(outDir, `icon-${size}${suffix}.png`), data);
     images.push({ size, data });
-    say(`[logo] icon-${size}.png  ${data.length} bytes  (${size >= 64 ? 'full wall' : 'reduced'})`);
   }
+  say(`[logo] ${theme}: 7 icon PNGs (full wall at 64+, reduced below)`);
 
   const ico = packIco(images);
-  await fs.writeFile(path.join(outDir, 'icon.ico'), ico);
-  say(`[logo] icon.ico  ${ico.length} bytes, ${images.length} entries`);
+  await fs.writeFile(path.join(outDir, `icon${suffix}.ico`), ico);
+  say(`[logo] icon${suffix}.ico  ${ico.length} bytes, ${images.length} entries`);
 
   for (const [name, size] of [
     ['tray', 16],
     ['tray@2x', 32],
   ]) {
     const data = await rasterise(win, smallSpec(size));
-    await fs.writeFile(path.join(root, 'assets', `${name}.png`), data);
-    say(`[logo] ${name}.png  ${data.length} bytes`);
+    // The tray art lives beside the app, not in the logo folder, because it is
+    // shipped as a runtime asset rather than as a brand deliverable.
+    const file = suffix ? `${name.replace('@2x', '')}-dark${name.includes('@2x') ? '@2x' : ''}.png` : `${name}.png`;
+    await fs.writeFile(path.join(root, 'assets', file), data);
+    say(`[logo] ${file}  ${data.length} bytes`);
   }
 
+  say(`[logo] ${theme} palette: ${Object.entries(HUES).map(([k, h]) => `${k} ${brick(h)}`).join('  ')}`);
+}
+
+async function run() {
+  await fs.mkdir(outDir, { recursive: true });
+
+  const win = new BrowserWindow({ width: 400, height: 300, show: false });
+  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><meta charset="utf-8">'));
+
+  await emitTheme(win, 'light', '');
+  await emitTheme(win, 'dark', '-dark');
+
+  // The lockups pair the LIGHT mark with dark text and the DARK mark with light
+  // text, because each is used on a surface of the opposite tone.
   for (const [name, scale, onDark] of [
     ['lockup-on-light', 1, false],
     ['lockup-on-light@2x', 2, false],
     ['lockup-on-dark', 1, true],
     ['lockup-on-dark@2x', 2, true],
   ]) {
+    THEME = onDark ? THEMES.dark : THEMES.light;
     const data = await rasterise(win, lockupSpec(scale, onDark));
     await fs.writeFile(path.join(outDir, `${name}.png`), data);
     say(`[logo] ${name}.png  ${data.length} bytes`);
   }
 
+  THEME = THEMES.light;
+  await fs.writeFile(path.join(outDir, 'lockup.svg'), lockupSvg(), 'utf8');
+
   win.destroy();
   say(`[logo] bricks ${WALL.length}, shards ${SHARDS.length}`);
-  say(`[logo] palette: ${Object.entries(HUES).map(([k, h]) => `${k} ${brick(h)}`).join('  ')}`);
   await fs.writeFile(path.join(outDir, 'render.log'), log.join('\n') + '\n', 'utf8');
   app.quit();
 }

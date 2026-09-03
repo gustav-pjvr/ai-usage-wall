@@ -14,6 +14,7 @@
  * other apps cover it, so a covered wall costs nothing at all.
  */
 
+import { velocityOf } from '../shared/velocity';
 import type { UsageIndex, TokenTotals } from '../main/data/usage';
 import type { ProjectionStatus } from '../main/projection';
 import type { ScreenStatus } from '../main/projection/screen';
@@ -165,21 +166,11 @@ export interface Derived {
 
 /** Gaps longer than this inside a session are treated as "away", not work. */
 const IDLE_GAP_MS = 5 * 60 * 1000;
-const VELOCITY_WINDOW_MS = 10 * 60 * 1000;
 
 export function derive(idx: UsageIndex): Derived {
   const now = Date.now();
 
-  let windowTokens = 0;
-  let earliest = now;
-  for (const [ts, total] of idx.recent) {
-    if (now - ts <= VELOCITY_WINDOW_MS) {
-      windowTokens += total;
-      if (ts < earliest) earliest = ts;
-    }
-  }
-  const spanMin = Math.max(1, (now - earliest) / 60000);
-  const velocity = windowTokens > 0 ? windowTokens / spanMin : 0;
+  const velocity = velocityOf(idx.recent, now);
 
   const t = idx.totals;
   const contextTokens = t.cacheRead + t.cacheCreate + t.input;
@@ -595,6 +586,16 @@ export class StatsView {
     velBody.appendChild(this.odos.velocity.node);
     velBody.appendChild(el('div', 'vel-unit', 'tokens / min'));
     velBody.appendChild(el('div', 'vel-note', 'trailing 10 minutes of record timestamps'));
+    /*
+     * The record. Hidden until one exists, because "PEAK 0" on a fresh install
+     * reads as a measurement rather than an absence.
+     */
+    const peak = el('div', 'vel-peak');
+    peak.hidden = true;
+    peak.appendChild(el('span', 'vel-peak-label', 'peak'));
+    peak.appendChild(el('span', 'vel-peak-value', ''));
+    peak.appendChild(el('span', 'vel-peak-when', ''));
+    velBody.appendChild(peak);
     vel.appendChild(velBody);
     grid.appendChild(vel);
 
@@ -859,6 +860,7 @@ export class StatsView {
     this.odos.output.set(t.output, animate);
     this.odos.thinking.set(t.thinking, animate);
     this.odos.velocity.set(d.velocity, animate);
+    this.paintPeak();
     this.odos.cache.set(d.cacheHitRate * 100, animate);
 
     const exact = this.root.querySelector('.hero-exact');
@@ -1075,6 +1077,27 @@ export class StatsView {
    * their own, and repainting them would restart their odometer animations
    * every twenty seconds for no reason.
    */
+  /**
+   * The all time high water mark, as sent by the main process.
+   *
+   * It is only ever displayed, never computed here. The record is decided in
+   * one place so that a screen showing a projected dashboard reports the
+   * SOURCE's record rather than quietly starting its own.
+   */
+  private paintPeak(): void {
+    const node = this.root.querySelector('.vel-peak') as HTMLElement | null;
+    if (!node) return;
+    const p = this.idx?.peak;
+    if (!p || !(p.velocity > 0)) {
+      node.hidden = true;
+      return;
+    }
+    node.hidden = false;
+    (node.querySelector('.vel-peak-value') as HTMLElement).textContent = compact(Math.round(p.velocity));
+    const when = relTime(p.at);
+    (node.querySelector('.vel-peak-when') as HTMLElement).textContent = when ? `· ${when}` : '';
+  }
+
   private paintTimeWindowed(): void {
     if (!this.idx) return;
 
@@ -1087,6 +1110,7 @@ export class StatsView {
 
     const d = derive(this.idx);
     this.odos.velocity.set(d.velocity, true);
+    this.paintPeak();
     this.root.dataset.intensity = d.intensity > 0.66 ? 'high' : d.intensity > 0.3 ? 'mid' : 'calm';
     this.root.style.setProperty('--intensity', d.intensity.toFixed(3));
   }

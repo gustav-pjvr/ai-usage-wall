@@ -41,6 +41,7 @@
  * latency and cost.
  */
 
+import type { PeakVelocity } from '../../shared/velocity';
 import { promises as fs, createReadStream } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -102,6 +103,12 @@ export interface UsageIndex {
   latest: { ts: string | null; model: string | null; sessionId: string | null; version: string | null; cwd: string | null };
   /** Wall-clock ms of parse work in the last refresh. */
   lastScanMs: number;
+  /**
+   * All time peak tokens per minute. Attached in memory before each push and
+   * deliberately NOT trusted from the cache file: a version bump discards this
+   * whole index, and a record must outlive that. See src/main/data/peak.ts.
+   */
+  peak?: PeakVelocity | null;
   /** True when the source directory could not be read at all. */
   unavailable: boolean;
   unavailableReason?: string;
@@ -175,8 +182,26 @@ async function listTranscripts(dir: string): Promise<string[]> {
  */
 
 /**
- * Read one transcript from `fromOffset` to EOF, folding records into the index.
- * Returns the new offset. Never throws: a damaged file costs that file only.
+ * Read one transcript from `fromOffset` to `size`, folding records into the
+ * index. Returns the new offset. Never throws: a damaged file costs that file
+ * only.
+ *
+ * THE READ IS BOUNDED AT `size` ON PURPOSE, and the offset that comes back
+ * counts only bytes of COMPLETE lines.
+ *
+ * It used to read to EOF while returning the size stat'd before the read.
+ * Claude Code appends to these files continuously, so anything written during
+ * the scan was folded into the totals AND left below the recorded offset, and
+ * the next pass read the same bytes again. Every token in that window was
+ * counted twice. It was found by writing 1,000 records into a 26 MB transcript
+ * 60 ms into a 350 ms scan: the second pass reached 122,000 records where
+ * 121,000 was correct.
+ *
+ * Bounding the read alone would trade one bug for a quieter one. `size` can
+ * land mid-line while the writer is between a record and its newline, and an
+ * offset set flatly to `size` would skip the remainder of that record forever.
+ * So the returned offset is walked back to the end of the last complete line,
+ * and the partial tail is read again next pass, when it is whole.
  */
 async function ingestFile(index: UsageIndex, file: string, fromOffset: number, size: number): Promise<number> {
   if (size <= fromOffset) return fromOffset;
@@ -185,10 +210,19 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
   let processed = 0;
 
   try {
-    const stream = createReadStream(file, { encoding: 'utf8', start: fromOffset });
+    // end is inclusive, so this is exactly the bytes that were stat'd.
+    const stream = createReadStream(file, { encoding: 'utf8', start: fromOffset, end: size - 1 });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+    // Bytes of complete lines only. A trailing partial line is not counted, so
+    // it is read again next pass rather than skipped.
+    let consumed = 0;
+    let lastLineBytes = 0;
+    let sawAnyLine = false;
 
     for await (const line of rl) {
+      lastLineBytes = Buffer.byteLength(line, 'utf8') + 1;
+      consumed += lastLineBytes;
+      sawAnyLine = true;
       // Yield to the event loop periodically. The cold index is several seconds
       // of work and the wall must stay responsive while it runs.
       if (++processed % 2000 === 0) await new Promise((r) => setImmediate(r));
@@ -289,12 +323,18 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
       }
     }
     rl.close();
+
+    /*
+     * If the slice did not end on a newline, readline still handed us the
+     * trailing fragment as a line. Its bytes must not be counted, or the rest
+     * of that record is skipped when the writer finishes it.
+     */
+    if (sawAnyLine && consumed > size - fromOffset) consumed -= lastLineBytes;
+    return fromOffset + Math.max(0, consumed);
   } catch {
     // Unreadable or mid-write file: keep the old offset and try again next pass.
     return fromOffset;
   }
-
-  return size;
 }
 
 /** Prompts the user actually submitted, from history.jsonl. Append-only too. */

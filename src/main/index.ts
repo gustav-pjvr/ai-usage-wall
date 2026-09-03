@@ -8,6 +8,8 @@
  * when one card changes.
  */
 
+import { currentPeak, loadPeak, offerPeak } from './data/peak';
+import { velocityOf } from '../shared/velocity';
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, screen, shell, nativeImage, nativeTheme } from 'electron';
 import * as path from 'node:path';
 import { promises as fs } from 'node:fs';
@@ -210,6 +212,15 @@ async function refreshUsage(reason: string): Promise<void> {
     usage = result.index;
     usageIndexing = false;
     if (result.rebuilt) console.log('[usage] a transcript shrank, index rebuilt from scratch');
+    /*
+     * Offer the reading to the record. A scan runs when a transcript is
+     * written, which is exactly when a peak can happen, so sampling here
+     * catches bursts without a timer of its own. A rebuild does not reset the
+     * record: peak.ts persists separately for precisely that reason.
+     */
+    if (await offerPeak(velocityOf(usage.recent))) {
+      console.log(`[peak] new record: ${Math.round(currentPeak()?.velocity ?? 0).toLocaleString()} tokens/min`);
+    }
     if (Date.now() - usageLastSave > USAGE_SAVE_INTERVAL_MS) {
       usageLastSave = Date.now();
       await saveIndex(usageCacheFile(), usage).catch((err) =>
@@ -1107,7 +1118,13 @@ function usageForRenderer(): Record<string, unknown> {
     return { ...emptyIndex(), fileCount: 0, indexing: false, projection: projection.projectionStatus() };
   }
   const { files, ...rest } = usage;
-  return { ...rest, fileCount: Object.keys(files).length, indexing: usageIndexing, projection: projection.projectionStatus() };
+  return {
+    ...rest,
+    peak: currentPeak(),
+    fileCount: Object.keys(files).length,
+    indexing: usageIndexing,
+    projection: projection.projectionStatus(),
+  };
 }
 
 /**
@@ -1529,6 +1546,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     usage = await loadIndex(usageCacheFile());
+    await loadPeak(app.getPath('userData'));
     if (projection.isScreen()) {
       console.log('[usage] not indexing: this machine is a projection screen');
     } else {

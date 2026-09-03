@@ -1,0 +1,192 @@
+/*
+ * The pairing window.
+ *
+ * Same palette as the dashboard, but this is a normal focusable window rather
+ * than a desktop layer, so it gets an opaque background and real focus rings.
+ * The code itself is the largest thing on screen because reading it aloud to
+ * someone at another machine is the actual job.
+ */
+
+:root {
+  --ground: oklch(0.15 0.014 250);
+  --panel: oklch(0.2 0.016 248);
+  --edge: oklch(1 0 0 / 0.1);
+  --fg: oklch(0.97 0.005 250);
+  --fg-dim: oklch(0.74 0.012 250);
+  --sig: oklch(0.8 0.14 192);
+  --bad: oklch(0.72 0.17 25);
+  --good: oklch(0.8 0.16 152);
+  --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--fg);
+  font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  user-select: none;
+}
+
+#pair {
+  padding: 22px 26px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.title {
+  font-size: 19px;
+  letter-spacing: -0.015em;
+}
+
+.lede {
+  color: var(--fg-dim);
+  max-width: 46ch;
+}
+
+.sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--edge);
+  padding-bottom: 8px;
+  margin-top: 6px;
+}
+
+/* The code is the point of the window: big, mono, selectable. */
+.code {
+  font-family: var(--mono);
+  font-size: 34px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  padding: 16px 10px;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid oklch(0.62 0.13 192 / 0.45);
+  color: var(--sig);
+  user-select: text;
+}
+
+.code:focus-visible {
+  outline: 2px solid var(--sig);
+  outline-offset: 3px;
+}
+
+.countdown {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-dim);
+  margin-top: -6px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid oklch(0.62 0.14 192 / 0.5);
+  background: linear-gradient(180deg, oklch(0.35 0.08 196), oklch(0.27 0.06 200));
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  padding: 9px 16px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  border-color: oklch(0.74 0.15 192 / 0.8);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--sig);
+  outline-offset: 2px;
+}
+
+.btn-quiet {
+  background: var(--panel);
+  border-color: var(--edge);
+  font-weight: 500;
+}
+
+.code-input {
+  font-family: var(--mono);
+  font-size: 22px;
+  letter-spacing: 0.14em;
+  text-align: center;
+  text-transform: uppercase;
+  padding: 13px 10px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+  color: var(--fg);
+  user-select: text;
+}
+
+.code-input:focus-visible {
+  outline: 2px solid var(--sig);
+  outline-offset: 2px;
+}
+
+.msg {
+  min-height: 1.4em;
+  font-size: 13px;
+  color: var(--fg-dim);
+}
+
+.msg.is-bad {
+  color: var(--bad);
+}
+
+.msg.is-ok {
+  color: var(--good);
+}
+
+.ok {
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--good);
+}
+
+.screen-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--edge);
+}
+
+.screen-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.screen-state {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--fg-dim);
+}
+
+.screen-state.is-on {
+  color: var(--good);
+}

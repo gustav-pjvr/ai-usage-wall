@@ -17,6 +17,7 @@ import { watch as watchFs, type FSWatcher } from 'node:fs';
 import { detectCapability, type Capability } from './capability';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { PRODUCT_NAME, isStatsOnly } from '../shared/edition';
+import { checkNow, installNow, startUpdater, stopUpdater, updateLabel, updateState } from './updater';
 import { loadClients, watchClients, type StoreSnapshot } from './data/store';
 import {
   PROJECTS_DIR,
@@ -456,6 +457,20 @@ function refreshTrayMenu(): void {
             { label: 'Reload clients', click: () => void reloadData() },
             { label: 'Open client data folder', click: () => void shell.openPath(resolveClientsDir()) },
           ]),
+      /*
+       * Updates. Only the shareable build has anything to do here, so the item
+       * is absent entirely in the full build rather than present and inert.
+       */
+      ...(isStatsOnly
+        ? [
+            {
+              label: updateLabel(),
+              enabled: updateState().phase === 'ready' || updateState().phase === 'idle' || updateState().phase === 'none' || updateState().phase === 'error',
+              click: () => (updateState().phase === 'ready' ? installNow() : checkNow()),
+            },
+            { type: 'separator' as const },
+          ]
+        : []),
       {
         label: 'Diagnostics overlay',
         type: 'checkbox',
@@ -963,6 +978,7 @@ function startWatching(): void {
 }
 
 function quit(): void {
+  stopUpdater();
   if (usageTimer) clearTimeout(usageTimer);
   usageWatcher?.close();
   // Persist whatever the periodic save has not yet flushed.
@@ -1023,6 +1039,22 @@ app.commandLine.appendSwitch('renderer-process-limit', '1');
 app.commandLine.appendSwitch('disable-background-networking');
 app.commandLine.appendSwitch('disable-component-update');
 app.commandLine.appendSwitch('disable-breakpad');
+/*
+ * Give the stats edition its own identity BEFORE anything asks for a path.
+ *
+ * electron-builder writes the repo's package.json into both editions' asar, so
+ * both reported productName "MuchBetter Client Wall" and therefore resolved to
+ * the SAME userData folder and the same single-instance lock. Two consequences,
+ * both bad: the shareable build read the full build's settings and client data
+ * folder, and the second edition to launch exited with "another instance is
+ * already running" on any machine running both, which is exactly the projection
+ * setup.
+ *
+ * setName must run before app is ready and before any getPath('userData'), so
+ * it lives here at module scope rather than in a start function.
+ */
+if (isStatsOnly) app.setName(PRODUCT_NAME);
+
 app.commandLine.appendSwitch('no-pings');
 app.commandLine.appendSwitch('disable-features', 'Translate,MediaRouter,OptimizationHints,DialMediaRouteProvider');
 // We load only local files over our own protocol, never remote origins, so
@@ -1071,6 +1103,8 @@ if (!app.requestSingleInstanceLock()) {
 
     windows = targetDisplays().map(createWindowForDisplay);
     buildTray();
+    // After the tray, so a state change has a menu to refresh.
+    startUpdater(() => refreshTrayMenu());
     registerHotkeys();
     applyStartup();
 

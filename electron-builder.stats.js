@@ -18,6 +18,17 @@
 module.exports = {
   appId: 'world.muchbetter.claudestatswall',
   productName: 'Claude Stats Wall',
+  /*
+   * No spaces in the artefact name.
+   *
+   * The product name has three, and latest.yml refers to the installer by its
+   * exact filename, so every update URL became percent-encoded. That is legal
+   * and it is a nuisance at every layer: the update route had to accept spaces,
+   * logs are unreadable, and one missed decode is a 404 that only shows up as
+   * "update failed" on someone else's machine. Removing them once here is
+   * cheaper than handling them everywhere forever.
+   */
+  artifactName: 'ClaudeStatsWall-Setup-${version}.${ext}',
   directories: {
     output: 'release-stats',
     buildResources: 'assets',
@@ -54,6 +65,25 @@ module.exports = {
     installerIcon: 'assets/logo/icon.ico',
     uninstallerIcon: 'assets/logo/icon.ico',
   },
+  /*
+   * The update feed. `generic` means a plain HTTPS directory holding
+   * latest.yml, the installer and its blockmap: no credential, no GitHub token
+   * in a binary handed to strangers, which is the objection that used to rule
+   * auto-update out. electron-builder writes latest.yml at package time and
+   * embeds this URL as app-update.yml inside the app.
+   *
+   * The blockmap is what makes an update a partial download: electron-updater
+   * fetches only the changed blocks, so a patch release is a few MB rather than
+   * the full 107.
+   */
+  publish: [
+    {
+      provider: 'generic',
+      url: 'https://claude-stats-wall.gustavpjvr.workers.dev/updates/',
+      channel: 'latest',
+    },
+  ],
+
   compression: 'normal',
   removePackageScripts: true,
 };

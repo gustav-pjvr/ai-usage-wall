@@ -743,13 +743,41 @@ Three decisions carry it:
 
 | Output | Use |
 |---|---|
-| `assets/logo/mark.svg` | vector master, full wall |
-| `assets/logo/mark-small.svg` | vector master, reduced variant |
+| `assets/logo/mark{,-dark}.svg` | vector master, full wall, per theme |
+| `assets/logo/mark-small{,-dark}.svg` | vector master, reduced variant, per theme |
 | `assets/logo/icon.ico` | app and installer icon, 7 entries (16 to 256) |
-| `assets/tray.png` + `tray@2x.png` | tray icon, 1x and 2x |
+| `assets/logo/icon-dark.ico` | dark-theme set, not shipped: Windows bakes one icon |
+| `assets/tray{,-dark}.png` + `@2x` | tray icon, both themes, 1x and 2x |
 | `assets/logo/lockup-on-{light,dark}.png` | wordmark, 1x and 2x |
 
 Three things about it are deliberate:
+
+- **Two THEMES, one geometry.** A light set on a white plate and a dark set on
+  the wall's own backdrop colour. Not one coordinate moves between them: only
+  the plate and the brick lightness change, because they have to read as the
+  same mark. The brick lightness genuinely differs (0.62 on white, 0.74 on
+  near-black); one value for both means choosing which theme to disappoint. The
+  dark set also lifts the shard alpha floor to 0.58, because a fading shard
+  fades towards the plate and 0.42 was invisible on black while still readable
+  on white.
+
+  The TRAY icon follows the taskbar theme at runtime. The app icon (`.ico`)
+  cannot: Windows bakes one icon per executable, so the light plate ships there
+  and carries its own background on any surface.
+
+- **The tray reads `SystemUsesLightTheme`, not `nativeTheme`.** Windows keeps
+  two independent settings: `AppsUseLightTheme` for application chrome and
+  `SystemUsesLightTheme` for the taskbar and tray. Electron's
+  `nativeTheme.shouldUseDarkColors` reports the app one, so using it to pick a
+  tray icon picks by the wrong setting, and wrongly for exactly the people who
+  mix the two.
+
+  `nativeTheme.on('updated')` is also not sufficient, and this was TESTED rather
+  than assumed: flipping `SystemUsesLightTheme`, even with a WM_SETTINGCHANGE /
+  ImmersiveColorSet broadcast, never raised the event. So the event is kept for
+  the common case (Settings changes both at once) and a 30 second poll covers a
+  taskbar-only change. The poll is affordable only because the read is an
+  in-process `RegGetValueW` through koffi rather than a `reg.exe` spawn.
 
 - **Two variants, with a switch at 64px.** At and above 64 the full wall is
   used; below it a reduced variant of eight chunky bricks and two chips takes

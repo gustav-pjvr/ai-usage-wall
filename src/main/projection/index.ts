@@ -102,19 +102,20 @@ export function stopProjection(): void {
 /**
  * The consent gate.
  *
- * Shown once, before the first byte can ever leave. It names the exact host, it
+ * Shown once, before the first byte can ever leave. It names the exact host it will talk to, it
  * says what is sent and what is not, and it says that nothing goes anywhere
  * until a screen is paired, which is literally true: without a paired screen
  * there is no key to encrypt for.
  */
-function consent(role: 'source' | 'screen'): boolean {
+function consent(role: 'source' | 'screen', relayUrl: string = DEFAULT_RELAY): boolean {
+  const host = relayHost(relayUrl);
   const detail =
     role === 'source'
-      ? `${PRODUCT_NAME} will connect to the relay and send this machine's dashboard, encrypted, to screens you pair with a code.\n\n` +
+      ? `${PRODUCT_NAME} will connect to ${host} and send this machine's dashboard, encrypted, to screens you pair with a code.\n\n` +
         'Sent: token totals, daily and hourly activity, model names, session times, project folder names, Claude Code version.\n\n' +
         'Never sent: file paths, your Windows username, prompts, or any transcript text.\n\n' +
-        'The relay forwards ciphertext it cannot read and stores nothing. Nothing is sent until you pair a screen, and you can stop from the tray at any time.'
-      : `${PRODUCT_NAME} will connect to the relay and display a paired machine's dashboard.\n\n` +
+        `${host} forwards ciphertext it cannot read, keeps no message content, and has request logging turned off. Nothing is sent until you pair a screen, and you can stop from the tray at any time.`
+      : `${PRODUCT_NAME} will connect to ${host} and display a paired machine's dashboard.\n\n` +
         'While this machine is a screen it does not read its own Claude Code transcripts.\n\n' +
         'You can unpair from the tray at any time.';
 
@@ -268,11 +269,18 @@ export function shareProjectNames(): boolean {
   return source?.current().shareProjectNames ?? true;
 }
 
-export function relayHost(): string {
+/**
+ * Just the host of the relay, for the tray label and the consent dialog. A full
+ * URL inside a sentence reads as noise; the host is the part a person can
+ * actually judge. Falls back to the raw string if it will not parse, because
+ * showing something odd beats showing nothing when the question is whether to
+ * trust it.
+ */
+export function relayHost(url: string = DEFAULT_RELAY): string {
   try {
-    return new URL(DEFAULT_RELAY).host;
+    return new URL(url).host;
   } catch {
-    return DEFAULT_RELAY;
+    return url;
   }
 }
 

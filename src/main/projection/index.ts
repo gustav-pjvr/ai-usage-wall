@@ -10,7 +10,7 @@
 import { dialog } from 'electron';
 import { PRODUCT_NAME } from '../../shared/edition';
 import { normaliseCode } from '../../shared/pairing-code';
-import { lookupOf, newKeyPair, newSecret, newSpaceId, deriveScreenKey } from './crypto';
+import { deriveScreenKey, lookupFromStretched, newKeyPair, newSecret, newSpaceId, stretchCode } from './crypto';
 import { ScreenReceiver, type ScreenStatus } from './screen';
 import { SourceProjector, type SourceStatus } from './source';
 import {
@@ -183,7 +183,14 @@ export async function redeemCode(raw: string): Promise<{ ok: boolean; message: s
   const code = normaliseCode(raw);
   if (!code) return { ok: false, message: 'That does not look like a pairing code. It is 12 characters.' };
 
-  const lookup = lookupOf(code);
+  /*
+   * scrypt runs HERE, once, and both the lookup sent to the relay and the key
+   * derived below come from it. It blocks the main process for about 100 ms in
+   * response to the user pressing Pair, which is acceptable, and it is not run
+   * a second time inside deriveScreenKey.
+   */
+  const stretched = stretchCode(code);
+  const lookup = lookupFromStretched(stretched);
   const keyPair = newKeyPair();
 
   let res: Response;
@@ -209,7 +216,7 @@ export async function redeemCode(raw: string): Promise<{ ok: boolean; message: s
 
   let key: Buffer;
   try {
-    key = deriveScreenKey(keyPair.privateKey, body.sourcePub, code, lookup);
+    key = deriveScreenKey(keyPair.privateKey, body.sourcePub, stretched, lookup);
   } catch (err) {
     return { ok: false, message: `Could not complete the key exchange: ${(err as Error).message}` };
   }

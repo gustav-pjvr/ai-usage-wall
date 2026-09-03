@@ -53,9 +53,20 @@ const configs = [
     outfile: path.join(dist, 'preload/index.js'),
     external: ['electron'],
   },
+  /*
+   * The two browser bundles are IIFE, not CJS.
+   *
+   * They are loaded by a plain <script> tag, which has no `module` object. An
+   * entry with any top-level export makes esbuild emit the CommonJS wrapper,
+   * and the whole bundle then dies on `ReferenceError: module is not defined`
+   * before a single line runs. pair.ts needs `export {}` for its `declare
+   * global` block, so it hit this and rendered an empty window. main.ts only
+   * escaped by having no exports, which is luck rather than design.
+   */
   {
     ...common,
     platform: 'browser',
+    format: 'iife',
     target: 'chrome120',
     entryPoints: [path.join(root, 'src/renderer/main.ts')],
     outfile: path.join(dist, 'renderer/main.js'),
@@ -65,6 +76,7 @@ const configs = [
   {
     ...common,
     platform: 'browser',
+    format: 'iife',
     target: 'chrome120',
     entryPoints: [path.join(root, 'src/renderer/pair.ts')],
     outfile: path.join(dist, 'renderer/pair.js'),

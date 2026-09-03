@@ -16,6 +16,8 @@
   --sig: oklch(0.78 0.14 195);
   --sig-dim: oklch(0.62 0.1 200);
   --warn: oklch(0.8 0.14 75);
+  /* Same value as --bad in pair.css: one failure colour across both surfaces. */
+  --bad: oklch(0.72 0.17 25);
   --grid-line: oklch(1 0 0 / 0.045);
   --panel-bg: oklch(0.175 0.016 245);
   --panel-edge: oklch(1 0 0 / 0.075);
@@ -612,7 +614,8 @@
     opacity: 1;
     transform: none;
   }
-  .live-state::before { animation: none !important; }
+  .live-state::before,
+  .proj-dot { animation: none !important; }
   .eff-fill { transition: none; }
 }
 
@@ -853,7 +856,9 @@
  * zero usage, which is a claim rather than an absence.
  *
  * "is-stale-data": the source is unreadable but cached numbers exist. They are
- * real, just not current, so they stay on screen and are visibly marked.
+ * real, just not current, so they stay on screen and are visibly marked. A
+ * projection SCREEN takes the same state in every phase but `live`: the numbers
+ * were real when the last frame arrived and the status pill carries their age.
  */
 .nodata {
   position: absolute;
@@ -913,6 +918,15 @@
   filter: saturate(0.7);
 }
 
+/*
+ * The throughput footer keeps its signal colour and its activity dot from the
+ * record timestamps inside the data, which on a dead link still look recent.
+ * Stale data gets the amber and loses the dot, so nothing down there claims
+ * liveness the link cannot back.
+ */
+.stats.is-stale-data .live-state { color: var(--warn); }
+.stats.is-stale-data .live-state::before { display: none; }
+
 .stats.is-stale-data .panel-hero::before {
   content: 'NOT LIVE';
   position: absolute;
@@ -923,4 +937,52 @@
   letter-spacing: 0.14em;
   color: var(--warn);
   z-index: 3;
+}
+
+/* ── Projection pill ────────────────────────────────────────────────────── */
+
+/*
+ * First item in the strip, present only while projection is on. It keeps
+ * mixed case on purpose: the strip uppercases everything else, but here the
+ * capitals are the state word and the source machine's name must read as
+ * typed, or "LIVE from Gustav-PC" would collapse into one shout.
+ */
+.status-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  text-transform: none;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: oklch(0.6 0.014 240);
+}
+
+/* An author display value beats the UA [hidden] rule, so restate it. */
+.status-proj[hidden] { display: none; }
+
+.status-proj[data-tone='live'] { color: var(--sig); }
+.status-proj[data-tone='warn'] { color: var(--warn); }
+.status-proj[data-tone='bad'] { color: var(--bad); }
+
+/*
+ * The dot exists only for a SCREEN in the live phase: it means frames are
+ * arriving, which an open socket on a source does not. It carries no base
+ * transform, so the shared pulse keyframe may own `transform` outright; give
+ * it one and the keyframe overwrites it, which is rule 3.
+ */
+.proj-dot {
+  display: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+
+.status-proj[data-role='screen'][data-tone='live'] .proj-dot {
+  display: inline-block;
+  animation: sig-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }

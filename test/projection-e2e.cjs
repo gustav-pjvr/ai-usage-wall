@@ -4,7 +4,8 @@
  * Drives the real SourceProjector and ScreenReceiver classes rather than
  * reimplementing the protocol, so this catches the things the unit tests
  * cannot: the socket lifecycle, the pairing handshake as the app actually
- * performs it, framing, and the staleness state machine.
+ * performs it, framing, the staleness state machine, and the replay boundary
+ * surviving a screen restart.
  *
  * The consent dialogs are bypassed on purpose. They are UI, they block, and
  * what is under test here is the runtime beneath them.
@@ -77,6 +78,7 @@ app.whenReady().then(async () => {
   const { ScreenReceiver } = require(scrBundle);
   const cx = require(cxBundle);
   const RELAY = 'https://claude-stats-relay.gustavpjvr.workers.dev';
+  const notice = (t, b) => console.log(`        [notice] ${t}: ${b}`);
 
   console.log('\nprojection end to end (real classes, deployed relay)\n');
 
@@ -94,7 +96,7 @@ app.whenReady().then(async () => {
       shareProjectNames: true,
     },
     (s) => (srcStatus = s),
-    (t, b) => console.log(`        [notice] ${t}: ${b}`),
+    notice,
   );
   source.start();
 
@@ -127,7 +129,10 @@ app.whenReady().then(async () => {
   await wait(800);
 
   const raw = offer.code.replace(/-/g, '');
-  const lookup = cx.lookupOf(raw);
+  // Exactly what redeemCode does: one scrypt, and both the lookup and the key
+  // come from it.
+  const stretched = cx.stretchCode(raw);
+  const lookup = cx.lookupFromStretched(stretched);
   const kp = cx.newKeyPair();
   const res = await fetch(`${RELAY}/v1/pair/redeem`, {
     method: 'POST',
@@ -136,20 +141,17 @@ app.whenReady().then(async () => {
   });
   ok('the relay accepts the code', res.status === 200, `got ${res.status}`);
   const creds = await res.json();
-  const key = cx.deriveScreenKey(kp.privateKey, creds.sourcePub, raw, lookup);
+  const key = cx.deriveScreenKey(kp.privateKey, creds.sourcePub, stretched, lookup);
+
+  const screenState = {
+    role: 'screen', relayUrl: RELAY, spaceId: creds.spaceId, screenId: creds.screenId,
+    screenToken: creds.token, key: key.toString('base64'), sourceLabel: '',
+    pairedAt: new Date().toISOString(),
+  };
 
   let received = null;
   let scrStatus = null;
-  const screen = new ScreenReceiver(
-    {
-      role: 'screen', relayUrl: RELAY, spaceId: creds.spaceId, screenId: creds.screenId,
-      screenToken: creds.token, key: key.toString('base64'), sourceLabel: '',
-      pairedAt: new Date().toISOString(),
-    },
-    (u) => (received = u),
-    (s) => (scrStatus = s),
-    (t, b) => console.log(`        [notice] ${t}: ${b}`),
-  );
+  const screen = new ScreenReceiver(screenState, (u) => (received = u), (s) => (scrStatus = s), notice);
   await screen.start();
 
   ok('the screen reaches LIVE from a decrypted frame',
@@ -171,15 +173,57 @@ app.whenReady().then(async () => {
   ok('the project arrived as a label', json.includes('muchbetter-client-wall'));
   ok('the totals arrived intact', received?.totals?.requests === 6, JSON.stringify(received?.totals));
 
+  // ── Replay across a restart ──────────────────────────────────────────────
+  /*
+   * The accepted sequence must survive a restart. Before it was persisted, a
+   * relay that had kept old ciphertexts could replay them in ascending order
+   * after any restart and each one was accepted and shown as current.
+   *
+   * `lastSeq` and `handle` are private in TypeScript and plain properties in
+   * the bundle; reaching in is what lets this inject a frame the relay would
+   * have to be malicious to send.
+   */
+  const cacheFile = path.join(OUT, 'projection-last.json');
+  ok('the screen persisted its accepted sequence', await until('cache written', () => fs.existsSync(cacheFile)));
+  screen.stop();
+  await wait(300);
+
+  let received2 = null;
+  let scrStatus2 = null;
+  const screen2 = new ScreenReceiver(screenState, (u) => (received2 = u), (s) => (scrStatus2 = s), notice);
+  await screen2.start();
+  ok('the restarted screen shows the cached frame immediately', received2?.totals?.requests === 6,
+     JSON.stringify(received2?.totals));
+  ok('the restarted screen does not claim live on a cached frame', scrStatus2?.phase !== 'live', scrStatus2?.phase);
+  const restoredSeq = screen2.lastSeq;
+  ok('the accepted sequence was restored, not reset to 0', restoredSeq > 0, String(restoredSeq));
+
+  // Sequence 1 would have passed a screen that reset to 0. The payload carries
+  // a recognisable number so the assertion cannot be fooled by a real frame
+  // from the source arriving at the same moment.
+  const replayed = cx.seal(key, 1, { sentAt: Date.now(), body: { t: 'frame', usage: { v: 1, totals: { requests: 999 } } } });
+  await screen2.handle({ t: 'frame', ct: replayed });
+  ok('a replayed frame older than the restored sequence is rejected', received2?.totals?.requests !== 999);
+  ok('a rejected replay does not refresh liveness', scrStatus2?.phase !== 'live', scrStatus2?.phase);
+
+  const fresh = cx.seal(key, restoredSeq + 1, { sentAt: Date.now(), body: { t: 'frame', usage: { v: 1, totals: { requests: 777 } } } });
+  await screen2.handle({ t: 'frame', ct: fresh });
+  ok('a frame newer than the restored sequence is still accepted', received2?.totals?.requests === 777,
+     JSON.stringify(received2?.totals));
+
+  ok('the restarted screen goes live again on real frames from the source',
+     await until('screen2 live', () => scrStatus2?.phase === 'live' && received2?.totals?.requests === 6),
+     JSON.stringify(scrStatus2));
+
   // ── Revocation ───────────────────────────────────────────────────────────
   const screenId = creds.screenId;
   await source.revoke(screenId);
   ok('the screen is told it was revoked',
-     await until('revoked', () => scrStatus?.phase === 'revoked'), JSON.stringify(scrStatus));
+     await until('revoked', () => scrStatus2?.phase === 'revoked'), JSON.stringify(scrStatus2));
   ok('the source drops the screen from its list',
      await until('dropped', () => !srcStatus?.screens?.some((s) => s.screenId === screenId)));
 
-  screen.stop();
+  screen2.stop();
   source.destroy();
   await wait(500);
 

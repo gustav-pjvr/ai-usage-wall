@@ -17,9 +17,11 @@
  */
 
 import type { KeyObject } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { toWire, type ProjectedUsage } from '../../shared/projection-wire';
 import { CODE_TTL_MS, formatCode, generateCode } from '../../shared/pairing-code';
-import { deriveScreenKey, lookupOf, newKeyPair, open, randomBytes, seal } from './crypto';
+import { deriveScreenKey, lookupFromStretched, newKeyPair, open, randomBytes, seal, stretchCode } from './crypto';
 import { RelaySocket, type SocketStatus } from './relay-socket';
 import { saveProjection, type SourceState } from './store';
 
@@ -42,6 +44,20 @@ const WIRE_MIN_INTERVAL_MS = 10_000;
  */
 const BEAT_MS = 30_000;
 
+/**
+ * The leaf of the home directory, which on Windows IS the username. It goes to
+ * toWire so a label equal to it is masked: running Claude Code from the home
+ * folder made the username the project label, and the consent dialog promises
+ * the username is never sent.
+ */
+const HOME_DIR_NAME = ((): string => {
+  try {
+    return path.basename(os.homedir());
+  } catch {
+    return '';
+  }
+})();
+
 export interface SourceScreenStatus {
   screenId: string;
   label: string;
@@ -62,6 +78,8 @@ export interface SourceStatus {
 
 interface PendingOffer {
   code: string;
+  /** scrypt of the code, computed once in beginPairing and reused for the key. */
+  stretched: Buffer;
   lookup: string;
   keyPair: { privateKey: KeyObject; publicKey: string };
   expiresAt: number;
@@ -146,9 +164,16 @@ export class SourceProjector {
 
   beginPairing(): { code: string; expiresAt: number } {
     const code = generateCode(randomBytes);
+    /*
+     * scrypt runs HERE, once per pairing, and the result serves both the
+     * lookup sent now and the key derived when the screen pairs. About 100 ms
+     * on the main thread in response to a click, which is acceptable; it must
+     * never move into the per-message path, and 'paired' must not run it again.
+     */
+    const stretched = stretchCode(code);
     const keyPair = newKeyPair();
     const expiresAt = Date.now() + CODE_TTL_MS;
-    this.pending = { code, lookup: lookupOf(code), keyPair, expiresAt };
+    this.pending = { code, stretched, lookup: lookupFromStretched(stretched), keyPair, expiresAt };
 
     this.socket.send({
       t: 'offer',
@@ -215,7 +240,7 @@ export class SourceProjector {
 
         let key: Buffer;
         try {
-          key = deriveScreenKey(pending.keyPair.privateKey, screenPub, pending.code, pending.lookup);
+          key = deriveScreenKey(pending.keyPair.privateKey, screenPub, pending.stretched, pending.lookup);
         } catch (err) {
           console.warn('[projection] could not derive a key for the new screen:', (err as Error).message);
           return;
@@ -340,6 +365,7 @@ export class SourceProjector {
         shareProjectNames: this.state.shareProjectNames,
         sourceLabel: this.state.label,
         indexing,
+        homeDirName: HOME_DIR_NAME,
       });
     } catch (err) {
       console.warn('[projection] could not build a frame:', (err as Error).message);
@@ -378,13 +404,25 @@ export class SourceProjector {
     this.lastSend = Date.now();
 
     for (const screen of this.state.screens) {
-      if (!this.online.has(screen.screenId)) continue;
+      if (!this.online.has(screen.screenId) || !screen.confirmed) continue;
       this.sendTo(screen.screenId, { t: 'frame', usage: this.latest });
     }
   }
 
+  /**
+   * Nothing but the hello goes to a screen that has not proved its key.
+   *
+   * The hello-ack is the proof that both sides derived the same key. Before
+   * this gate the whole dashboard went out on connect and on every change
+   * regardless, so the confirmed flag only ever changed a tray label. A screen
+   * that cannot open the hello could not open a frame either, so withholding
+   * them costs a real screen nothing: the ack arrives within a second and the
+   * push in the 'up' handler sends the first frame the moment it does.
+   */
   private pushNow(screenId: string): void {
     if (!this.latest) return;
+    const record = this.state.screens.find((s) => s.screenId === screenId);
+    if (!record?.confirmed) return;
     this.sendTo(screenId, { t: 'frame', usage: this.latest });
   }
 
@@ -393,7 +431,8 @@ export class SourceProjector {
     // Only if nothing has gone out recently: a real frame is a better beat.
     if (Date.now() - this.lastSend < BEAT_MS) return;
     for (const screen of this.state.screens) {
-      if (this.online.has(screen.screenId)) this.sendTo(screen.screenId, { t: 'beat' });
+      // Same gate as the frames: an unconfirmed screen gets the hello and nothing else.
+      if (this.online.has(screen.screenId) && screen.confirmed) this.sendTo(screen.screenId, { t: 'beat' });
     }
   }
 

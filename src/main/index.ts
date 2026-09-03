@@ -1270,9 +1270,28 @@ if (!app.requestSingleInstanceLock()) {
         refreshTrayMenu();
         pushPairStatus();
         pushState();
-        // A screen's data arrives over the wire, so a status change is often
-        // the only signal the renderer gets.
-        if (projection.isScreen()) pushUsage();
+
+        /*
+         * UNCONDITIONAL, and that matters.
+         *
+         * This was gated on `isScreen()`, which is false at exactly the moment
+         * it needs to be true: unpairing nulls the screen BEFORE it publishes
+         * the "off" status, so the one push that would have cleared the wall
+         * never happened. A machine that had been a screen went on showing
+         * "LIVE from <source>" at full brightness for ever, with numbers that
+         * had stopped arriving. Status changes are rare; an extra push is free.
+         */
+        pushUsage();
+
+        /*
+         * Coming back from being a screen, this machine has not indexed its own
+         * transcripts since it was paired, so `usage` is whatever was cached at
+         * startup. Start reading again rather than leaving old numbers up.
+         */
+        if (projection.projectionStatus().role === 'off' && !usageWatcher && !isDev) {
+          console.log('[usage] projection off, resuming local indexing');
+          void refreshUsage('projection-off').then(startUsageWatch);
+        }
       },
       onUsage: () => pushUsage(),
       notify: (title, content) => {

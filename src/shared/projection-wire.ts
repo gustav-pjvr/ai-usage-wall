@@ -100,6 +100,26 @@ export interface WireOptions {
   sourceLabel: string;
   indexing: boolean;
   sentAt?: number;
+  /**
+   * The leaf of the home directory, which on Windows is the username. Any
+   * label segment equal to it (case-insensitively) is replaced with "home":
+   * a project run from the home folder would otherwise be labelled with the
+   * username, and two same-named folders directly under it would carry it as
+   * the parent prefix. The consent dialog promises the username is never sent.
+   */
+  homeDirName?: string;
+}
+
+const HOME_LABEL = 'home';
+
+/** Labels are "leaf" or "parent / leaf"; mask either segment when it is the home directory. */
+function maskHome(label: string, homeDirName: string | undefined): string {
+  if (!homeDirName) return label;
+  const home = homeDirName.toLowerCase();
+  return label
+    .split(' / ')
+    .map((segment) => (segment.toLowerCase() === home ? HOME_LABEL : segment))
+    .join(' / ');
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -117,7 +137,7 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
     const paths = raw.map(([key, v]) => (typeof v?.display === 'string' && v.display) || key);
     const labels = labelProjects(paths);
     raw.forEach(([key, v], i) => {
-      const label = labels.get(paths[i]) ?? `project ${i + 1}`;
+      const label = maskHome(labels.get(paths[i]) ?? `project ${i + 1}`, opts.homeDirName);
       // Two paths can label the same only if they are genuinely the same
       // folder name in the same parent, so fold rather than overwrite.
       const existing = projects[label];
@@ -159,9 +179,12 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
     };
   });
 
-  // latest.cwd becomes a label, or nothing. Never the path.
-  const latestCwd = typeof idx.latest?.cwd === 'string' ? idx.latest.cwd : null;
-  const latestProject = latestCwd ? (labelProjects([latestCwd]).get(latestCwd) ?? null) : null;
+  // latest.cwd becomes a label, or nothing. Never the path, and nothing at all
+  // when project names are not shared: this is the folder the user is in RIGHT
+  // NOW, and it used to go out regardless of the toggle.
+  const latestCwd = opts.shareProjectNames && typeof idx.latest?.cwd === 'string' ? idx.latest.cwd : null;
+  const latestLabel = latestCwd ? (labelProjects([latestCwd]).get(latestCwd) ?? null) : null;
+  const latestProject = latestLabel ? maskHome(latestLabel, opts.homeDirName) : null;
 
   return {
     v: WIRE_VERSION,

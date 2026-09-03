@@ -125,7 +125,10 @@ so deleting the file is safe.
 ## Claude Stats
 
 Everything on that view is read from `~/.claude/projects/**/*.jsonl` and
-`~/.claude/history.jsonl` on this machine. No API, no account, no network.
+`~/.claude/history.jsonl` on this machine. No API, no account, and no network to
+produce any of it. The app reaches the network for exactly two things, neither of
+which reads or sends a transcript: [projection](#projection), which is off until
+you turn it on, and the update check in the stats build.
 
 Panels are tagged **MEASURED** (straight from the transcripts) or **DERIVED**
 (computed, with the method printed on the panel). Three things are deliberately
@@ -135,6 +138,124 @@ cost.** The status strip says so rather than showing a guess.
 The first index takes about five seconds and is cached; after that it only reads
 the bytes appended since last time, triggered by a filesystem watch rather than a
 timer. Full reasoning in [ARCHITECTURE.md](ARCHITECTURE.md#claude-stats).
+
+## Projection
+
+**Off by default, and off is structural rather than a promise.** With no
+credentials file the socket class is never constructed, so there is no connection
+to leak, misconfigure or forget about. Turning it on is a deliberate act with a
+consent dialog in front of it.
+
+Projection puts one machine's dashboard on another machine's screen. The
+**source** reads its own `~/.claude` as usual and sends an encrypted snapshot to
+each **screen** it has paired. A machine acting as a screen does not index its
+own transcripts at all while it is one.
+
+Both editions have it. The relay is
+`https://claude-stats-relay.gustavpjvr.workers.dev`, a separate Cloudflare Worker
+that forwards ciphertext it cannot read.
+
+### Turning it on
+
+Tray icon, right-click, **Projection**. The first line of that submenu is a
+disabled readout of the current state, not a button: `Off (no network)`,
+`Projecting to 1 of 2 screens`, `Showing <label> (live)`.
+
+| Machine | Menu item |
+|---|---|
+| The one with the numbers (the **source**) | `Project this machine to another screen...` |
+| The one you want to watch on (the **screen**) | `Show another machine here...` |
+
+Either one shows a **modal consent dialog first**, titled "Turn on projection?",
+which lists what will be sent and what never will and states that nothing goes
+anywhere until a screen is paired. Cancel and nothing is written at all: no
+credentials file means no projection.
+
+### Pairing
+
+On the source, **Show a pairing code...**. That generates a **12-character** code
+over a Crockford base32 alphabet (no I, L, O or U so it can be read aloud),
+displayed as `XXXX-XXXX-XXXX` and valid for **ten minutes**. Type it on the
+screen. The two machines do an X25519 exchange that the code authenticates, and
+each ends up holding its own AES-256-GCM key. Up to 8 screens per source.
+
+**Nothing is sent before a screen is paired**, and again that is structural:
+without a paired screen there is no key to encrypt for, so there is nothing the
+source could send even if it wanted to.
+
+### What is sent
+
+`toWire()` in `src/shared/projection-wire.ts` is the only serialiser, and it
+names every field explicitly rather than spreading an object, so a field added to
+the index later cannot reach the wire by accident.
+
+- token totals: input, output, cache writes, cache reads, thinking, requests,
+  web search and web fetch counts
+- daily and hourly activity
+- model names
+- per-session start, end, requests, tokens and models
+- the last twenty minutes of throughput
+- prompt **counts** by day, and when the last one was
+- the Claude Code version, and a transcript file **count**
+- a label for the source machine, which is its Windows computer name: it is set
+  from `os.hostname()` and there is no UI to change it
+
+**Sent only while the tray checkbox `Send project folder names` is on** (it is on
+by default): project folder names. The folder name itself and nothing above it,
+except that one parent segment is prefixed when two projects would otherwise
+share a leaf name.
+
+### What is never sent
+
+- filesystem paths
+- the Windows username
+- session ids
+- prompt text
+- transcript text
+
+`sessions` are re-keyed by array index precisely so a session id cannot ride
+along, and when the index is unavailable the wire carries a fixed string rather
+than the real OS error, which could name a path.
+
+### What the relay can see
+
+It is a blind forwarder, and the honest list is:
+
+- that a machine is connected, and whether it is a source or a screen
+- its IP address (a failed pairing redemption also stores the IP for ten minutes,
+  to rate limit guessing)
+- the timing and size of every frame, which reveals **when** you are working
+
+It cannot see what any of the numbers are. It holds no key, never parses a
+frame's ciphertext, and **stores no frames at all**, not even the most recent
+one, which is why a screen connecting to an idle source waits for the source
+instead of being served something stale.
+
+Snapshots go out on change, floored at **one per 10 seconds**, plus one
+unthrottled full frame whenever a screen connects, which is what makes a
+reconnecting screen fill in immediately. While a screen is connected and nothing
+has changed, the source sends a **30 second** encrypted beat carrying no payload.
+
+### Credentials, and turning it off
+
+`projection.json` in the app's userData folder
+(`%APPDATA%\MuchBetter Client Wall\` or `%APPDATA%\Claude Stats Wall\`),
+encrypted with Electron's `safeStorage`, which on Windows is DPAPI scoped to the
+logged-in user, so copying the file to another machine yields nothing.
+Deliberately **not** in `settings.json`: that file gets hand-edited, backed up and
+pasted into chat windows when something goes wrong, and it is the wrong home for
+a key that decrypts a live feed of someone's machine. If `safeStorage` ever
+reports encryption unavailable the file is written as plain JSON instead, and the
+reader detects that by sniffing for a leading `{`.
+
+**Deleting `projection.json` turns everything off and forgets every pairing.**
+Its presence is the on switch, so with it gone no network object is constructed.
+`Stop projecting and forget all screens` in the tray does exactly that.
+
+Removing one screen (`Remove this screen`) **deletes that screen's key here
+first** and tells the relay second, so a revoked screen stops working immediately
+whether or not the relay cooperates. A revocation made while the source is
+offline is replayed on the next connect.
 
 ## The shareable build
 
@@ -150,17 +271,25 @@ There are two editions from one codebase, chosen at build time.
 | Obsidian vault | read when configured | never read |
 
 **Claude Stats Wall is the one you can hand to someone else.** It reads only the
-recipient's own `~/.claude`, needs no account, no API key and no network, and
-carries no MuchBetter client data: `data/` is not in its `extraResources`, so
-there is nothing to leak even in principle. It installs alongside the full build
-under its own appId rather than upgrading over it.
+recipient's own `~/.claude`, needs no account and no API key, and carries no
+MuchBetter client data: `data/` is not in its `extraResources`, so there is
+nothing to leak even in principle. It installs alongside the full build under its
+own appId rather than upgrading over it.
 
-Two things to say when you hand it over:
+Four things to say when you hand it over:
 
 - **The installer is not code-signed**, so Windows SmartScreen will warn on
   first run. "More info" then "Run anyway".
 - **Without Claude Code installed** it says "No Claude Code data on this
   machine" and names the path it looked in, rather than showing zeros.
+- **It updates itself.** Unlike the full build, the stats build checks the
+  download site for a new version 90 seconds after launch and every six hours
+  after that, downloads quietly and installs on quit. It sends nothing about the
+  recipient's usage to do it, but it is a network request and saying "no network"
+  about this build is no longer true.
+- **It can project.** [Projection](#projection) ships in both editions. It is off
+  by default, and a consent dialog and a pairing code stand between a fresh
+  install and a single byte leaving the machine.
 
 `npm run deploy` only ever touches the FULL build, on this machine.
 

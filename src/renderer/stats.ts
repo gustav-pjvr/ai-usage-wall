@@ -15,6 +15,8 @@
  */
 
 import type { UsageIndex, TokenTotals } from '../main/data/usage';
+import type { ProjectionStatus } from '../main/projection';
+import type { ScreenStatus } from '../main/projection/screen';
 
 // ── Formatting ─────────────────────────────────────────────────────────────
 
@@ -30,15 +32,30 @@ export function compact(n: number): string {
 
 const full = (n: number) => n.toLocaleString('en-US');
 
-function relTime(iso: string | null): string {
-  if (!iso) return 'never';
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return 'unknown';
+/** Age of an epoch-ms instant, coarse on purpose: "3m ago" is all a glance needs. */
+function relAgo(t: number): string {
   const s = Math.max(0, (Date.now() - t) / 1000);
   if (s < 45) return 'just now';
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
+}
+
+function relTime(iso: string | null): string {
+  if (!iso) return 'never';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return 'unknown';
+  return relAgo(t);
+}
+
+/**
+ * Wall-clock HH:MM in the viewer's own zone, for "data as of 14:32". Built by
+ * hand rather than with toLocaleTimeString, which some locales render as
+ * "14.32" or with a suffix, and a status pill has no room for either.
+ */
+function clockTime(t: number): string {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -53,6 +70,79 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 const totalOf = (t: TokenTotals) => t.input + t.output + t.cacheCreate + t.cacheRead;
+
+// ── Projection status wording ──────────────────────────────────────────────
+
+/**
+ * The source's label is typed on another machine and reaches three surfaces
+ * here. textContent already makes it inert as markup, but a bidi override or
+ * a zero-width joiner can still make "LIVE from <label>" read as something
+ * else entirely, so control and direction-forcing characters are dropped at
+ * this boundary rather than trusted to have been dropped upstream.
+ */
+export function cleanLabel(label: string): string {
+  const cleaned = label.replace(/[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, '').trim();
+  return cleaned || 'the source machine';
+}
+
+export type PillTone = 'live' | 'warn' | 'bad' | 'muted';
+
+export interface Pill {
+  text: string;
+  tone: PillTone;
+}
+
+/**
+ * The status-strip pill for the projection state, or null when projection is
+ * off. Pure, so the mapping can be checked without a DOM.
+ *
+ * `retryAt` is the wall-clock the socket will retry at, fixed when its payload
+ * arrived. The countdown is read off the clock at paint time rather than shown
+ * as whatever number the last push happened to carry, which would sit frozen
+ * between pushes and then be wrong.
+ *
+ * Ages come from `lastAt`, not `ageMs`, for the same reason: the receiver's
+ * snapshot is exact when sent and stale a moment later, while `lastAt` lets the
+ * 20 s status clock keep the label honest without a new payload.
+ */
+export function projectionPill(p: ProjectionStatus, retryAt: number | null, now = Date.now()): Pill | null {
+  if (p.role === 'off') return null;
+  const retry = (): string => {
+    const left = retryAt === null ? 0 : Math.ceil((retryAt - now) / 1000);
+    return left > 0 ? `retrying in ${left}s` : 'retrying now';
+  };
+  if (p.role === 'source') {
+    if (p.phase === 'open') {
+      const n = p.screens.length;
+      if (n === 0) return { text: 'PROJECTING · no screens paired', tone: 'live' };
+      const online = p.screens.filter((s) => s.online).length;
+      return { text: `PROJECTING · ${online} of ${n} screen${n === 1 ? '' : 's'}`, tone: 'live' };
+    }
+    if (p.phase === 'closed') return { text: `PROJECTING · relay unreachable, ${retry()}`, tone: 'warn' };
+    return { text: 'PROJECTING · connecting to relay', tone: 'muted' };
+  }
+  switch (p.phase) {
+    case 'live':
+      return { text: `LIVE from ${p.sourceLabel}`, tone: 'live' };
+    case 'link-lost':
+      return { text: `LINK LOST · last heard ${p.lastAt === null ? 'never' : relAgo(p.lastAt)}`, tone: 'warn' };
+    case 'offline':
+      return {
+        text: `${p.sourceLabel} OFFLINE · data as of ${p.lastAt === null ? 'unknown' : clockTime(p.lastAt)}`,
+        tone: 'warn',
+      };
+    case 'relay-unreachable':
+      return { text: `RELAY UNREACHABLE · ${retry()}`, tone: 'warn' };
+    case 'revoked':
+      return { text: 'REMOVED BY THE SOURCE', tone: 'bad' };
+    case 'space-closed':
+      return { text: 'SOURCE STOPPED PROJECTING', tone: 'bad' };
+    case 'key-mismatch':
+      return { text: 'CANNOT DECRYPT · pair again', tone: 'bad' };
+    default:
+      return { text: 'CONNECTING...', tone: 'muted' };
+  }
+}
 
 // ── Derived metrics, each with its method stated ───────────────────────────
 
@@ -442,6 +532,9 @@ export class StatsView {
   private idx: UsageIndex | null = null;
   private lastRenderKey = '';
   private clockTimer = 0;
+  private projection: ProjectionStatus = { role: 'off' };
+  /** Wall-clock the relay retry is due, fixed when its payload arrived. */
+  private retryAt: number | null = null;
 
   constructor() {
     this.root = el('div', 'stats');
@@ -567,6 +660,16 @@ export class StatsView {
 
     // Status strip.
     const strip = el('footer', 'status-strip');
+    /*
+     * Projection pill, first in the strip and hidden while projection is off.
+     * On a screen this is the only thing that says whose numbers these are and
+     * how old they are, so it leads the strip rather than trailing it.
+     */
+    const proj = el('span', 'status-item status-proj');
+    proj.hidden = true;
+    proj.appendChild(el('span', 'proj-dot'));
+    proj.appendChild(el('span', 'proj-text', ''));
+    strip.appendChild(proj);
     strip.appendChild(el('span', 'status-item status-source', ''));
     strip.appendChild(el('span', 'status-item status-scan', ''));
     strip.appendChild(el('span', 'status-item status-ver', ''));
@@ -618,7 +721,7 @@ export class StatsView {
     const none = el('div', 'nodata');
     const ni = el('div', 'loading-inner');
     ni.appendChild(el('div', 'nodata-mark', '!'));
-    ni.appendChild(el('div', 'loading-title', 'No Claude Code data on this machine'));
+    ni.appendChild(el('div', 'loading-title nodata-title', 'No Claude Code data on this machine'));
     ni.appendChild(
       el(
         'div',
@@ -695,19 +798,51 @@ export class StatsView {
     }
 
     /*
-     * Unreadable source AND nothing cached means there is genuinely nothing to
-     * say. Showing zeros in every panel would read as "you have used Claude
-     * zero times", which is a claim, not an absence. Say the absence instead.
+     * Where these numbers came from. On a SCREEN they are another machine's,
+     * delivered over the relay, and every honesty rule below keys off the
+     * projection phase instead of the local source, because the local source
+     * was never read. The main process attaches the status to every payload.
      */
-    const nothing = idx.unavailable && idx.totals.requests === 0;
-    this.root.classList.toggle('is-nodata', nothing);
-    if (nothing) {
-      const pathNode = this.root.querySelector('.nodata-path');
-      if (pathNode) pathNode.textContent = idx.unavailableReason ?? '';
-    }
+    const raw = (idx as unknown as { projection?: ProjectionStatus }).projection ?? { role: 'off' as const };
+    const projection: ProjectionStatus =
+      raw.role === 'screen' ? { ...raw, sourceLabel: cleanLabel(raw.sourceLabel) } : raw;
+    this.projection = projection;
+    const retryIn = projection.role === 'off' ? undefined : projection.retryIn;
+    this.retryAt = typeof retryIn === 'number' ? Date.now() + retryIn * 1000 : null;
+    const screen = projection.role === 'screen' ? projection : null;
 
-    // Cached numbers with an unreadable source are STALE, not live. Mark them.
-    this.root.classList.toggle('is-stale-data', idx.unavailable && idx.totals.requests > 0);
+    /*
+     * Nothing to say at all. Locally that is an unreadable source with nothing
+     * cached; on a screen it is a pairing that has never produced a frame, in
+     * this process or in the cache. Showing zeros in every panel would read as
+     * "you have used Claude zero times", which is a claim, not an absence.
+     * Say the absence instead.
+     *
+     * A screen that HAS a frame keeps it through every phase, including
+     * revoked: those numbers were real when they arrived, and the pill carries
+     * their age.
+     */
+    const nothing = screen
+      ? screen.lastAt === null && idx.totals.requests === 0
+      : idx.unavailable && idx.totals.requests === 0;
+    this.root.classList.toggle('is-nodata', nothing);
+    if (nothing) this.paintNoData(screen, idx);
+
+    /*
+     * Numbers that are not live are STALE and dimmed, never blanked and never
+     * zeroed. Locally: cached figures with an unreadable source. On a screen:
+     * any phase but `live`, which the receiver grants only on a frame it
+     * decrypted itself within the last 90 s, plus the source's own
+     * unavailable flag, since a live link to stale data is still stale data.
+     */
+    const stale = screen
+      ? screen.phase !== 'live' || idx.unavailable
+      : idx.unavailable && idx.totals.requests > 0;
+    this.root.classList.toggle('is-stale-data', stale);
+
+    // "this machine" becomes a lie the moment the data is projected.
+    const sub = this.root.querySelector('.hero-sub');
+    if (sub) sub.textContent = `every session on ${screen ? screen.sourceLabel : 'this machine'}`;
 
     this.root.dataset.intensity = d.intensity > 0.66 ? 'high' : d.intensity > 0.3 ? 'mid' : 'calm';
     this.root.style.setProperty('--intensity', d.intensity.toFixed(3));
@@ -758,7 +893,11 @@ export class StatsView {
 
     const liveState = this.root.querySelector('.live-state');
     if (liveState) {
-      liveState.textContent = idx.unavailable
+      // Record timestamps inside a frame that stopped arriving would still
+      // read "active now" for a while. The link decides, not the payload.
+      liveState.textContent = screen && screen.phase !== 'live'
+        ? 'not live'
+        : idx.unavailable
         ? 'source unavailable'
         : d.sinceLast < 90_000
           ? 'active now'
@@ -932,6 +1071,77 @@ export class StatsView {
     set('.status-ver', idx.latest.version ? `claude code ${idx.latest.version}` : '');
     set('.status-last', `last record ${relTime(idx.latest.ts)}`);
     this.root.classList.toggle('is-stale', idx.unavailable);
+
+    // Repainted on the same 20 s clock as the relative times, so "last heard"
+    // and the retry countdown age correctly between payloads.
+    const pill = this.root.querySelector<HTMLElement>('.status-proj');
+    if (pill) {
+      const p = projectionPill(this.projection, this.retryAt);
+      pill.hidden = p === null;
+      if (p) {
+        pill.dataset.tone = p.tone;
+        // The pulsing dot belongs to a screen receiving live frames, not to a
+        // source that merely has its socket open, so the role is on the node.
+        pill.dataset.role = this.projection.role;
+        const text = pill.querySelector('.proj-text');
+        if (text) text.textContent = p.text;
+      }
+    }
+  }
+
+  /**
+   * Wording for the empty panel. Two different absences: a local source with
+   * nothing to read, and a paired screen that has never received a frame. The
+   * second must not say "no Claude Code data on this machine", because this
+   * machine's data was never the subject.
+   */
+  private paintNoData(screen: ScreenStatus | null, idx: UsageIndex): void {
+    const set = (sel: string, text: string) => {
+      const n = this.root.querySelector(sel);
+      if (n) n.textContent = text;
+    };
+    if (!screen) {
+      set('.nodata-title', 'No Claude Code data on this machine');
+      set(
+        '.nodata-body',
+        'Claude Stats reads the transcripts Claude Code writes to ~/.claude. Nothing was found there, so there is nothing to report.',
+      );
+      set('.nodata-path', idx.unavailableReason ?? '');
+      return;
+    }
+    const src = screen.sourceLabel;
+    switch (screen.phase) {
+      case 'revoked':
+        set('.nodata-title', `Removed by ${src}`);
+        set(
+          '.nodata-body',
+          `${src} removed this screen from its projection before a single frame arrived, so there is nothing to show. Pair again from the tray to reconnect.`,
+        );
+        break;
+      case 'space-closed':
+        set('.nodata-title', `${src} stopped projecting`);
+        set(
+          '.nodata-body',
+          'The source closed its projection before this screen received anything, so there is nothing to show. It needs to start projecting again and pair this screen.',
+        );
+        break;
+      case 'key-mismatch':
+        set('.nodata-title', `Cannot decrypt frames from ${src}`);
+        set(
+          '.nodata-body',
+          'Frames are arriving but this screen cannot open them, so nothing is shown rather than something guessed. Pair again to exchange a fresh key.',
+        );
+        break;
+      default:
+        // Connecting, or the relay is down. The remaining phases need a frame
+        // and cannot occur here.
+        set('.nodata-title', `Waiting for ${src}`);
+        set(
+          '.nodata-body',
+          `This screen is paired to ${src} and has not received a frame yet. The dashboard fills in when the first one arrives; nothing is shown before then.`,
+        );
+    }
+    set('.nodata-path', screen.reason ?? '');
   }
 
   destroy(): void {

@@ -25,8 +25,6 @@ import { clearProjection, loadLastFrame, saveLastFrame, saveProjection, type Scr
 const LIVE_MS = 90_000;
 /** Past this, stop saying "reconnecting" and say the source is offline. */
 const OFFLINE_MS = 5 * 60_000;
-/** The cache is a convenience, not a record. Once a minute is plenty. */
-const CACHE_MIN_INTERVAL_MS = 60_000;
 
 export type ScreenPhase =
   | 'connecting'
@@ -56,7 +54,11 @@ export class ScreenReceiver {
   private lastSeq = 0;
   /** Screen-clock time of the last frame this machine actually opened. */
   private lastAuthAt = 0;
-  private lastCacheWrite = 0;
+  /** The last frame's wire payload and its screen-clock arrival, for the cache. */
+  private lastPayload: ProjectedUsage | null = null;
+  private lastPayloadAt = 0;
+  /** Cache writes queue behind each other so two cannot interleave on the temp file. */
+  private cacheChain: Promise<void> = Promise.resolve();
   private badFrames = 0;
   private terminal: ScreenPhase | null = null;
   private clock: NodeJS.Timeout | null = null;
@@ -85,8 +87,20 @@ export class ScreenReceiver {
     // marked stale because lastAuthAt stays 0 until a real frame arrives.
     const cached = await loadLastFrame();
     if (cached) {
-      this.usage = fromWire(cached.payload as ProjectedUsage) as Record<string, unknown>;
-      this.onUsage(this.usage);
+      /*
+       * The accepted sequence is restored BEFORE the socket opens. It used to
+       * start at 0 on every launch, so after any restart the first retained
+       * ciphertext with seq > 0 was accepted and shown as live: a relay that
+       * kept yesterday's frames could replay them in order (rule 29, across
+       * a restart).
+       */
+      this.lastSeq = cached.seq;
+      if (cached.payload) {
+        this.lastPayload = cached.payload as ProjectedUsage;
+        this.lastPayloadAt = cached.receivedAt;
+        this.usage = fromWire(this.lastPayload) as Record<string, unknown>;
+        this.onUsage(this.usage);
+      }
     }
     this.socket.start();
     // One timer for the age text. Nothing else polls.
@@ -151,6 +165,10 @@ export class ScreenReceiver {
       return;
     }
 
+    // It opened, so the key is right. A key-mismatch verdict from an earlier
+    // run of bad frames is stale, and left sticky it would hide a working feed.
+    if (this.terminal === 'key-mismatch') this.terminal = null;
+
     // Replay: the relay can resend an old frame, and yesterday's numbers must
     // never refresh liveness. See rule 29.
     if (opened.seq <= this.lastSeq) {
@@ -179,6 +197,7 @@ export class ScreenReceiver {
       }
       const ct = seal(this.key, Date.now(), { t: 'hello-ack', label: hostLabel() });
       this.socket.send({ t: 'up', ct });
+      this.persist();
       this.publish();
       return;
     }
@@ -186,14 +205,31 @@ export class ScreenReceiver {
     if (body.t === 'frame' && body.usage) {
       this.usage = fromWire(body.usage) as Record<string, unknown>;
       this.onUsage(this.usage);
-      const now = Date.now();
-      if (now - this.lastCacheWrite > CACHE_MIN_INTERVAL_MS) {
-        this.lastCacheWrite = now;
-        void saveLastFrame(body.usage, now);
-      }
+      this.lastPayload = body.usage;
+      this.lastPayloadAt = Date.now();
     }
 
+    this.persist();
     this.publish();
+  }
+
+  /**
+   * Write the accepted sequence, with the last frame, after EVERY accepted
+   * message, beats and hellos included.
+   *
+   * The cache used to be throttled to once a minute. That was fine for the
+   * payload, which is a convenience, and wrong for the sequence, which is a
+   * security boundary: every unpersisted second is a second of frames the
+   * relay could replay after a restart. Frames arrive at most every 10 s and
+   * beats every 30 s, so unthrottled is a few small writes a minute. The
+   * residual replay window is whatever arrived after the last write that
+   * completed, which is one message unless the disk is failing.
+   */
+  private persist(): void {
+    const seq = this.lastSeq;
+    const payload = this.lastPayload;
+    const receivedAt = this.lastPayloadAt;
+    this.cacheChain = this.cacheChain.then(() => saveLastFrame(payload, receivedAt, seq));
   }
 
   status(): ScreenStatus {

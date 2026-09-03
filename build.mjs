@@ -60,6 +60,15 @@ const configs = [
     entryPoints: [path.join(root, 'src/renderer/main.ts')],
     outfile: path.join(dist, 'renderer/main.js'),
   },
+  // The pairing window is its own entry: it shares no code with the wall and
+  // must not drag the wall's bundle into a 460px dialog.
+  {
+    ...common,
+    platform: 'browser',
+    target: 'chrome120',
+    entryPoints: [path.join(root, 'src/renderer/pair.ts')],
+    outfile: path.join(dist, 'renderer/pair.js'),
+  },
 ];
 
 /*
@@ -72,7 +81,8 @@ const configs = [
 async function copyStatic() {
   await fs.mkdir(path.join(dist, 'renderer/styles'), { recursive: true });
   await fs.copyFile(path.join(root, 'src/renderer/index.html'), path.join(dist, 'renderer/index.html'));
-  for (const css of ['wall.css', 'stats.css', 'shell.css']) {
+  await fs.copyFile(path.join(root, 'src/renderer/pair.html'), path.join(dist, 'renderer/pair.html'));
+  for (const css of ['wall.css', 'stats.css', 'shell.css', 'pair.css']) {
     await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
   }
 }

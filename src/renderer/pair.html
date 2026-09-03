@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The same strict policy as the wall. `connect-src 'none'` in particular:
+      every byte of network traffic in this feature happens in the main process,
+      and this window must not be able to reach the relay even by accident.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Projection</title>
+    <link rel="stylesheet" href="styles/pair.css" />
+  </head>
+  <body>
+    <main id="pair" aria-live="polite">
+      <!-- Filled from pair.ts. Never innerHTML. -->
+    </main>
+    <script src="pair.js"></script>
+  </body>
+</html>

@@ -36,4 +36,26 @@ const api = {
 
 contextBridge.exposeInMainWorld('wall', api);
 
+/*
+ * The pairing window's bridge, deliberately separate from `wall`.
+ *
+ * `wall` is exposed to the always-on desktop layer and carries usage data; this
+ * one carries pairing actions. Neither surface has any business with the
+ * other's calls, and one preload serving two windows is not a reason to merge
+ * them.
+ */
+contextBridge.exposeInMainWorld('pair', {
+  mode: () => ipcRenderer.invoke('pair:mode'),
+  status: () => ipcRenderer.invoke('pair:status'),
+  onStatus: (cb: (s: unknown) => void) => {
+    ipcRenderer.on('pair:status', (_e, s) => cb(s));
+  },
+  newCode: () => ipcRenderer.invoke('pair:newCode'),
+  cancelCode: () => ipcRenderer.invoke('pair:cancelCode'),
+  redeem: (code: string) => ipcRenderer.invoke('pair:redeem', code),
+  revoke: (screenId: string) => ipcRenderer.invoke('pair:revoke', screenId),
+  copy: (text: string) => ipcRenderer.invoke('pair:copy', text),
+  close: () => ipcRenderer.invoke('pair:close'),
+});
+
 export type WallApi = typeof api;

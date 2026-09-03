@@ -18,6 +18,7 @@ import { detectCapability, type Capability } from './capability';
 import { loadSettings, saveSettings, type Settings } from './settings';
 import { PRODUCT_NAME, isStatsOnly } from '../shared/edition';
 import { checkNow, installNow, startUpdater, stopUpdater, updateLabel, updateState } from './updater';
+import * as projection from './projection';
 import { loadClients, watchClients, type StoreSnapshot } from './data/store';
 import {
   PROJECTS_DIR,
@@ -374,6 +375,124 @@ function buildTray(): void {
   }
 }
 
+/**
+ * The Projection submenu.
+ *
+ * Built fresh each time the tray opens, so it always reflects the real state
+ * rather than a cached idea of it.
+ */
+/*
+ * The pairing window: the one focusable window this app has.
+ *
+ * The wall's windows are created `focusable: false` so they can sit behind
+ * everything without stealing focus, which makes a text input in them a trap.
+ * Typing a code needs a real window, so this is a small one, closable with
+ * Escape or its own title bar (rule 17).
+ */
+let pairWindow: BrowserWindow | null = null;
+let pairMode: 'source' | 'screen' = 'source';
+
+function openPairWindow(mode: 'source' | 'screen'): void {
+  pairMode = mode;
+  if (pairWindow && !pairWindow.isDestroyed()) {
+    pairWindow.webContents.send('pair:status', projection.projectionStatus());
+    pairWindow.focus();
+    return;
+  }
+
+  pairWindow = new BrowserWindow({
+    width: 460,
+    height: mode === 'source' ? 560 : 400,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: false,
+    title: 'Projection',
+    backgroundColor: '#26262b',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      devTools: isDev,
+    },
+  });
+  pairWindow.setMenu(null);
+  void pairWindow.loadFile(path.join(__dirname, '..', 'renderer', 'pair.html'));
+  pairWindow.on('closed', () => {
+    pairWindow = null;
+  });
+}
+
+function pushPairStatus(): void {
+  if (pairWindow && !pairWindow.isDestroyed()) {
+    pairWindow.webContents.send('pair:status', projection.projectionStatus());
+  }
+}
+
+function projectionMenu(): Electron.MenuItemConstructorOptions[] {
+  const status = projection.projectionStatus();
+  const head: Electron.MenuItemConstructorOptions[] = [
+    { label: projection.projectionLabel(), enabled: false },
+    { type: 'separator' },
+  ];
+
+  if (status.role === 'off') {
+    return [
+      ...head,
+      {
+        label: 'Project this machine to another screen...',
+        click: () => {
+          void (async () => {
+            if (await projection.enableSource(require('node:os').hostname())) openPairWindow('source');
+          })();
+        },
+      },
+      {
+        label: 'Show another machine here...',
+        click: () => {
+          if (projection.enableScreen()) openPairWindow('screen');
+        },
+      },
+    ];
+  }
+
+  if (status.role === 'source') {
+    const screens: Electron.MenuItemConstructorOptions[] = status.screens.length
+      ? status.screens.map((sc) => ({
+          label: `${sc.label}${sc.online ? '  (connected)' : '  (offline)'}${sc.confirmed ? '' : '  (unconfirmed)'}`,
+          submenu: [{ label: 'Remove this screen', click: () => void projection.revokeScreen(sc.screenId) }],
+        }))
+      : [{ label: 'No screens paired yet', enabled: false }];
+
+    return [
+      ...head,
+      { label: 'Show a pairing code...', click: () => openPairWindow('source') },
+      { type: 'separator' },
+      ...screens,
+      { type: 'separator' },
+      {
+        label: 'Send project folder names',
+        type: 'checkbox',
+        checked: projection.shareProjectNames(),
+        click: () => void projection.setShareProjectNames(!projection.shareProjectNames()),
+      },
+      { type: 'separator' },
+      {
+        label: 'Stop projecting and forget all screens',
+        click: () => void projection.disableProjection(true),
+      },
+    ];
+  }
+
+  return [
+    ...head,
+    { label: 'Unpair from this source', click: () => void projection.unpairScreen() },
+  ];
+}
+
 function refreshTrayMenu(): void {
   if (!tray) return;
   const layerItem = (mode: LayerMode, label: string) => ({
@@ -457,6 +576,18 @@ function refreshTrayMenu(): void {
             { label: 'Reload clients', click: () => void reloadData() },
             { label: 'Open client data folder', click: () => void shell.openPath(resolveClientsDir()) },
           ]),
+      /*
+       * Projection. The submenu shape follows the role, so an off machine is
+       * offered two choices and a running one is offered what it can actually
+       * do. The first line always states the current state plainly, including
+       * "no network", because that is the claim the product makes.
+       */
+      {
+        label: 'Projection',
+        submenu: projectionMenu(),
+      },
+      { type: 'separator' as const },
+
       /*
        * Updates. Only the shareable build has anything to do here, so the item
        * is absent entirely in the full build rather than present and inert.
@@ -745,8 +876,19 @@ function wallState(wall: WallWindow) {
  * a second during an active session. Send a projection instead.
  */
 function usageForRenderer(): Record<string, unknown> {
+  /*
+   * A SCREEN shows the source's numbers, not its own. It does not index its own
+   * transcripts at all while paired, so `usage` here is an empty index and
+   * returning it would paint a wall of zeros, which rule 12 forbids.
+   */
+  if (projection.isScreen()) {
+    const projected = projection.projectedUsage();
+    if (projected) return { ...projected, projection: projection.projectionStatus() };
+    // Paired but nothing received yet. Say so rather than showing an empty index.
+    return { ...emptyIndex(), fileCount: 0, indexing: false, projection: projection.projectionStatus() };
+  }
   const { files, ...rest } = usage;
-  return { ...rest, fileCount: Object.keys(files).length, indexing: usageIndexing };
+  return { ...rest, fileCount: Object.keys(files).length, indexing: usageIndexing, projection: projection.projectionStatus() };
 }
 
 /**
@@ -763,6 +905,12 @@ function pushUsageProgress(p: IndexProgress): void {
 }
 
 function pushUsage(): void {
+  /*
+   * Hand the projector a copy before anything else. It returns synchronously
+   * after setting a flag; the encrypting and sending happen on a later tick, so
+   * a relay outage can never slow the local dashboard down (rule 30).
+   */
+  projection.offerUsage(usage, usageIndexing);
   const payload = usageForRenderer();
   for (const w of windows) {
     if (w.win.isDestroyed()) continue;
@@ -979,6 +1127,7 @@ function startWatching(): void {
 
 function quit(): void {
   stopUpdater();
+  projection.stopProjection();
   if (usageTimer) clearTimeout(usageTimer);
   usageWatcher?.close();
   // Persist whatever the periodic save has not yet flushed.
@@ -1013,6 +1162,20 @@ function registerIpc(): void {
   ipcMain.handle('wall:exitFocus', () => {
     if (focusMode) toggleFocusMode();
   });
+  ipcMain.handle('pair:mode', () => pairMode);
+  ipcMain.handle('pair:status', () => projection.projectionStatus());
+  ipcMain.handle('pair:newCode', () => projection.beginPairing());
+  ipcMain.handle('pair:cancelCode', () => projection.cancelPairing());
+  ipcMain.handle('pair:redeem', (_e, code: string) => projection.redeemCode(String(code ?? '')));
+  ipcMain.handle('pair:revoke', (_e, screenId: string) => projection.revokeScreen(String(screenId ?? '')));
+  ipcMain.handle('pair:copy', (_e, text: string) => {
+    const { clipboard } = require('electron') as typeof import('electron');
+    clipboard.writeText(String(text ?? ''));
+  });
+  ipcMain.handle('pair:close', () => {
+    if (pairWindow && !pairWindow.isDestroyed()) pairWindow.close();
+  });
+
   ipcMain.handle('wall:openExternal', (_e, url: string) => {
     // Only ever open http(s). Client JSON is hand-edited and untrusted.
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url);
@@ -1097,8 +1260,33 @@ if (!app.requestSingleInstanceLock()) {
      * screen immediately, then refresh in the background. A cold index is
      * several seconds of parsing and must never gate the window appearing.
      */
+    /*
+     * Projection starts BEFORE the indexer, because its role decides whether
+     * there is any point indexing at all: a screen shows another machine's
+     * numbers and must not read its own transcripts while paired.
+     */
+    await projection.startProjection({
+      onStatus: () => {
+        refreshTrayMenu();
+        pushPairStatus();
+        pushState();
+        // A screen's data arrives over the wire, so a status change is often
+        // the only signal the renderer gets.
+        if (projection.isScreen()) pushUsage();
+      },
+      onUsage: () => pushUsage(),
+      notify: (title, content) => {
+        console.log(`[projection] ${title}: ${content}`);
+        tray?.displayBalloon?.({ title, content });
+      },
+    });
+
     usage = await loadIndex(usageCacheFile());
-    void refreshUsage('startup').then(startUsageWatch);
+    if (projection.isScreen()) {
+      console.log('[usage] not indexing: this machine is a projection screen');
+    } else {
+      void refreshUsage('startup').then(startUsageWatch);
+    }
     if (!isStatsOnly) startWatching();
 
     windows = targetDisplays().map(createWindowForDisplay);

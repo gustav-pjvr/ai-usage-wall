@@ -766,7 +766,10 @@ export class StatsView {
       if (!this.clockTimer) {
         // Only the relative-time labels need a clock, and once every 20s is
         // plenty for "3m ago". Nothing else polls.
-        this.clockTimer = window.setInterval(() => this.paintStatus(), 20_000);
+        this.clockTimer = window.setInterval(() => {
+          this.paintStatus();
+          this.paintTimeWindowed();
+        }, 20_000);
       }
     } else {
       this.canvas.stop();
@@ -1051,6 +1054,42 @@ export class StatsView {
 
     const pslot = this.root.querySelector('.chart-projects');
     if (pslot) pslot.replaceChildren(breakdown(projects, 5, this.tip));
+  }
+
+  /**
+   * Repaint the values whose meaning depends on the CURRENT time, not on new
+   * data arriving.
+   *
+   * Velocity is "tokens per minute over a trailing ten minutes" and intensity
+   * is derived from it, so both decay on their own as the window slides past
+   * the last record. The dashboard only repainted when a usage push arrived,
+   * which meant a machine with Claude Code closed sat there showing the last
+   * velocity it ever computed, indefinitely, as though it were current.
+   *
+   * Gustav caught this by comparing two machines: the projected SCREEN decayed
+   * to zero correctly, because a beat every thirty seconds forces it to
+   * repaint, while the source froze. The screen was right and the source was
+   * presenting a stale derived number as live, which is what rule 12 exists to
+   * prevent.
+   *
+   * Only the time-windowed values are touched here. Totals do not change on
+   * their own, and repainting them would restart their odometer animations
+   * every twenty seconds for no reason.
+   */
+  private paintTimeWindowed(): void {
+    if (!this.idx) return;
+
+    /*
+     * A screen that is not live has already frozen its clock deliberately, so
+     * that its trace does not scroll real data off the edge as if time were
+     * passing on data that stopped arriving. Do not thaw it here.
+     */
+    if (this.projection?.role === 'screen' && this.projection.phase !== 'live') return;
+
+    const d = derive(this.idx);
+    this.odos.velocity.set(d.velocity, true);
+    this.root.dataset.intensity = d.intensity > 0.66 ? 'high' : d.intensity > 0.3 ? 'mid' : 'calm';
+    this.root.style.setProperty('--intensity', d.intensity.toFixed(3));
   }
 
   private paintStatus(): void {

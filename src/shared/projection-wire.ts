@@ -35,6 +35,10 @@ export interface WireTotals {
   requests: number;
   webSearch: number;
   webFetch: number;
+  /** Dollars at API list prices, derived by the source from these same counts. */
+  costUsd: number;
+  /** Tokens the source's price table could not price, so a gap is visible. */
+  unpricedTokens: number;
 }
 
 /** A session with its identity removed: only the shape of the work remains. */
@@ -79,7 +83,14 @@ export interface ProjectedUsage {
   peak?: { velocity: number; at: string } | null;
 }
 
-/** Copy the eight numeric fields explicitly. A spread would carry extras. */
+/**
+ * Copy the numeric fields explicitly. A spread would carry extras.
+ *
+ * costUsd and unpricedTokens were added here deliberately when the cost stat
+ * shipped: naming fields means a new one does NOT cross until someone decides
+ * it should, and this is that decision. Both are aggregates of the source's own
+ * token counts, so they say nothing the totals beside them do not.
+ */
 function totals(t: Record<string, unknown> | undefined): WireTotals {
   const n = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
   return {
@@ -91,6 +102,8 @@ function totals(t: Record<string, unknown> | undefined): WireTotals {
     requests: n(t?.requests),
     webSearch: n(t?.webSearch),
     webFetch: n(t?.webFetch),
+    costUsd: n(t?.costUsd),
+    unpricedTokens: n(t?.unpricedTokens),
   };
 }
 

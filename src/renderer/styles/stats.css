@@ -136,8 +136,23 @@
 
 .panel-hero     { grid-column: span 5; grid-row: span 1; --pi: 0; }
 .panel-live     { grid-column: span 5; grid-row: span 1; --pi: 1; }
-.panel-vel      { grid-column: span 2; grid-row: span 1; --pi: 2; }
-.panel-counters { grid-column: span 4; grid-row: span 1; --pi: 3; }
+/*
+ * The right hand column of the top row holds two panels stacked, cost above
+ * velocity. It is a wrapper rather than two grid cells because the row height
+ * is set by the grid, and splitting one cell keeps every other panel exactly
+ * where it was.
+ */
+.panel-stack {
+  grid-column: span 2;
+  grid-row: span 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px; /* matches the grid gap so the seam is invisible */
+  min-height: 0;
+}
+.panel-stack .panel-cost { flex: 0 0 auto; --pi: 2; }
+.panel-stack .panel-vel  { flex: 1 1 auto; min-height: 0; --pi: 3; }
+.panel-counters { grid-column: span 4; grid-row: span 1; --pi: 4; }
 .panel-daily    { grid-column: span 5; grid-row: span 1; --pi: 4; }
 .panel-eff      { grid-column: span 3; grid-row: span 1; --pi: 5; }
 .panel-models   { grid-column: span 4; grid-row: span 1; --pi: 6; }
@@ -625,7 +640,7 @@
   .stats-grid { grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
   .panel-hero     { grid-column: span 7; }
   .panel-live     { grid-column: span 5; }
-  .panel-vel      { grid-column: span 3; }
+  .panel-stack    { grid-column: span 3; }
   .panel-counters { grid-column: span 5; }
   .panel-eff      { grid-column: span 4; }
   .panel-daily    { grid-column: span 12; }
@@ -1019,4 +1034,38 @@
 
 .vel-peak-when {
   color: oklch(0.5 0.015 250);
+}
+
+
+/* Total cost. Same shape as the velocity readout so the top row reads as one. */
+.cost-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+
+.cost-value {
+  font-family: var(--mono);
+  font-size: clamp(18px, 1.5vw, 26px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  color: oklch(0.86 0.13 155);
+  overflow-wrap: anywhere;
+}
+
+.cost-note {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: oklch(0.58 0.015 240);
+}
+
+.cost-gap {
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: oklch(0.72 0.13 75);
 }

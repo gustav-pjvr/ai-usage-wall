@@ -43,6 +43,7 @@
 
 import type { PeakVelocity } from '../../shared/velocity';
 import { promises as fs, createReadStream } from 'node:fs';
+import { costOf } from '../../shared/pricing';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as readline from 'node:readline';
@@ -57,7 +58,7 @@ const PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
 
 /** Bump when the aggregate shape changes, to invalidate old caches. */
-const INDEX_VERSION = 2;
+const INDEX_VERSION = 3;
 
 /** Hourly buckets are kept for this many days. Daily buckets are kept forever. */
 const HOURLY_DAYS = 14;
@@ -73,6 +74,19 @@ export interface TokenTotals {
   requests: number;
   webSearch: number;
   webFetch: number;
+  /**
+   * Dollars at API list prices. DERIVED, not recorded: cost appears nowhere in
+   * the transcripts, so this is the same arithmetic Claude Code's own /cost
+   * does on the same token counts. See src/shared/pricing.ts.
+   */
+  costUsd: number;
+  /**
+   * Tokens belonging to a model the price table does not know.
+   *
+   * Kept so an unpriced model shows as a caveat rather than quietly making the
+   * total too low. A new model id is a question, not a zero.
+   */
+  unpricedTokens: number;
 }
 
 export interface SessionInfo {
@@ -123,6 +137,8 @@ const emptyTotals = (): TokenTotals => ({
   requests: 0,
   webSearch: 0,
   webFetch: 0,
+  costUsd: 0,
+  unpricedTokens: 0,
 });
 
 function addInto(target: TokenTotals, u: TokenTotals): void {
@@ -134,6 +150,8 @@ function addInto(target: TokenTotals, u: TokenTotals): void {
   target.requests += u.requests;
   target.webSearch += u.webSearch;
   target.webFetch += u.webFetch;
+  target.costUsd += u.costUsd;
+  target.unpricedTokens += u.unpricedTokens;
 }
 
 export function emptyIndex(): UsageIndex {
@@ -242,6 +260,27 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
       const u = o?.message?.usage;
       if (!u || typeof u !== 'object') continue;
 
+      const model: string = typeof o?.message?.model === 'string' ? o.message.model : 'unknown';
+
+      /*
+       * The two cache TTLs are priced differently, 1.25x base for five minutes
+       * and 2x for an hour, so the split matters and the record carries it.
+       * Falling back to the undivided total as 5m would understate a long
+       * session, which is exactly the sessions that cost anything.
+       */
+      const write1h = u.cache_creation?.ephemeral_1h_input_tokens || 0;
+      const write5m =
+        u.cache_creation?.ephemeral_5m_input_tokens ?? Math.max(0, (u.cache_creation_input_tokens || 0) - write1h);
+
+      const cost = costOf(model, {
+        input: u.input_tokens || 0,
+        output: u.output_tokens || 0,
+        cacheRead: u.cache_read_input_tokens || 0,
+        cacheWrite5m: write5m,
+        cacheWrite1h: write1h,
+        webSearch: u.server_tool_use?.web_search_requests || 0,
+      });
+
       const rec: TokenTotals = {
         input: u.input_tokens || 0,
         output: u.output_tokens || 0,
@@ -251,12 +290,17 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
         requests: 1,
         webSearch: u.server_tool_use?.web_search_requests || 0,
         webFetch: u.server_tool_use?.web_fetch_requests || 0,
+        costUsd: cost ?? 0,
+        unpricedTokens:
+          cost === null
+            ? (u.input_tokens || 0) + (u.output_tokens || 0) +
+              (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0)
+            : 0,
       };
 
       addInto(index.totals, rec);
 
       const ts: string | null = typeof o.timestamp === 'string' ? o.timestamp : null;
-      const model: string = typeof o?.message?.model === 'string' ? o.message.model : 'unknown';
 
       index.models[model] ??= emptyTotals();
       addInto(index.models[model], rec);

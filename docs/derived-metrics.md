@@ -24,6 +24,85 @@ verified decay curve rather than an assurance.
 
 ---
 
+## Total cost
+
+**DERIVED, and further from measured than anything else on the dashboard.**
+
+No transcript records a cost. Every record type in a session file was scanned
+for a key containing "cost" and there is none: Claude Code's own `/cost` and
+`/usage` compute it in process from the token counts, which ARE recorded.
+`src/shared/pricing.ts` does the same arithmetic over every project on this
+machine.
+
+### What the number is not
+
+It is not a bill. On a subscription nothing here was charged per token. It is
+what the same work would have cost through the API at list prices, and it covers
+only sessions on this machine.
+
+### The rates
+
+Dollars per million tokens, captured 2026-09-04:
+
+| Model | Input | Output |
+|---|---|---|
+| Fable 5 / 5.1, Mythos 5 / 5.1 | 10 | 50 |
+| Opus 5, 4.8, 4.7, 4.6 | 5 | 25 |
+| Sonnet 5 | 2 | 10 |
+| Sonnet 4.6 | 3 | 15 |
+| Haiku 4.5 | 1 | 5 |
+
+Then the multipliers, which are where a naive implementation goes wrong:
+
+- a cache read is **0.1x** the input rate, except on Fable 5.1 where it is
+  **0.025x** ($0.25 per million against a $10 input rate)
+- a cache write is **1.25x** at the five minute TTL and **2x** at one hour, so
+  the split matters and the indexer reads it per record from
+  `cache_creation.ephemeral_5m_input_tokens` / `ephemeral_1h_input_tokens`
+- a server side web search is **$0.01**
+
+### How the rates were checked
+
+Against a real `/usage` breakdown, by feeding Claude Code's own reported token
+counts through `costOf` and comparing dollars:
+
+| Model | Computed | Claude Code |
+|---|---|---|
+| Sonnet 5 | $1.123 | $1.12 |
+| Haiku 4.5 (with one web search) | $0.0464 | $0.0464 |
+| Fable 5.1 | $62.24 | $61.63 |
+
+Sonnet matches to the cent. Haiku only matches once the web search is counted,
+which is what pins that price. Fable 5.1 is within the rounding of the displayed
+token counts, and would be about $18 high if the 0.025x cache read factor were
+wrong, so it is the load-bearing case.
+
+**What could not be checked this way:** a whole session. `/usage` reports for a
+window that is not the whole transcript file, so comparing its session total
+against a sum over the file compares different things. An attempt to do so gave
+$802 against $331 and the discrepancy was entirely in which records were
+counted, not in the rates.
+
+### Unpriced models
+
+A model the table does not know contributes **null**, not zero, and its tokens
+are accumulated separately into `unpricedTokens`. The card then says so. Zero
+would have made the total quietly too low with nothing on screen to indicate it,
+which is the failure mode this whole document exists to avoid.
+
+### Never rounded up
+
+`formatCost` floors to the cent. `toFixed(2)` rounds half away from zero, so
+$22,523.469 would print as $22,523.47 and claim a cent that was not spent. An
+estimate people will compare against a bill should err low.
+
+### Prices go stale
+
+The table is a snapshot with a date on it. Nothing checks it against a live
+source, and a price change makes the number wrong with no signal. Re-check it
+against the `claude-api` skill when a model is added or a rate moves.
+
+
 ## MEASURED versus DERIVED, and why the label exists
 
 `panel(title, tag, extraClass)` (`stats.ts:235-242`) stamps every panel header

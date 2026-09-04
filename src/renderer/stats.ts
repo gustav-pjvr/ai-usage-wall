@@ -573,7 +573,7 @@ export class StatsView {
     heroBody.appendChild(this.odos.total.node);
     const heroMeta = el('div', 'hero-meta');
     heroMeta.appendChild(el('span', 'hero-exact', ''));
-    heroMeta.appendChild(el('span', 'hero-sub', 'every session on this machine'));
+    heroMeta.appendChild(el('span', 'hero-sub', 'across every session on this machine'));
     heroBody.appendChild(heroMeta);
 
     /*
@@ -920,7 +920,7 @@ export class StatsView {
 
     // "this machine" becomes a lie the moment the data is projected.
     const sub = this.root.querySelector('.hero-sub');
-    if (sub) sub.textContent = `every session on ${screen ? screen.sourceLabel : 'this machine'}`;
+    if (sub) sub.textContent = `across every session on ${screen ? screen.sourceLabel : 'this machine'}`;
 
     this.root.dataset.intensity = d.intensity > 0.66 ? 'high' : d.intensity > 0.3 ? 'mid' : 'calm';
     this.root.style.setProperty('--intensity', d.intensity.toFixed(3));

@@ -766,7 +766,16 @@ function renderBrokenCards(layout: ReturnType<typeof computeLayout>, seen: Set<s
 
 function renderDiagnostics(pageCount: number): void {
   if (!state) return;
-  const on = state.settings.debug;
+  /*
+   * Coerced, because toggleAttribute TOGGLES when its second argument is
+   * undefined rather than clearing. A settings file written before `debug`
+   * existed, or any state that reaches here without the key, made the
+   * diagnostics panel flip on and off on every render. It was found by
+   * capturing a screenshot for the website: an empty bordered box sat over the
+   * status bar and nothing in the DOM explained it until elementFromPoint
+   * named the element.
+   */
+  const on = state.settings.debug === true;
   diagEl.toggleAttribute('data-on', on);
   if (!on) return;
 

@@ -74,11 +74,79 @@ function stamp(at: number): string {
   return sameDay ? hhmm : `${d.getDate()}/${d.getMonth() + 1} ${hhmm}`;
 }
 
+/**
+ * Grab the conversation and move it.
+ *
+ * There are no scrollbars in this window, so the wheel and the trackpad are two
+ * of the three ways to scroll and this is the third. It deliberately does NOT
+ * start on message text: dragging there selects, which is how a message gets
+ * copied, and taking that away to add scrolling would be a poor trade. The
+ * cursor says which is which, grab over the background and a caret over text.
+ *
+ * The three pixel threshold is what keeps a plain click from counting as a
+ * drag, so clicking in the list still does nothing surprising.
+ */
+function enableDragScroll(list: HTMLElement): void {
+  let startY = 0;
+  let startTop = 0;
+  let armed = false;
+  let dragging = false;
+
+  list.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.msg-text')) return;
+    armed = true;
+    dragging = false;
+    startY = e.clientY;
+    startTop = list.scrollTop;
+  });
+
+  list.addEventListener('pointermove', (e) => {
+    if (!armed) return;
+    const dy = e.clientY - startY;
+    if (!dragging) {
+      if (Math.abs(dy) < 3) return;
+      dragging = true;
+      list.classList.add('dragging');
+      try {
+        list.setPointerCapture(e.pointerId);
+      } catch {
+        // Capture is a nicety: without it a fast drag off the window just ends.
+      }
+    }
+    list.scrollTop = startTop - dy;
+  });
+
+  const release = (e: PointerEvent) => {
+    if (!armed) return;
+    armed = false;
+    dragging = false;
+    list.classList.remove('dragging');
+    try {
+      list.releasePointerCapture(e.pointerId);
+    } catch {
+      /* never had it */
+    }
+  };
+  list.addEventListener('pointerup', release);
+  list.addEventListener('pointercancel', release);
+  list.addEventListener('pointerleave', release);
+}
+
+/** How close to the bottom still counts as "reading the newest". */
+const STICK_PX = 60;
+/** Whether the view was pinned to the bottom before the last redraw. */
+let wasAtBottom = true;
+
 function currentThread(): ChatThread | null {
   return view.threads.find((t) => t.peerId === active) ?? view.threads[0] ?? null;
 }
 
 function render(): void {
+  const prev = root.querySelector('.list');
+  if (prev) {
+    wasAtBottom = prev.scrollHeight - prev.scrollTop - prev.clientHeight <= STICK_PX;
+  }
   root.replaceChildren();
 
   const thread = currentThread();
@@ -164,6 +232,8 @@ function render(): void {
     input.value = '';
     draft = '';
     grow();
+    // Sending is an intent to be at the newest, wherever the view was.
+    wasAtBottom = true;
     await window.chat.send(thread.peerId, text);
     await refresh();
     input.focus();
@@ -187,9 +257,18 @@ function render(): void {
   form.appendChild(send);
   root.appendChild(form);
 
-  // Newest message in view. Done after layout so the height is real.
+  enableDragScroll(list);
+
+  /*
+   * Follow the conversation only if the reader was already at the bottom.
+   *
+   * Every arriving message rebuilds this list, and jumping to the newest
+   * unconditionally would drag someone out of the history they had scrolled
+   * back to read. Sixty pixels of slack counts as "at the bottom", so a small
+   * nudge upward does not stop it following.
+   */
   requestAnimationFrame(() => {
-    list.scrollTop = list.scrollHeight;
+    if (wasAtBottom) list.scrollTop = list.scrollHeight;
     input.focus();
     grow();
   });

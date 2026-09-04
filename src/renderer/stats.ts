@@ -32,6 +32,32 @@ export function compact(n: number): string {
   return n.toLocaleString('en-US');
 }
 
+/**
+ * The hero figure only: same tiers as compact(), one more decimal.
+ *
+ * At 27.7B a single decimal moves in steps of a hundred million tokens, so the
+ * headline sat still through a whole day's work and then jumped. Two decimals
+ * step every ten million, which is roughly a busy hour, so the number visibly
+ * moves.
+ *
+ * It is NOT the cost formatter. That one floors, because a money figure that
+ * rounds up claims spending that did not happen. This is a token count, it is
+ * measured rather than estimated, and normal rounding is the honest thing: the
+ * exact figure is printed in full directly underneath it either way.
+ *
+ * compact() is deliberately left alone. Velocity, models, projects and the peak
+ * all read better at one decimal, and this is the one number big enough on
+ * screen for a second to be legible.
+ */
+export function compactPrecise(n: number): string {
+  const a = Math.abs(n);
+  if (a >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
+  if (a >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (a >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (a >= 1e4) return `${(n / 1e3).toFixed(1)}K`;
+  return n.toLocaleString('en-US');
+}
+
 const full = (n: number) => n.toLocaleString('en-US');
 
 /** Age of an epoch-ms instant, coarse on purpose: "3m ago" is all a glance needs. */
@@ -540,7 +566,7 @@ export class StatsView {
     // Hero: total tokens processed.
     const hero = panel('Total tokens processed', 'measured', 'panel-hero');
     const heroBody = el('div', 'hero-body');
-    this.odos.total = new Odometer('hero-value', compact);
+    this.odos.total = new Odometer('hero-value', compactPrecise);
     heroBody.appendChild(this.odos.total.node);
     const heroMeta = el('div', 'hero-meta');
     heroMeta.appendChild(el('span', 'hero-exact', ''));

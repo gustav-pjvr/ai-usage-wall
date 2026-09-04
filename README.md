@@ -28,7 +28,7 @@ Other scripts:
 ```bash
 npm run build      # bundle to dist/
 npm run dev        # rebuild on change
-npm test           # 143 checks: layout, colour, schema, projection, crypto, indexing
+npm test           # 209 checks: layout, colour, schema, projection, crypto, indexing, chat, pricing
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
 npm run logo       # regenerate the mark, icons and wordmark

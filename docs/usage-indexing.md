@@ -250,10 +250,10 @@ so reporting it would only flicker the loading panel.
 
 | Field | What it holds | Why it exists |
 |---|---|---|
-| `version` | `INDEX_VERSION`, currently 2 (`usage.ts:59`) | `loadIndex` discards a cache with any other value (`usage.ts:476`) |
+| `version` | `INDEX_VERSION`, currently 3, bumped when the cost fields were added (`usage.ts`) | `loadIndex` discards a cache with any other value (`usage.ts:476`) |
 | `builtAt` | ISO stamp of the last completed pass | |
 | `files` | path to `{ size, offset }` | the whole incremental scheme; stripped before IPC |
-| `totals` | the eight counters | the hero and the counter tiles |
+| `totals` | the eight token counters, plus `costUsd` and `unpricedTokens` (see [derived-metrics.md](derived-metrics.md)) | the hero and the counter tiles |
 | `daily` | `YYYY-MM-DD` to totals | kept forever; drives the daily chart and "days active" |
 | `hourly` | `YYYY-MM-DDTHH` to totals | kept 14 days (`HOURLY_DAYS`, `usage.ts:62`), pooled into a 24 hour profile |
 | `models` | model name to totals | the model split |

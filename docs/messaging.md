@@ -26,6 +26,30 @@ least one confirmed screen; on a screen, a pairing that has not ended. It
 carries the unread count, so `Messages (3)` is readable without opening
 anything.
 
+## Scrolling
+
+There are no scrollbars in this window. Nothing to drag, nothing white down the
+side of a dark panel. Three ways to move instead:
+
+- the wheel and the trackpad, which work because the region still has
+  `overflow-y: auto`. Hiding a bar with `overflow: hidden` would have stopped
+  the region scrolling at all, which is the mistake this avoids.
+- grabbing the conversation and moving it. The cursor is a grab hand over the
+  background.
+- nothing else. There is deliberately no scroll-to-bottom button; the view
+  follows the newest message on its own.
+
+Dragging does **not** start on message text. A drag there selects, which is how
+a message gets copied, and buying scrolling with the loss of copy would be a bad
+trade. The cursor says which is which: a grab hand over the background, a caret
+over text. A drag has to move three pixels before it counts, so a plain click
+still does nothing.
+
+The view follows new messages only when it was already at the bottom, with sixty
+pixels of slack. Otherwise a message arriving while someone reads back through
+history would yank them to the end of it. Sending always returns to the bottom,
+because sending is an intent to be at the newest.
+
 ## What crosses the wire
 
 One new body type on the existing sealed envelope, in both directions:
@@ -84,12 +108,16 @@ Per-screen threads rather than a broadcast: keys are per screen, so a broadcast
 would seal the same words for up to eight machines. A message meant for one
 device should reach one device.
 
-Dedupe is by message id, held in a bounded set per peer. It matters because the
-source does not check sequence numbers on the `up` channel, so a relay replaying
-an old sealed frame would otherwise deliver the message again. Since the review
-there is also a persisted per-screen `lastUpSeq`, which is the real boundary;
-the id set catches duplicates within the window and the sequence catches
-anything older. See [projection-crypto.md](projection-crypto.md).
+Two layers, because one was not enough.
+
+Dedupe by message id, held in a bounded set per peer, catches a duplicate while
+the id is still remembered. A persisted per-screen `lastUpSeq` is the real
+boundary: it catches anything older, including a frame a relay held back until
+the original had scrolled out of the window entirely.
+
+The sequence check is the newer of the two. The `up` channel had none while it
+carried only a hello-ack per connection, and messaging is what made replaying it
+worth anything. See [projection-crypto.md](projection-crypto.md).
 
 ## Storage
 

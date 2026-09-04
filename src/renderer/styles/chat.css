@@ -126,6 +126,28 @@ body {
 
 /* Message list */
 
+/*
+ * Scrollbars are hidden everywhere in this window, not styled thin.
+ *
+ * There is nothing to drag, so scrolling is the wheel, the trackpad, or
+ * grabbing the conversation and moving it. `overflow-y: auto` stays, because
+ * hiding the bar must not stop the region scrolling: `hidden` would.
+ */
+.list,
+.tabs,
+.input {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.list::-webkit-scrollbar,
+.tabs::-webkit-scrollbar,
+.input::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
 .list {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -133,6 +155,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  /* Grabbable, except over text, which stays selectable so a message can be copied. */
+  cursor: grab;
+}
+
+.list.dragging {
+  cursor: grabbing;
+  /* A drag must move the view, not paint a selection across every message. */
+  user-select: none;
+}
+
+.msg-text {
+  cursor: text;
 }
 
 .empty {

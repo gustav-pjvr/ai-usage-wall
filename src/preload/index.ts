@@ -75,6 +75,9 @@ contextBridge.exposeInMainWorld('updateToast', {
   onUpdate: (cb: (s: unknown) => void) => {
     ipcRenderer.on('wall:update', (_e, s) => cb(s));
   },
+  onNotice: (cb: (n: unknown) => void) => {
+    ipcRenderer.on('wall:notice', (_e, n) => cb(n));
+  },
 });
 
 /*

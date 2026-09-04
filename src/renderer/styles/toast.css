@@ -110,3 +110,17 @@ body {
 [hidden] {
   display: none !important;
 }
+
+/*
+ * A message arrived. Distinct from the update colours so a glance tells the two
+ * apart without reading: the updater is blue while working and green when done,
+ * a message is the signal cyan the rest of the app uses for live activity.
+ */
+.toast[data-phase='notice'] .dot {
+  background: oklch(0.8 0.14 192);
+  animation: none;
+}
+
+.toast[data-phase='notice'] .bar {
+  display: none;
+}

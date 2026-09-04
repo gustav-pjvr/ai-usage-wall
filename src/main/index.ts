@@ -1013,6 +1013,9 @@ function hideToast(): void {
 
 /** Show the toast only while there is something in flight worth showing. */
 function syncToast(u: UpdateState): void {
+  // A notice has the window for its two seconds. The timer calls back here
+  // afterwards, so nothing is lost by waiting.
+  if (noticeTimer) return;
   const wanted = u.phase === 'downloading' || u.phase === 'ready';
   if (!wanted) {
     hideToast();
@@ -1031,6 +1034,52 @@ function syncToast(u: UpdateState): void {
     clearTimeout(toastLinger);
     toastLinger = null;
   }
+}
+
+/*
+ * Message arrival notices, shown in the same window as the download toast.
+ *
+ * One always-on-top window rather than two: a second would have to negotiate
+ * position with this one and could overlap it. A notice takes the window for
+ * two seconds and then hands it back to whatever the updater was showing, so a
+ * download in progress reappears rather than being cancelled by a message.
+ *
+ * The notice carries a name and a count and NEVER the message text. It floats
+ * above other applications, so its content is readable by anyone glancing at
+ * the screen, and the point of the channel is that the words are private.
+ */
+const NOTICE_MS = 2000;
+let noticeTimer: NodeJS.Timeout | null = null;
+let noticeCount = 0;
+let noticeFrom = '';
+
+function notifyMessage(label: string): void {
+  /*
+   * Nothing to announce if the conversation is already on screen and in front
+   * of you. A popup telling you about a message you are watching arrive is
+   * noise, and this window is the one surface that interrupts.
+   */
+  if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible() && chatWindow.isFocused()) return;
+
+  // A burst is one notice with a count, not a stack of them fighting for the
+  // same corner.
+  noticeCount = noticeFrom === label ? noticeCount + 1 : 1;
+  noticeFrom = label;
+
+  ensureToastWindow();
+  if (!toastWindow || toastWindow.isDestroyed()) return;
+  if (!toastWindow.isVisible()) toastWindow.showInactive();
+  toastWindow.webContents.send('wall:notice', { from: label, count: noticeCount });
+
+  if (noticeTimer) clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => {
+    noticeTimer = null;
+    noticeCount = 0;
+    noticeFrom = '';
+    // Hand the window back to the updater, which hides it if it has nothing.
+    syncToast(updateState());
+  }, NOTICE_MS);
+  noticeTimer.unref?.();
 }
 
 /** One push, every surface. Safe to call on every state change. */
@@ -1420,6 +1469,7 @@ function quit(): void {
   stopUpdater();
   stopDesktopWatch();
   if (toastLinger) clearTimeout(toastLinger);
+  if (noticeTimer) clearTimeout(noticeTimer);
   if (toastWindow && !toastWindow.isDestroyed()) toastWindow.destroy();
   projection.stopProjection();
   if (usageTimer) clearTimeout(usageTimer);
@@ -1603,6 +1653,7 @@ if (!app.requestSingleInstanceLock()) {
     projection.setChatListener((_peerId, label) => {
       pushChatChanged();
       refreshTrayMenu();
+      notifyMessage(label);
       console.log(`[chat] message from ${label}`);
     });
 

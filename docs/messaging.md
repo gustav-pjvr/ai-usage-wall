@@ -11,6 +11,27 @@ rest, and deleted with the pairing that produced it.
 Read [projection.md](projection.md) first for the channel this sits on, and
 [privacy-wire.md](privacy-wire.md) for what leaves the machine.
 
+## Arrival
+
+A message raises the same panel the update downloader uses, bottom right, above
+other windows, for two seconds. It says `New message` and who it is from, or
+`4 new messages` when several land together, and it never shows the text.
+
+Three details worth knowing:
+
+- **One window, not two.** A second always-on-top panel would have to negotiate
+  a position with the first and could overlap it. A notice borrows the update
+  toast for its two seconds and then hands it back, so a download in progress
+  reappears rather than being cancelled by a message.
+- **A burst is one notice with a count.** Five messages do not stack five
+  panels in the same corner.
+- **Nothing appears if the Messages window is already open and focused.** A
+  popup announcing a message you are watching arrive is noise, and this panel is
+  the one surface in the app that interrupts.
+
+The tray count is still there for anything missed, and it is the durable signal:
+the panel is gone in two seconds whether or not anyone saw it.
+
 ## Where it lives
 
 **Tray icon, Projection, Messages...**, on both machines. It is a window of its
@@ -147,9 +168,16 @@ thread on the source forever, one orphan per pair-and-unpair cycle.
   boolean, and a hostname would be a name in a file that does not need one.
 - **No read receipts, no typing indicators.** Both mean sending something the
   person did not ask to send.
-- **No notification on arrival.** The tray count changes and the window updates
-  if it is open. This app interrupts only when asked to, and a message from your
-  own other machine is not that.
+- **No message content in the notification.** A message arriving raises a two
+  second panel in the corner saying who it is from and how many, never a word of
+  what. That panel floats above other applications, so anyone glancing at the
+  screen can read it, and the point of the channel underneath is that the words
+  are not for them.
+
+  This entry used to read "no notification on arrival", on the reasoning that
+  the app interrupts only when asked. Gustav asked, so it notifies. The
+  reasoning was not wrong, it was simply outvoted by the person using it, and
+  the restraint that survived is the part about content.
 - **No formatting, no links, no markup.** The renderer writes every message with
   `textContent`. Messages come from another machine, and rendering them as
   markup would turn a private channel into a way to script the window.

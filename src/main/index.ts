@@ -79,6 +79,8 @@ let focusMode = false;
 let hidden = false;
 let usage: UsageIndex = emptyIndex();
 let usageWatcher: FSWatcher | null = null;
+let usageSweep: NodeJS.Timeout | null = null;
+let usageWatchFailures = 0;
 let usageTimer: NodeJS.Timeout | null = null;
 let usageBusy = false;
 let usageDirty = false;
@@ -255,19 +257,83 @@ async function refreshUsage(reason: string): Promise<void> {
  * without chokidar walking the 960 MB tree. Debounced, because a single
  * assistant turn produces several writes.
  */
+/**
+ * How often to scan anyway, whatever the watcher did or did not report.
+ *
+ * The watcher was the ONLY trigger for a refresh, so a single missed event left
+ * the dashboard stale until the next write happened to arrive, with no way to
+ * tell that from a genuinely quiet machine. On Windows a recursive fs.watch is
+ * ReadDirectoryChangesW, whose buffer drops events under churn rather than
+ * queueing them, and the watcher can also die and never come back.
+ *
+ * This bounds staleness to the interval regardless. It is a safety net and not
+ * the mechanism: when the watcher is working, every tick finds a recent scan
+ * and does nothing.
+ *
+ * TO BE CLEAR ABOUT WHAT THIS DOES NOT FIX: a headless `claude -p` run writes
+ * its transcript in occasional batches, with gaps over two minutes, so during a
+ * background agent's run there is nothing new on disk to find. Measured on
+ * 2026-09-04: a five minute run wrote at t+5s, t+2m11s and at exit. Sweeping
+ * more often cannot surface work that has not been written. That was very
+ * nearly shipped as a fix for exactly that symptom.
+ *
+ * SIXTY SECONDS, AND WHY NOT LESS. A sweep that finds nothing changed still
+ * stats every transcript: measured at 168 to 188 ms across 459 files on this
+ * machine, and that grows with the tree. Thirty seconds would spend about 0.6
+ * percent of a core forever on a machine doing nothing, which is the wrong
+ * trade for a wall that is supposed to be unobtrusive. Sixty halves it, and
+ * bounding staleness at a minute is already the difference between a bounded
+ * delay and an indefinite one. The cost only lands when the machine is idle:
+ * while the watcher is delivering events, every tick sees a recent scan and
+ * returns without touching the disk.
+ */
+const USAGE_SWEEP_MS = 60_000;
+
 function startUsageWatch(): void {
   try {
     usageWatcher = watchFs(PROJECTS_DIR, { recursive: true, persistent: true }, () => {
+      // Any event at all is proof the watcher works, so stop counting failures.
+      usageWatchFailures = 0;
       if (usageTimer) clearTimeout(usageTimer);
       usageTimer = setTimeout(() => {
         usageTimer = null;
         void refreshUsage('transcript changed');
       }, 900);
     });
-    usageWatcher.on('error', (err) => console.warn('[usage] watcher error:', err.message));
+    usageWatcher.on('error', (err) => {
+      /*
+       * This used to log and stop there, which left the app with a dead watcher
+       * and no way back short of a restart. Backoff is capped and reset by the
+       * first event a new watcher delivers, so a permanently broken watch costs
+       * one attempt a minute rather than a restart loop.
+       */
+      console.warn('[usage] watcher error, will restart:', err.message);
+      try {
+        usageWatcher?.close();
+  if (usageSweep) clearInterval(usageSweep);
+      } catch {
+        /* already gone */
+      }
+      usageWatcher = null;
+      const delay = Math.min(60_000, 2000 * 2 ** Math.min(usageWatchFailures++, 5));
+      const retry = setTimeout(() => {
+        if (!usageWatcher) startUsageWatch();
+      }, delay);
+      retry.unref?.();
+    });
     console.log('[usage] watching', PROJECTS_DIR);
   } catch (err) {
     console.warn('[usage] could not watch transcripts:', (err as Error).message);
+  }
+
+  if (!usageSweep) {
+    usageSweep = setInterval(() => {
+      // Cheap when the watcher is doing its job: this finds a recent scan and
+      // returns without touching the disk.
+      if (Date.now() - usageLastRun < USAGE_SWEEP_MS) return;
+      void refreshUsage('sweep');
+    }, USAGE_SWEEP_MS);
+    usageSweep.unref?.();
   }
 }
 

@@ -408,6 +408,49 @@ renderer through the only bridge (`preload/index.ts:19-23`) and lands in
 
 ---
 
+## The sweep, and what it is not for
+
+A refresh used to be triggered only by the watcher, by startup, and by
+projection being switched off. That made the whole dashboard depend on
+`fs.watch` firing every single time. One missed event and the numbers stayed
+frozen until the next write happened to arrive, and nothing distinguished that
+from a genuinely quiet machine.
+
+On Windows a recursive `fs.watch` is `ReadDirectoryChangesW`, whose buffer drops
+events under churn rather than queueing them, and the watcher can also error and
+stop. The error handler logged and gave up, so a dead watcher never came back.
+
+Both are now handled: a sweep every 60 seconds refreshes if nothing has scanned
+in that time, and a watcher error closes, backs off and restarts, with the
+backoff reset by the first event a new watcher delivers.
+
+**Sixty seconds, not thirty.** A sweep that finds nothing changed still stats
+every transcript: measured at 168 to 188 ms across 459 files, and that grows
+with the tree. Thirty seconds would spend roughly 0.6 percent of a core forever
+on an idle machine. The cost only lands when idle, because a tick that sees a
+recent scan returns without touching the disk.
+
+### What the sweep does NOT fix
+
+It does not make a background agent's work appear while the agent is working,
+and it was very nearly shipped as though it would.
+
+A headless `claude -p` run does not write its transcript as it goes. Measured on
+2026-09-04, a five minute run wrote at t+5s (73 KB), then nothing for over two
+minutes, then at t+2m11s (159 KB), then nothing again until it exited (173 KB).
+Twenty six records in about three bursts.
+
+So during a background run there is nothing new on disk to find, and "last
+record 4 minutes ago" is the correct answer rather than a stale one. Velocity
+decaying at the same time is the trailing window behaving properly. Interactive
+Claude Code flushes every turn, which is why a session at the keyboard looks
+live on the wall and a background agent does not.
+
+Sweeping more often cannot surface work that has not been written. The
+distinction is worth keeping because the two symptoms look identical from the
+outside.
+
+
 ## The unavailable state
 
 Set in exactly one place (`usage.ts:374-381`): the projects directory could not be

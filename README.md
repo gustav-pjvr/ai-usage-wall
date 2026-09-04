@@ -292,6 +292,10 @@ Four things to say when you hand it over:
 - **It can project.** [Projection](#projection) ships in both editions. It is off
   by default, and a consent dialog and a pairing code stand between a fresh
   install and a single byte leaving the machine.
+- **Paired machines can message each other.** Plain text, over the same sealed
+  channel, from the tray under Projection. The relay forwards it without being
+  able to read it, and a message that cannot be delivered says so rather than
+  pretending it went. See [docs/messaging.md](docs/messaging.md).
 
 `npm run deploy` only ever touches the FULL build, on this machine.
 

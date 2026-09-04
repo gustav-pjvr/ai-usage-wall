@@ -280,6 +280,22 @@ push was once gated on `isScreen()`, which is false by the time an unpaired
 screen publishes `off`, so a former screen kept showing `LIVE from <source>` at
 full brightness forever.
 
+## Messages
+
+Once a pairing is confirmed, both machines can send each other text on the same
+sealed channel, as a `{t:'chat', msg}` body in either direction. It is reached
+from the tray under Projection, in a window of its own rather than on the
+pairing panel, because the pairing panel is asymmetric and the receiving machine
+never opens it. Full detail in [messaging.md](messaging.md).
+
+Two consequences for this document:
+
+- The `up` channel now carries frequent traffic, where it previously carried one
+  hello-ack per connection. It gained a persisted per-screen replay boundary as
+  a result; see [projection-crypto.md](projection-crypto.md).
+- The tray's Projection submenu gains a `Messages...` entry, carrying an unread
+  count, whenever there is a peer to message.
+
 ## Revocation, unpairing, stopping
 
 **Source removes a screen** (`Remove this screen` in the tray, or `Remove` in
@@ -328,7 +344,7 @@ time the menu opens.
 | Source, socket not open | `Projecting: relay unreachable, retrying in Ns` | as below |
 | Source, no screens | `Projecting: no screens paired yet` | `Show a pairing code...`, `No screens paired yet`, `Send project folder names` checkbox, `Stop projecting and forget all screens` |
 | Source, screens | `Projecting to X of Y screen(s)` | one item per screen: `<label>  (connected or offline)` plus `(unconfirmed)` while unproven, each with `Remove this screen` |
-| Screen, live | `Showing <label> (live)` | `Unpair from this source` |
+| Screen, live | `Showing <label> (live)` | `Messages...`, `Unpair from this source` |
 | Screen, link lost (90 s to 5 min) | `Showing <label> (link lost)` | same |
 | Screen, offline (over 5 min) | `<label> is offline` | same |
 | Screen, relay unreachable | `Relay unreachable, retrying` | same |

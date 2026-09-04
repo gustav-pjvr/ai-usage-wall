@@ -3,7 +3,8 @@
 **Summary.** Three layers, listed separately because they have different
 audiences: what the relay sees in the clear (routing and bearer credentials),
 what is sealed and reaches the paired screen (the dashboard, with paths,
-usernames and session ids removed), and what never leaves the source at all.
+usernames and session ids removed, plus any text a person sends from the
+messages window), and what never leaves the source at all.
 `toWire()` is the only serialiser and builds the frame by naming each field, so
 a field added to the local index later is absent from the wire until someone
 adds it on purpose. Leak-guard tests assert on the output; project folder names
@@ -46,10 +47,18 @@ public key), and `offer-expired`.
 ## Layer 2: sealed, reaching the paired screen
 
 The sealed envelope is `{sentAt, body}`. `body` is one of
-`{t:'hello', label}`, `{t:'beat'}`, or `{t:'frame', usage}`; the screen sends
-`{t:'hello-ack', label}` back. `label` in the hello is the source's Windows
-computer name; `label` in the ack is the screen's hostname. Both identify a
-machine and both travel sealed only.
+`{t:'hello', label}`, `{t:'beat'}`, `{t:'frame', usage}`, or `{t:'chat', msg}`;
+the screen sends `{t:'hello-ack', label}` and `{t:'chat', msg}` back. `label` in
+the hello is the source's Windows computer name; `label` in the ack is the
+screen's hostname. Both identify a machine and both travel sealed only.
+
+**Chat carries what a person typed.** `msg` is `{id, text, at}`: a random id, the
+message text capped at 2000 characters, and the sender's clock. This is the one
+thing on the wire that is not derived from the transcripts, so it deserves
+saying plainly rather than being folded into a list. It is sealed like
+everything else, so the relay cannot read it, and it is stored on both machines
+through the same DPAPI writer that protects the keys. See
+[messaging.md](messaging.md).
 
 `usage` is a `ProjectedUsage` (`src/shared/projection-wire.ts`), built by
 `toWire()`. Field by field:
@@ -80,6 +89,26 @@ Sealed does not mean anonymous. Model names, session start and end times, daily
 and hourly buckets and `sentAt` all describe when and how the person works, and
 a project label is a folder name someone chose. This layer is protected from
 the relay and from the network, not from the screen's owner.
+
+### What chat adds to this layer
+
+Message text is the only content on the wire a person authors directly. What
+that means in practice:
+
+- It is not derived from anything the indexer read, so none of the leak guards
+  in `toWire()` apply to it, and none of them need to: whatever is in it, a
+  person typed it deliberately and pressed Enter.
+- It is capped at 2000 characters and control characters are stripped before
+  sending, which is about keeping frames small and terminals safe rather than
+  about privacy.
+- Both machines keep it. History is capped at 300 messages per thread and lives
+  in `projection-chat.json`, written by the same encrypted writer as the keys.
+  Revoking a screen, unpairing, or turning projection off deletes it.
+- The relay sees the same thing it sees for a dashboard frame: a timestamp, a
+  size, and ciphertext. A chat frame is small and irregular where a dashboard
+  frame is larger and roughly periodic, so the relay can distinguish "someone is
+  typing to their other machine" from "the dashboard changed". It cannot tell
+  what was typed.
 
 ## Layer 3: never leaves the source
 

@@ -198,6 +198,15 @@ export function newSecret(bytes = 32): string {
 }
 
 /** 26 characters of Crockford base32, lowercase: the space id the relay routes on. */
+/**
+ * Id for one chat message. Only ever compared for equality, so 96 bits of
+ * randomness is far more than the job needs and leaves no room for a collision
+ * to silently swallow a message during dedupe.
+ */
+export function newMessageId(): string {
+  return randomBytes(12).toString('hex');
+}
+
 export function newSpaceId(): string {
   const lower = '0123456789abcdefghjkmnpqrstvwxyz';
   let out = '';

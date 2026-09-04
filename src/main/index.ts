@@ -404,6 +404,12 @@ function buildTray(): void {
   }
 }
 
+/** Messages, with the unread count when there is one. */
+function messagesLabel(): string {
+  const n = projection.unreadChat();
+  return n > 0 ? `Messages (${n})` : 'Messages...';
+}
+
 /**
  * The Projection submenu.
  *
@@ -455,6 +461,53 @@ function openPairWindow(mode: 'source' | 'screen'): void {
   });
 }
 
+/*
+ * The messages window.
+ *
+ * Separate from the pairing window on purpose. The pairing panel is asymmetric:
+ * the source shows a code there and the screen only ever sees it once, while
+ * redeeming. Hanging the conversation off it would have left the receiving
+ * machine with no way in. Both roles open this the same way, from the tray.
+ *
+ * Focusable and normal, for the same reason the pairing window is: the wall's
+ * own windows cannot take focus, so a text input in them is a trap.
+ */
+let chatWindow: BrowserWindow | null = null;
+
+function openChatWindow(): void {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.show();
+    chatWindow.focus();
+    return;
+  }
+  chatWindow = new BrowserWindow({
+    width: 460,
+    height: 620,
+    minWidth: 340,
+    minHeight: 380,
+    title: 'Messages',
+    backgroundColor: '#26262b',
+    autoHideMenuBar: true,
+    webPreferences: {
+      preload: path.join(__dirname, '..', 'preload', 'index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      devTools: isDev,
+    },
+  });
+  chatWindow.setMenu(null);
+  void chatWindow.loadFile(path.join(__dirname, '..', 'renderer', 'chat.html'));
+  chatWindow.on('closed', () => {
+    chatWindow = null;
+  });
+}
+
+/** Nudge the window to reload its threads. Cheap, and it owns the rendering. */
+function pushChatChanged(): void {
+  if (chatWindow && !chatWindow.isDestroyed()) chatWindow.webContents.send('chat:changed');
+}
+
 function pushPairStatus(): void {
   if (pairWindow && !pairWindow.isDestroyed()) {
     pairWindow.webContents.send('pair:status', projection.projectionStatus());
@@ -499,6 +552,7 @@ function projectionMenu(): Electron.MenuItemConstructorOptions[] {
     return [
       ...head,
       { label: 'Show a pairing code...', click: () => openPairWindow('source') },
+      ...(projection.chatAvailable() ? [{ label: messagesLabel(), click: () => openChatWindow() }] : []),
       { type: 'separator' },
       ...screens,
       { type: 'separator' },
@@ -518,6 +572,7 @@ function projectionMenu(): Electron.MenuItemConstructorOptions[] {
 
   return [
     ...head,
+    { label: messagesLabel(), click: () => openChatWindow() },
     { label: 'Unpair from this source', click: () => void projection.unpairScreen() },
   ];
 }
@@ -1421,6 +1476,35 @@ function registerIpc(): void {
     if (pairWindow && !pairWindow.isDestroyed()) pairWindow.close();
   });
 
+  // ── Messages ─────────────────────────────────────────────────────────────
+
+  /*
+   * One preload serves every window, so `chat` is reachable from the wall and
+   * the pairing window too. Only the messages window has any business calling
+   * these, and checking the sender costs one comparison. It is defence in depth
+   * rather than a known hole: exploiting it would need a renderer compromise
+   * first, and every window runs with contextIsolation on and no innerHTML.
+   */
+  const fromChatWindow = (e: { sender: Electron.WebContents }): boolean =>
+    !!chatWindow && !chatWindow.isDestroyed() && e.sender.id === chatWindow.webContents.id;
+
+  ipcMain.handle('chat:load', (e) => (fromChatWindow(e) ? projection.chatThreads() : { threads: [], role: 'off', reachable: [] }));
+  ipcMain.handle('chat:send', (e, peerId: string, text: string) => {
+    if (!fromChatWindow(e)) return { ok: false, delivered: false };
+    const r = projection.sendChat(String(peerId ?? ''), text);
+    // The tray label carries the unread count, and sending can clear it.
+    refreshTrayMenu();
+    return r;
+  });
+  ipcMain.handle('chat:markRead', (e, peerId: string) => {
+    if (!fromChatWindow(e)) return;
+    projection.markChatRead(String(peerId ?? ''));
+    refreshTrayMenu();
+  });
+  ipcMain.handle('chat:close', (e) => {
+    if (fromChatWindow(e) && chatWindow && !chatWindow.isDestroyed()) chatWindow.close();
+  });
+
   ipcMain.handle('wall:openExternal', (_e, url: string) => {
     // Only ever open http(s). Client JSON is hand-edited and untrusted.
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url);
@@ -1510,10 +1594,23 @@ if (!app.requestSingleInstanceLock()) {
      * there is any point indexing at all: a screen shows another machine's
      * numbers and must not read its own transcripts while paired.
      */
+    /*
+     * A message that arrives while the window is shut is not announced with a
+     * balloon. The tray label carries the count, and this app has one standing
+     * rule about interrupting: it does not, unless the user asked to be
+     * interrupted. A chat message from your own other machine is not that.
+     */
+    projection.setChatListener((_peerId, label) => {
+      pushChatChanged();
+      refreshTrayMenu();
+      console.log(`[chat] message from ${label}`);
+    });
+
     await projection.startProjection({
       onStatus: () => {
         refreshTrayMenu();
         pushPairStatus();
+        pushChatChanged();
         pushState();
 
         /*

@@ -28,6 +28,28 @@ import type { PeakVelocity } from '../../shared/velocity';
 /** Ignore anything below this, so noise never sets a record. */
 const FLOOR = 1000;
 
+/**
+ * Which definition of velocity the stored record was measured with.
+ *
+ * Version 1 divided the window's tokens by the time since the oldest record in
+ * it; version 2 divides by the window. The ratio between them is 10/spanMin
+ * with spanMin floored at 1, so version 1 read between 1x and 10x version 2
+ * depending only on how tightly the work was bunched. Measured across the live
+ * buffer: mean 2.16x, worst exactly 10.00x.
+ *
+ * A stored record is therefore discarded rather than converted, because there
+ * is no conversion. Recovering the old spanMin would need the moment that
+ * produced it, and that is gone.
+ *
+ * NOT because the old figure is out of reach. That was the first reason written
+ * here and it was wrong: Gustav asked where the "10x" came from, and checking it
+ * showed the new formula reaching 26.4M/min in the same buffer against a stored
+ * record of 9.6M. The old number would have been beaten within the hour. The
+ * reason to drop it is that a high water mark mixing two definitions measures
+ * nothing, which is true regardless of which number is larger.
+ */
+const PEAK_VERSION = 2;
+
 let cached: PeakVelocity | null = null;
 let file: string | null = null;
 
@@ -37,7 +59,11 @@ const fileFor = (userData: string) => path.join(userData, 'peak-velocity.json');
 export async function loadPeak(userData: string): Promise<PeakVelocity | null> {
   file = fileFor(userData);
   try {
-    const raw = JSON.parse(await fs.readFile(file, 'utf8')) as Partial<PeakVelocity>;
+    const raw = JSON.parse(await fs.readFile(file, 'utf8')) as Partial<PeakVelocity> & { v?: number };
+    if (Number(raw?.v) !== PEAK_VERSION) {
+      console.log('[peak] discarding a record measured with an older velocity definition');
+      return (cached = null);
+    }
     const v = Number(raw?.velocity);
     // A record that is not a finite positive number is not a record.
     if (!Number.isFinite(v) || v < FLOOR) return (cached = null);
@@ -64,7 +90,7 @@ export async function offerPeak(velocity: number, when: number = Date.now()): Pr
   cached = { velocity, at: new Date(when).toISOString() };
   if (!file) return true;
   try {
-    await fs.writeFile(file, JSON.stringify(cached, null, 2), 'utf8');
+    await fs.writeFile(file, JSON.stringify({ v: PEAK_VERSION, ...cached }, null, 2), 'utf8');
   } catch (err) {
     // Losing the write costs the record on next launch, nothing more. It must
     // never take the scan down with it.

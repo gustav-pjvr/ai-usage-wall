@@ -632,7 +632,12 @@ export class StatsView {
     this.odos.velocity = new Odometer('vel-value', (n) => compact(Math.round(n)));
     velBody.appendChild(this.odos.velocity.node);
     velBody.appendChild(el('div', 'vel-unit', 'tokens / min'));
-    velBody.appendChild(el('div', 'vel-note', 'trailing 10 minutes of record timestamps'));
+        /*
+ * "processed", not "used", and matching the hero's TOTAL TOKENS PROCESSED.
+ * 97% of what this counts is cache reads, so the honest word is the one that
+ * covers context being re-read rather than one that implies generation.
+ */
+    velBody.appendChild(el('div', 'vel-note', 'average tokens processed in the last 10 min'));
     /*
      * The record. Hidden until one exists, because "PEAK 0" on a fresh install
      * reads as a measurement rather than an absence.

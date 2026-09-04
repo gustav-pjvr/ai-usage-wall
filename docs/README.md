@@ -17,7 +17,7 @@ reversed; these are the depth behind it.
 | Document | What it covers |
 |---|---|
 | [usage-indexing.md](usage-indexing.md) | Reading Claude Code transcripts, the incremental scan, the index shape, project labelling |
-| [derived-metrics.md](derived-metrics.md) | Measured against derived, velocity and intensity, the live trace, and why a value that stops changing is a bug |
+| [derived-metrics.md](derived-metrics.md) | Measured against derived, cost, recent volume and intensity, the live trace, and why a value that stops changing is a bug |
 
 ## Projection
 

@@ -15,7 +15,10 @@
  */
 
 import { formatCost } from '../shared/pricing';
-import { velocityOf } from '../shared/velocity';
+import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
+
+/** Minutes in the velocity window, for turning the rate back into a total. */
+const VELOCITY_WINDOW_MIN = VELOCITY_WINDOW_MS / 60_000;
 import type { UsageIndex, TokenTotals } from '../main/data/usage';
 import type { ProjectionStatus } from '../main/projection';
 import type { ScreenStatus } from '../main/projection/screen';
@@ -627,17 +630,36 @@ export class StatsView {
     stack.appendChild(cost);
 
     // Velocity + today.
-    const vel = panel('Velocity', 'derived', 'panel-vel');
+    /*
+     * A QUANTITY, not a speed.
+     *
+     * This was "tokens / min" for a long time and it kept being wrong in a way
+     * that was hard to name. Gustav got there in the end: a number labelled per
+     * minute that only moves a tenth for each minute of new work, and that
+     * still reads 1.8M nine minutes after he stops, does not describe any
+     * minute he is looking at. He was objecting to the unit, not the division.
+     *
+     * The fix is not another window length. His data cannot support a rate at
+     * any resolution finer than about ten minutes: Claude Code writes one
+     * record per response, so a long thinking turn is a gap, and measured over
+     * thirty minutes of real activity a one, two or five minute window reads
+     * ZERO repeatedly while work is actively happening. A faster rate would be
+     * a lie in the other direction.
+     *
+     * So the wall shows the window total with the window as its only time unit.
+     * One unit, no conversion, and no claim about any individual minute.
+     *
+     * velocityOf() is untouched and still returns per minute: intensity uses
+     * it, the peak is persisted in it, and the projection wire carries it. Only
+     * the display multiplies back up.
+     */
+    const vel = panel('Recent volume', 'derived', 'panel-vel');
     const velBody = el('div', 'vel-body');
-    this.odos.velocity = new Odometer('vel-value', (n) => compact(Math.round(n)));
+    this.odos.velocity = new Odometer('vel-value', (n) => compact(Math.round(n * VELOCITY_WINDOW_MIN)));
     velBody.appendChild(this.odos.velocity.node);
-    velBody.appendChild(el('div', 'vel-unit', 'tokens / min'));
-        /*
- * "processed", not "used", and matching the hero's TOTAL TOKENS PROCESSED.
- * 97% of what this counts is cache reads, so the honest word is the one that
- * covers context being re-read rather than one that implies generation.
- */
-    velBody.appendChild(el('div', 'vel-note', 'average tokens processed in the last 10 min'));
+    velBody.appendChild(el('div', 'vel-unit', 'tokens, last 10 min'));
+    // Worth saying on the wall itself: 97% of this is context being re-read.
+    velBody.appendChild(el('div', 'vel-note', 'everything processed, mostly cache reads'));
     /*
      * The record. Hidden until one exists, because "PEAK 0" on a fresh install
      * reads as a measurement rather than an absence.
@@ -1165,7 +1187,10 @@ export class StatsView {
       return;
     }
     node.hidden = false;
-    (node.querySelector('.vel-peak-value') as HTMLElement).textContent = compact(Math.round(p.velocity));
+    // Stored per minute, shown over the same window as the value above it.
+    (node.querySelector('.vel-peak-value') as HTMLElement).textContent = compact(
+      Math.round(p.velocity * VELOCITY_WINDOW_MIN),
+    );
     const when = relTime(p.at);
     (node.querySelector('.vel-peak-when') as HTMLElement).textContent = when ? `· ${when}` : '';
   }

@@ -157,7 +157,7 @@ UI says which kind you are looking at.
 Both derived panels state their own arithmetic in the interface, not just in a
 comment:
 
-- Velocity: "average tokens processed in the last 10 min" (`stats.ts`)
+- Recent volume: "tokens, last 10 min" and "everything processed, mostly cache reads" (`stats.ts`)
 - Context efficiency: "cache reads / (cache reads + cache writes + fresh input)"
   (`stats.ts:635`)
 
@@ -177,11 +177,43 @@ tokens   = sum of recent[i][1] where now - ts <= window
 velocity = tokens > 0 ? tokens / 10 : 0
 ```
 
-**Divided by the window, not by the age of the oldest record in it.** That is the
-literal reading of "average tokens processed in the last 10 minutes", and it means
-the number changes only when the facts change: it holds steady while the same
-records are in view, and falls as they age out, reaching zero ten minutes after
-the last one.
+**Divided by the window, not by the age of the oldest record in it.** The number
+changes only when the facts change: it holds steady while the same records are in
+view, and falls as they age out, reaching zero ten minutes after the last one.
+
+### The wall shows a quantity, not a rate
+
+`velocityOf` returns per minute and everything internal uses it that way:
+intensity, the persisted peak, and the projection wire. **The card multiplies it
+back up and shows the window total**, labelled `tokens, last 10 min`.
+
+That was the third attempt at this panel and the first that answered the actual
+objection. Gustav's words about the per-minute version: "its per min but
+calculated per 10min, am i right to bring this up?" The arithmetic was fine, and
+answering only that talked past him. A number labelled per minute that moves one
+tenth for each minute of new work, and still reads 1.8M nine minutes after the
+work stopped, does not describe any minute a person is looking at. The complaint
+was about the unit, not the division.
+
+The tempting fix, a shorter window, is refused by the data. Claude Code writes one
+record per assistant response, so a long thinking turn is a gap with nothing in
+it. Measured across thirty minutes of real activity:
+
+| Window | Reads | Behaviour during ACTIVE work |
+|---|---|---|
+| 1 min | 2.75M/min | hits zero repeatedly |
+| 2 min | 4.12M/min | hits zero repeatedly |
+| 5 min | 2.56M/min | hits zero repeatedly |
+| 10 min | 1.82M/min | range 0.26M to 2.34M |
+| 20 min | 1.81M/min | range 0.48M to 1.81M |
+
+A faster rate is a lie in the other direction. This data cannot support a rate at
+any resolution finer than about ten minutes, so the wall shows a quantity with
+the window as its only time unit: one unit, no conversion, no claim about any
+individual minute.
+
+The peak is stored per minute and displayed the same way, multiplied by the
+window, so the two numbers on the card are in the same units.
 
 ### What it used to do, and why that was wrong
 
@@ -228,7 +260,7 @@ left as a worry: the busiest ten minute window in a full 600 record buffer held
 **What "tokens" means here.** The sum is input plus output plus cache writes plus
 cache reads, and on this machine cache reads are 97.27% of it. So the reading is
 overwhelmingly context being re-read, not text being generated, which is why the
-note says "processed" and not "used". It is the same definition as the headline
+card says so out loud: "everything processed, mostly cache reads". It is the same definition as the headline
 TOTAL TOKENS PROCESSED and the same components the cost stat prices, so the three
 agree with each other. A velocity counting only generation would contradict the
 number sitting next to it.

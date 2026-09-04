@@ -263,8 +263,8 @@ Two consequences of "the screen's clock decides", read from the code:
   real defect: the optimisation is dead code that reads as if it works.
 
 **Why a screen decays correctly while an idle source used to freeze.** The
-history is recorded in `src/renderer/stats.ts`. Velocity is tokens per minute
-over a trailing ten minute window, so it should fall to zero on its own once
+history is recorded in `src/renderer/stats.ts`. The recent volume panel sums the
+tokens in a trailing ten minute window, so it should fall to zero on its own once
 activity stops. The local dashboard only repainted when a usage push arrived,
 so a source with Claude Code closed sat showing its last computed velocity
 indefinitely as if current. The projected screen did not have this problem:

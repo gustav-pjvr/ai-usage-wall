@@ -157,7 +157,7 @@ UI says which kind you are looking at.
 Both derived panels state their own arithmetic in the interface, not just in a
 comment:
 
-- Velocity: "trailing 10 minutes of record timestamps" (`stats.ts:597`)
+- Velocity: "average tokens processed in the last 10 min" (`stats.ts`)
 - Context efficiency: "cache reads / (cache reads + cache writes + fresh input)"
   (`stats.ts:635`)
 
@@ -172,36 +172,71 @@ person looking at the wall, indistinguishable from one that was made up.
 Velocity is the first thing it does (`stats.ts:173-182`):
 
 ```
-window   = 10 minutes                          (VELOCITY_WINDOW_MS, stats.ts:168)
+window   = 10 minutes                     (VELOCITY_WINDOW_MS, shared/velocity.ts)
 tokens   = sum of recent[i][1] where now - ts <= window
-earliest = smallest ts still inside the window
-spanMin  = max(1, (now - earliest) / 60000)
-velocity = tokens > 0 ? tokens / spanMin : 0
+velocity = tokens > 0 ? tokens / 10 : 0
 ```
 
-Two choices in there are worth understanding, because they decide what the number
-means.
+**Divided by the window, not by the age of the oldest record in it.** That is the
+literal reading of "average tokens processed in the last 10 minutes", and it means
+the number changes only when the facts change: it holds steady while the same
+records are in view, and falls as they age out, reaching zero ten minutes after
+the last one.
 
-**The span is measured from the earliest record still in the window, not from the
-window's full width.** A burst that started two minutes ago is reported as two
-minutes of work rather than diluted across ten. The alternative would make a hard
-sprint look like a moderate trot for its first eight minutes.
+### What it used to do, and why that was wrong
 
-**There is a one minute floor on the span.** Two records milliseconds apart would
-otherwise divide by something near zero and report a rate in the billions. The
-floor caps the reading at "everything in the window, per minute".
+Until 0.9.9 the divisor was `max(1, (now - earliest) / 60000)`, the time since the
+oldest record still in the window. The numerator sat still while the divisor grew,
+so the reading fell with no new work at all. Measured on the live buffer, the same
+three records and the same 2.65M tokens read:
 
-The direct consequence is that a single record of `T` tokens at age `m` minutes
-reads as `T / max(1, m)` tokens per minute, and decays hyperbolically as it ages
-out. That is the decay curve in the section below.
+| Minutes since the last record | Old reading |
+|---|---|
+| 1 | 2,355K |
+| 3 | 847K |
+| 5 | 517K |
+| 7 | 372K |
+| 9 | 290K |
+
+A 1/t curve, which is exactly what "drops a little then plateaus" looks like from
+the sofa. Gustav found it by noticing the wall said Claude had been quiet for seven
+minutes while the rate beside it read half a million a minute. Both were true. Only
+one of them was what the card claimed to be showing.
+
+It was also a label mismatch: the note said "trailing 10 minutes", which describes
+the new formula, not the one that was running.
+
+**The ratio between them is `10 / spanMin`, floored at 1, so the old reading ran
+between 1x and 10x the new one** depending only on how tightly the work was bunched.
+Measured across the live buffer: mean 2.16x, worst exactly 10.00x.
+
+The stored peak is versioned for that reason and a record from the old definition is
+discarded rather than converted (`main/data/peak.ts`). Not because the old number was
+out of reach: that was the first reason written down and it was wrong. The new formula
+reached 26.4M/min in the same buffer against a stored record of 9.6M, so it would have
+been beaten within the hour. The reason is that a high water mark mixing two
+definitions measures nothing, whichever number is larger.
 
 ### Bounds worth knowing
 
-`recent` holds at most 600 entries (`RECENT_EVENTS`, `usage.ts:64`, applied in
-`prune`, `usage.ts:341-344`). In a busy ten minutes the window could in principle
-be clipped by the ring rather than by time. On this machine that is not close: 600
-records inside ten minutes would be one per second. This is read from the code, not
-observed, and it is a bound rather than a behaviour.
+`recent` holds at most 600 entries (`RECENT_EVENTS`, `usage.ts`). In a busy ten
+minutes the window could in principle be clipped by the ring rather than by time,
+which would make the average silently too low. **Measured 2026-09-04 rather than
+left as a worry: the busiest ten minute window in a full 600 record buffer held
+128 records.** Not close to the cap.
+
+**What "tokens" means here.** The sum is input plus output plus cache writes plus
+cache reads, and on this machine cache reads are 97.27% of it. So the reading is
+overwhelmingly context being re-read, not text being generated, which is why the
+note says "processed" and not "used". It is the same definition as the headline
+TOTAL TOKENS PROCESSED and the same components the cost stat prices, so the three
+agree with each other. A velocity counting only generation would contradict the
+number sitting next to it.
+
+**How much the averaging dilutes.** During real activity, very little. At the most
+recent burst on 2026-09-04 the work spanned 9.0 of the 10 minutes: 1.96M/min
+averaged against 2.19M/min over just the working span, an 11% difference. The
+average only reads low when work has genuinely stopped, which is the point.
 
 `derive()` also computes `tokensPerRequest`, `activeHours`, `todayTotals` and
 `weekTotals` (`stats.ts:187-226`). **No caller reads any of them.** The only

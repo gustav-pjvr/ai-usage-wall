@@ -14,27 +14,38 @@ export const VELOCITY_WINDOW_MS = 10 * 60 * 1000;
 /** [epochMs, totalTokens, outputTokens], oldest first, as the index stores it. */
 export type RecentRecord = [number, number, number];
 
+/** The window in minutes, which is the divisor. Ten. */
+const WINDOW_MIN = VELOCITY_WINDOW_MS / 60_000;
+
 /**
- * Tokens per minute across the records inside the window ending at `now`.
+ * Average tokens per minute over the last ten minutes.
  *
- * The span is measured from the EARLIEST record still in the window rather than
- * from the window's full width, so a burst that started two minutes ago is
- * reported as two minutes of work rather than diluted across ten. The one
- * minute floor stops a pair of records milliseconds apart from reporting a rate
- * in the billions.
+ * Divided by the WINDOW, not by the time since the oldest record in it. That
+ * distinction is the whole of this comment.
+ *
+ * It used to divide by `now - earliest`, which meant the divisor grew while the
+ * numerator sat still, so a figure fell by 65 percent between minute three and
+ * minute nine with no new work at all: same three records, 2.65M tokens, and a
+ * reading that went 847K, 642K, 517K, 432K, 372K. A 1/t curve, which is exactly
+ * what "drops a little then plateaus" looks like. Gustav spotted it because the
+ * wall said Claude had been quiet for seven minutes and the rate beside it was
+ * still half a million a minute.
+ *
+ * It was also not what the card claimed. The label said "trailing 10 minutes",
+ * which is this, not that. A number that moves while the facts do not is the
+ * kind of wrong that looks like a feature.
+ *
+ * Now: work in the window, divided by the window. It holds steady while those
+ * records are in view and falls as they age out, reaching zero ten minutes
+ * after the last one.
  */
 export function velocityOf(recent: readonly RecentRecord[], now: number = Date.now()): number {
   let windowTokens = 0;
-  let earliest = now;
   for (const [ts, total] of recent) {
-    if (now - ts <= VELOCITY_WINDOW_MS) {
-      windowTokens += total;
-      if (ts < earliest) earliest = ts;
-    }
+    if (now - ts <= VELOCITY_WINDOW_MS) windowTokens += total;
   }
   if (windowTokens <= 0) return 0;
-  const spanMin = Math.max(1, (now - earliest) / 60000);
-  return windowTokens / spanMin;
+  return windowTokens / WINDOW_MIN;
 }
 
 /** The persisted high water mark. */

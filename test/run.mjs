@@ -33,6 +33,7 @@ const ok = (name, cond, detail = '') => {
 const { deriveBrandTokens } = await load('src/shared/color.ts');
 const { computeLayout } = await load('src/shared/layout.ts');
 const { validateClient } = await load('src/shared/schema.ts');
+const { velocityOf, VELOCITY_WINDOW_MS } = await load('src/shared/velocity.ts');
 
 // ── Brand derivation: every card must be legible, whatever the brand ────────
 console.log('\nbrand token derivation');
@@ -135,5 +136,40 @@ ok('unknown fields are preserved', validateClient({ id: 'a', futureField: 42 }).
 ok('completed aliases to past', validateClient({ id: 'a', state: 'completed' }).client?.state === 'past');
 
 await fs.rm(tmp, { recursive: true, force: true });
+console.log('');
+console.log('velocity: an average over the window, not since the oldest record');
+{
+  const MIN = 60_000;
+  const now = 1_000_000_000_000;
+  // One burst of 3M tokens, all of it four minutes before `now`.
+  const burst = [[now - 4 * MIN, 1_000_000, 0], [now - 4 * MIN + 1000, 2_000_000, 0]];
+
+  ok('a burst is averaged over the full ten minutes, not its own span',
+     velocityOf(burst, now) === 300_000, String(velocityOf(burst, now)));
+
+  /*
+   * The bug this replaced: with the same records and no new work, the old
+   * formula fell steadily because its divisor grew. The reading must not move
+   * unless the facts do.
+   */
+  const atFive = velocityOf(burst, now + 1 * MIN);
+  const atNine = velocityOf(burst, now + 5 * MIN);
+  ok('the same records read the SAME five minutes later', atFive === atNine && atFive === 300_000,
+     `${atFive} then ${atNine}`);
+
+  ok('it falls only when a record ages out of the window',
+     velocityOf(burst, now + 6 * MIN + 1) === 200_000,
+     String(velocityOf(burst, now + 6 * MIN + 1)));
+  ok('and reaches zero once the window is empty',
+     velocityOf(burst, now + 11 * MIN) === 0);
+
+  ok('no records at all is zero, not a division by zero', velocityOf([], now) === 0);
+  ok('a record exactly on the boundary is still counted',
+     velocityOf([[now - VELOCITY_WINDOW_MS, 600_000, 0]], now) === 60_000);
+  ok('a record one millisecond past it is not',
+     velocityOf([[now - VELOCITY_WINDOW_MS - 1, 600_000, 0]], now) === 0);
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

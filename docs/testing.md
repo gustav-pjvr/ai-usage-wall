@@ -39,14 +39,14 @@ npm run test:e2e      # electron test/projection-e2e.cjs, hits the DEPLOYED rela
 
 | Suite | Checks | Result |
 |---|---|---|
-| `test/run.mjs` | 45 | 0 failed |
+| `test/run.mjs` | 52 | 0 failed |
 | `test/projection.test.mjs` | 34 | 0 failed |
 | `test/projection-crypto.test.mjs` | 37 | 0 failed |
 | `test/stats-projection.test.mjs` | 23 | 0 failed |
 | `test/usage-append.test.mjs` | 4 | 0 failed |
 | `test/chat.test.mjs` | 43 | 0 failed |
 | `test/pricing.test.mjs` | 23 | 0 failed |
-| **total** | **209** | |
+| **total** | **216** | |
 
 Two practical notes:
 
@@ -66,7 +66,7 @@ it is the **only** automated check that exists.
 
 ## The suites
 
-### `test/run.mjs` (45 checks): the two pure algorithms, plus the schema
+### `test/run.mjs` (52 checks): the pure algorithms, plus the schema
 
 Loads `src/shared/color.ts`, `src/shared/layout.ts` and `src/shared/schema.ts`
 (`run.mjs:33-35`). These carry the product's two guarantees, and both were

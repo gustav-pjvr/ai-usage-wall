@@ -69,7 +69,7 @@ through the same DPAPI writer that protects the keys. See
 | `sentAt` | source wall clock at build time, display only |
 | `sourceLabel` | the source's hostname |
 | `builtAt` | when the local index was built |
-| `totals` | eight numeric counters: input, output, cacheCreate, cacheRead, thinking, requests, webSearch, webFetch |
+| `totals` | ten numeric counters: input, output, cacheCreate, cacheRead, thinking, requests, webSearch, webFetch, plus `costUsd` and `unpricedTokens` |
 | `daily`, `hourly` | the same eight counters keyed by date and by date-hour |
 | `models` | the same eight counters keyed by **model name** |
 | `projects` | the same counters plus `lastSeen` and `display`, keyed by **label**, empty when sharing is off |
@@ -89,6 +89,13 @@ Sealed does not mean anonymous. Model names, session start and end times, daily
 and hourly buckets and `sentAt` all describe when and how the person works, and
 a project label is a folder name someone chose. This layer is protected from
 the relay and from the network, not from the screen's owner.
+
+**On `costUsd`.** It is a dollar figure the source derived from the token
+counts sitting beside it in the same frame, at API list prices. It reveals
+nothing the counters do not already, which is why adding it to the wire was a
+one line decision rather than an argument, but it is worth naming because a
+money figure crossing a network reads differently from a token count even when
+it is the same information twice.
 
 ### What chat adds to this layer
 

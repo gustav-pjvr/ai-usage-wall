@@ -5,6 +5,7 @@
 suites on that date.
 **Primary sources:** `test/run.mjs`, `test/projection.test.mjs`,
 `test/projection-crypto.test.mjs`, `test/stats-projection.test.mjs`,
+`test/usage-append.test.mjs`, `test/chat.test.mjs`, `test/pricing.test.mjs`,
 `test/projection-e2e.cjs`, `package.json`
 
 ## Summary
@@ -42,16 +43,20 @@ npm run test:e2e      # electron test/projection-e2e.cjs, hits the DEPLOYED rela
 | `test/projection.test.mjs` | 34 | 0 failed |
 | `test/projection-crypto.test.mjs` | 37 | 0 failed |
 | `test/stats-projection.test.mjs` | 23 | 0 failed |
-| **total** | **139** | |
+| `test/usage-append.test.mjs` | 4 | 0 failed |
+| `test/chat.test.mjs` | 43 | 0 failed |
+| `test/pricing.test.mjs` | 23 | 0 failed |
+| **total** | **209** | |
 
 Two practical notes:
 
-- `package.json:15` chains the four with `&&` and every suite ends in
+- `package.json` chains the suites with `&&` and every one ends in
   `process.exit(fail ? 1 : 0)`, so **the first failing suite stops the rest**. A
   red run tells you nothing about the suites after the one that failed.
-- `README.md:31` still says "42 checks on layout, colour and schema". That is
-  stale in two ways: `run.mjs` alone reports 45, and `npm test` now runs four
-  suites. Recorded rather than fixed; this task changed no source.
+- The three newest suites came from things that had already shipped broken:
+  `usage-append` from transcripts being counted twice, `chat` from a security
+  review, and `pricing` from a price table that could only be trusted by
+  checking it against numbers Claude Code had already priced.
 
 `npm run typecheck` is worth listing beside the tests, because for most of the
 main process (`win32/`, `settings.ts`, `updater.ts`, `capability.ts`, the store)

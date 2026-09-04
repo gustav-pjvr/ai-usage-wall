@@ -76,3 +76,18 @@ contextBridge.exposeInMainWorld('updateToast', {
     ipcRenderer.on('wall:update', (_e, s) => cb(s));
   },
 });
+
+/*
+ * The messages window's bridge. Separate from `pair` for the same reason `pair`
+ * is separate from `wall`: three surfaces, three sets of calls, and no window
+ * gets reach it does not need.
+ */
+contextBridge.exposeInMainWorld('chat', {
+  load: () => ipcRenderer.invoke('chat:load'),
+  send: (peerId: string, text: string) => ipcRenderer.invoke('chat:send', peerId, text),
+  markRead: (peerId: string) => ipcRenderer.invoke('chat:markRead', peerId),
+  onChanged: (cb: () => void) => {
+    ipcRenderer.on('chat:changed', () => cb());
+  },
+  close: () => ipcRenderer.invoke('chat:close'),
+});

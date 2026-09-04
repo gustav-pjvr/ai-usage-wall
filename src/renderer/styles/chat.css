@@ -1,0 +1,258 @@
+/*
+ * The messages window.
+ *
+ * Same palette and the same tokens as the pairing window, because they are two
+ * windows of one feature and a second visual language would make them look
+ * like two apps. Laid out as a column that fills the window: header, optional
+ * picker, a scrolling list that takes the slack, and a compose row pinned to
+ * the bottom.
+ */
+
+:root {
+  --ground: oklch(0.15 0.014 250);
+  --panel: oklch(0.2 0.016 248);
+  --edge: oklch(1 0 0 / 0.1);
+  --fg: oklch(0.97 0.005 250);
+  --fg-dim: oklch(0.74 0.012 250);
+  --sig: oklch(0.8 0.14 192);
+  --good: oklch(0.8 0.16 152);
+  --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--ground);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  overflow: hidden;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Header */
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid var(--edge);
+  flex: 0 0 auto;
+}
+
+.head-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.head-state {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.head-state.on {
+  color: var(--good);
+}
+
+.head-state.off {
+  color: var(--fg-dim);
+}
+
+/* Peer picker, only rendered when there is more than one */
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--edge);
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab.on {
+  background: var(--panel);
+  border-color: oklch(0.8 0.14 192 / 0.5);
+  color: var(--fg);
+}
+
+.tab-unread {
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--sig);
+  color: oklch(0.15 0.014 250);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Message list */
+
+.list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty {
+  margin: auto;
+  max-width: 30ch;
+  text-align: center;
+  color: var(--fg-dim);
+  line-height: 1.5;
+}
+
+.day {
+  align-self: center;
+  margin: 6px 0 2px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.56 0.012 250);
+}
+
+.msg {
+  max-width: 78%;
+  padding: 8px 11px;
+  border-radius: 12px;
+  border: 1px solid var(--edge);
+  background: var(--panel);
+}
+
+.msg.mine {
+  align-self: flex-end;
+  background: oklch(0.29 0.05 210);
+  border-color: oklch(0.8 0.14 192 / 0.28);
+}
+
+.msg.theirs {
+  align-self: flex-start;
+}
+
+.msg-text {
+  /* The messages are plain text and may contain newlines the sender typed. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.42;
+}
+
+.msg-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  color: oklch(0.62 0.012 250);
+}
+
+.msg.mine .msg-meta {
+  justify-content: flex-end;
+}
+
+.msg-queued {
+  color: oklch(0.78 0.12 75);
+  text-transform: uppercase;
+}
+
+/* Evicted by the outbox cap: this one is never going anywhere. */
+.msg-dropped {
+  color: oklch(0.72 0.17 25);
+  text-transform: uppercase;
+}
+
+/* Compose */
+
+.compose {
+  display: flex;
+  align-items: flex-end;
+  gap: 9px;
+  padding: 11px 16px 14px;
+  border-top: 1px solid var(--edge);
+  flex: 0 0 auto;
+}
+
+.input {
+  flex: 1 1 auto;
+  resize: none;
+  max-height: 120px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--edge);
+  background: oklch(0.17 0.014 250);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.input:focus {
+  outline: none;
+  border-color: oklch(0.8 0.14 192 / 0.55);
+}
+
+.input::placeholder {
+  color: oklch(0.55 0.012 250);
+}
+
+.send {
+  flex: 0 0 auto;
+  padding: 9px 17px;
+  border-radius: 9px;
+  border: 1px solid oklch(0.8 0.14 192 / 0.4);
+  background: oklch(0.29 0.05 210);
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.send:hover {
+  background: oklch(0.33 0.06 210);
+}
+
+.send:active {
+  transform: translateY(1px);
+}

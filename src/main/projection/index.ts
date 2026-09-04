@@ -8,6 +8,18 @@
  */
 
 import { dialog } from 'electron';
+import { SOURCE_PEER } from '../../shared/chat';
+import type { ChatThread } from '../../shared/chat';
+import {
+  allThreads,
+  forgetAll,
+  forgetPeer,
+  loadChat,
+  markRead,
+  relabel,
+  threadOf,
+  totalUnread,
+} from './chat-store';
 import { PRODUCT_NAME } from '../../shared/edition';
 import { normaliseCode } from '../../shared/pairing-code';
 import { deriveScreenKey, lookupFromStretched, newKeyPair, newSecret, newSpaceId, stretchCode } from './crypto';
@@ -63,6 +75,7 @@ export async function startProjection(opts: {
   emit = opts.onStatus;
   notice = opts.notify;
   onProjectedUsage = opts.onUsage;
+  await loadChat();
 
   const state = await loadProjection();
   if (!state) {
@@ -76,15 +89,106 @@ export async function startProjection(opts: {
 async function activate(state: ProjectionState): Promise<void> {
   stopAll();
   if (state.role === 'source') {
-    source = new SourceProjector(state, setStatus, notice);
+    source = new SourceProjector(state, setStatus, notice, chatNotify);
     source.start();
     console.log(`[projection] source, ${state.screens.length} screen(s) paired`);
   } else {
-    screen = new ScreenReceiver(state, onProjectedUsage, setStatus, notice);
+    screen = new ScreenReceiver(state, onProjectedUsage, setStatus, notice, chatNotify);
     await screen.start();
     console.log(`[projection] screen, showing ${state.sourceLabel || 'a paired source'}`);
   }
   setStatus(source ? source.status() : screen!.status());
+}
+
+/**
+ * Told when a message arrives, so the main process can open or refresh the chat
+ * window and update the tray. Set once at startup; a missing listener is fine
+ * and simply means nothing is watching yet.
+ */
+let onChatArrived: (peerId: string, label: string) => void = () => {};
+
+export function setChatListener(cb: (peerId: string, label: string) => void): void {
+  onChatArrived = cb;
+}
+
+const chatNotify = (peerId: string, label: string) => {
+  try {
+    onChatArrived(peerId, label);
+  } catch (err) {
+    console.warn('[chat] listener threw:', (err as Error).message);
+  }
+};
+
+/**
+ * Send a message to a peer, whichever role this machine is playing.
+ *
+ * `peerId` is a screen id on a source and SOURCE_PEER on a screen. Returns
+ * `delivered: false` for a message that was accepted but queued, which the UI
+ * shows rather than hides.
+ */
+export function sendChat(peerId: string, text: unknown): { ok: boolean; delivered: boolean } {
+  if (source) {
+    const r = source.sendChat(peerId, text);
+    return { ok: r.ok, delivered: r.delivered };
+  }
+  if (screen) {
+    const r = screen.sendChat(text);
+    return { ok: r.ok, delivered: r.delivered };
+  }
+  return { ok: false, delivered: false };
+}
+
+/** Threads for the chat window, with who can currently be reached. */
+export function chatThreads(): { threads: ChatThread[]; role: 'source' | 'screen' | 'off'; reachable: string[] } {
+  if (source) {
+    const st = source.status();
+    const reachable = st.screens.filter((sc) => sc.online && sc.confirmed).map((sc) => sc.screenId);
+    /*
+     * Every confirmed screen gets a thread even before a word is exchanged, so
+     * the window opens onto a conversation to start rather than an empty state
+     * that has to explain itself.
+     */
+    const existing = allThreads();
+    const known = new Set(existing.map((t) => t.peerId));
+    const blanks: ChatThread[] = st.screens
+      .filter((sc) => sc.confirmed && !known.has(sc.screenId))
+      .map((sc) => ({ peerId: sc.screenId, label: sc.label, messages: [], unread: 0 }));
+    for (const sc of st.screens) relabel(sc.screenId, sc.label);
+    return { threads: [...existing, ...blanks], role: 'source', reachable };
+  }
+  if (screen) {
+    const st = screen.status();
+    if (DEAD_PHASES.has(st.phase)) return { threads: [], role: 'off', reachable: [] };
+    const label = st.sourceLabel || 'the source machine';
+    relabel(SOURCE_PEER, label);
+    const one = threadOf(SOURCE_PEER) ?? { peerId: SOURCE_PEER, label, messages: [], unread: 0 };
+    return {
+      threads: [one],
+      role: 'screen',
+      reachable: st.phase === 'live' || st.phase === 'link-lost' ? [SOURCE_PEER] : [],
+    };
+  }
+  return { threads: [], role: 'off', reachable: [] };
+}
+
+/** True when there is anyone at all to message. Gates the tray entry. */
+/** Phases where the pairing is over and there is nobody left to message. */
+const DEAD_PHASES = new Set(['revoked', 'space-closed', 'key-mismatch']);
+
+export function chatAvailable(): boolean {
+  if (source) return source.status().screens.some((sc) => sc.confirmed);
+  // A revoked screen still HAS a ScreenReceiver, so `screen` being non-null was
+  // not enough: the tray kept offering Messages for a pairing that had ended.
+  if (screen) return !DEAD_PHASES.has(screen.status().phase);
+  return false;
+}
+
+export function markChatRead(peerId: string): void {
+  markRead(peerId);
+}
+
+export function unreadChat(): number {
+  return totalUnread();
 }
 
 function stopAll(): void {
@@ -164,6 +268,9 @@ export function cancelPairing(): void {
 
 export async function revokeScreen(screenId: string): Promise<void> {
   await source?.revoke(screenId);
+  // The conversation goes with the pairing. A thread for a screen that can
+  // never be reached again is clutter that also keeps its words on disk.
+  forgetPeer(screenId);
 }
 
 export async function setShareProjectNames(share: boolean): Promise<void> {
@@ -246,6 +353,7 @@ export async function redeemCode(raw: string): Promise<{ ok: boolean; message: s
 export async function unpairScreen(): Promise<void> {
   await screen?.unpair();
   stopAll();
+  forgetAll();
   setStatus({ role: 'off' });
 }
 
@@ -254,6 +362,9 @@ export async function disableProjection(forget: boolean): Promise<void> {
   if (forget && source) source.destroy();
   if (screen) await screen.unpair();
   stopAll();
+  // clearProjection() deletes the chat file; this drops what is still in memory
+  // so nothing is written back out from under it by a pending save.
+  forgetAll();
   await clearProjection();
   setStatus({ role: 'off' });
   console.log('[projection] off');

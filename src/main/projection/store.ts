@@ -29,6 +29,16 @@ export interface ScreenRecord {
   pairedAt: string;
   /** False until the screen has proved it holds the same key. */
   confirmed: boolean;
+  /**
+   * Highest sequence accepted from this screen on the `up` channel.
+   *
+   * The down direction has always had a replay boundary; this is the same idea
+   * for the other direction, added when chat made `up` frames frequent enough
+   * to be worth replaying. Persisted so it survives a restart, which is the
+   * whole point: an in-memory boundary resets to zero and lets a relay replay
+   * everything it kept.
+   */
+  lastUpSeq?: number;
 }
 
 export interface SourceState {
@@ -57,6 +67,7 @@ export interface ScreenState {
 export type ProjectionState = SourceState | ScreenState;
 
 const FILE = 'projection.json';
+const CHAT = 'projection-chat.json';
 const CACHE = 'projection-last.json';
 
 const filePath = (name: string): string => path.join(app.getPath('userData'), name);
@@ -88,6 +99,7 @@ export function normalise(raw: unknown): ProjectionState | null {
             label: str(s.label) || 'Screen',
             pairedAt: str(s.pairedAt) || new Date().toISOString(),
             confirmed: s.confirmed === true,
+            lastUpSeq: Number.isFinite(Number(s.lastUpSeq)) ? Number(s.lastUpSeq) : 0,
           }))
       : [];
     return {
@@ -174,6 +186,24 @@ export async function saveProjection(state: ProjectionState): Promise<void> {
 export async function clearProjection(): Promise<void> {
   await fs.rm(filePath(FILE), { force: true }).catch(() => {});
   await fs.rm(filePath(CACHE), { force: true }).catch(() => {});
+  // The conversation goes with the pairing. Turning projection off and leaving
+  // the messages on disk would be the surprising half of "forget".
+  await fs.rm(filePath(CHAT), { force: true }).catch(() => {});
+}
+
+/**
+ * Chat threads. Same writer as the keys, so same DPAPI protection and the same
+ * one-per-process warning if safeStorage is unavailable.
+ */
+export async function readChatFile(): Promise<unknown> {
+  return readEncrypted(CHAT);
+}
+
+export async function writeChatFile(value: unknown): Promise<void> {
+  await writeEncrypted(CHAT, value).catch((err) => {
+    // Losing a write costs history on next launch, nothing in the live session.
+    console.warn('[chat] could not save threads:', (err as Error).message);
+  });
 }
 
 export interface LastFrameCache {

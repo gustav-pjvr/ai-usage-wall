@@ -16,12 +16,15 @@
  *      usernames and session ids. See rule 26.
  */
 
+import { cleanIncoming, cleanLabel, cleanOutgoing } from '../../shared/chat';
+import type { ChatWire } from '../../shared/chat';
+import { forgetPeer, markDelivered, recordIncoming, recordOutgoing, takeOutbox } from './chat-store';
 import type { KeyObject } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { toWire, type ProjectedUsage } from '../../shared/projection-wire';
 import { CODE_TTL_MS, formatCode, generateCode } from '../../shared/pairing-code';
-import { deriveScreenKey, lookupFromStretched, newKeyPair, open, randomBytes, seal, stretchCode } from './crypto';
+import { deriveScreenKey, lookupFromStretched, newKeyPair, open, randomBytes, seal, stretchCode, newMessageId } from './crypto';
 import { RelaySocket, type SocketStatus } from './relay-socket';
 import { saveProjection, type SourceState } from './store';
 
@@ -103,6 +106,8 @@ export class SourceProjector {
     private state: SourceState,
     private readonly onStatus: (s: SourceStatus) => void,
     private readonly onNotice: (title: string, body: string) => void,
+    /** Told about a message that arrived, so the UI and tray can react. */
+    private readonly onChat?: (peerId: string, label: string) => void,
   ) {
     this.socket = new RelaySocket({
       url: `${state.relayUrl.replace(/\/$/, '').replace(/^https/, 'wss')}/v1/space/${state.spaceId}/source`,
@@ -289,6 +294,7 @@ export class SourceProjector {
         // Send the data immediately too, or a screen connecting to an idle
         // source stares at nothing until something changes.
         this.pushNow(screenId);
+        this.flushChat(screenId);
         this.publish();
         return;
       }
@@ -303,6 +309,10 @@ export class SourceProjector {
         this.state = { ...this.state, screens: this.state.screens.filter((s) => s.screenId !== screenId) };
         this.online.delete(screenId);
         await saveProjection(this.state);
+        // The key is gone, so this screen can never be reached again. Leaving
+        // its thread would keep a conversation on disk for a pairing that no
+        // longer exists, and show it in the window as permanently offline.
+        forgetPeer(screenId);
         this.onNotice('Screen unpaired', 'A screen removed itself from this space.');
         this.publish();
         return;
@@ -319,12 +329,49 @@ export class SourceProjector {
           // bundling. That silently broke the hello-ack, so a screen paired and
           // received frames but was never marked confirmed.
           const opened = open(Buffer.from(record.key, 'base64'), msg.ct);
-          const payload = opened.payload as { t?: string; label?: string };
+
+          /*
+           * Replay boundary for the up channel.
+           *
+           * Dedupe by message id catches a replay while the id is still
+           * remembered, but that set is bounded, so a relay holding an old
+           * sealed frame could re-present it once the original had scrolled out
+           * of history. The sequence is in the authenticated header and the
+           * screen derives it from its clock, so it only ever rises. Anything
+           * not strictly newer is a frame this source has already seen.
+           */
+          const lastUp = record.lastUpSeq ?? 0;
+          if (opened.seq <= lastUp) {
+            console.warn('[projection] ignoring an out-of-order or replayed message from a screen');
+            return;
+          }
+          this.state = {
+            ...this.state,
+            screens: this.state.screens.map((sc) =>
+              sc.screenId === from ? { ...sc, lastUpSeq: opened.seq } : sc,
+            ),
+          };
+          await saveProjection(this.state);
+
+          const payload = opened.payload as { t?: string; label?: string; msg?: unknown };
+
+          if (payload?.t === 'chat') {
+            /*
+             * No sequence check on this channel, by the design that predates
+             * chat: the source does not track a per-screen sequence for
+             * incoming. Dedupe is by message id instead, so a relay replaying
+             * an old up frame delivers nothing new.
+             */
+            const wire = cleanIncoming(payload.msg);
+            if (!wire) return;
+            const saved = recordIncoming(from, record.label, wire);
+            if (saved) this.onChat?.(from, record.label);
+            return;
+          }
+
           if (payload?.t !== 'hello-ack') return;
 
-          const label = typeof payload.label === 'string' && payload.label.trim()
-            ? payload.label.trim().slice(0, 40)
-            : record.label;
+          const label = cleanLabel(payload.label, record.label);
           this.state = {
             ...this.state,
             screens: this.state.screens.map((s) =>
@@ -334,6 +381,8 @@ export class SourceProjector {
           await saveProjection(this.state);
           this.onNotice('Screen paired', `${label} is now showing this machine.`);
           this.pushNow(from);
+          // Now that the key is proved, anything queued can go.
+          this.flushChat(from);
           this.publish();
         } catch {
           // Could not open it: this is not a screen that had the code. Ignore
@@ -436,9 +485,9 @@ export class SourceProjector {
     }
   }
 
-  private sendTo(screenId: string, payload: unknown): void {
+  private sendTo(screenId: string, payload: unknown): boolean {
     const record = this.state.screens.find((s) => s.screenId === screenId);
-    if (!record) return; // no key, no send. A relay-invented id lands here.
+    if (!record) return false; // no key, no send. A relay-invented id lands here.
     try {
       // Monotonic and clock-derived, so it keeps rising across a restart and a
       // replayed frame is always detectable as old.
@@ -447,10 +496,58 @@ export class SourceProjector {
       if (this.socket.send({ t: 'frame', to: screenId, ct })) {
         this.lastSentAt = Date.now();
         this.lastFrameBytes = ct.length;
+        return true;
       }
+      return false;
     } catch (err) {
       console.warn('[projection] could not seal a frame:', (err as Error).message);
+      return false;
     }
+  }
+
+  /**
+   * Whether a message put on the wire right now would actually arrive.
+   *
+   * All three conditions matter. The relay stores nothing, so a frame addressed
+   * to a screen that is not connected is discarded in transit with no error
+   * raised anywhere, and an unconfirmed screen has not proved it holds the key.
+   */
+  private deliverableTo(screenId: string): boolean {
+    const record = this.state.screens.find((s) => s.screenId === screenId);
+    return !!record && record.confirmed && this.online.has(screenId) && this.socket.phase === 'open';
+  }
+
+  /**
+   * Send a typed message to one screen.
+   *
+   * A message that cannot be delivered is queued rather than dropped, and the
+   * caller is told which happened so the UI can say so. Silently accepting a
+   * message that went nowhere is the failure this whole path is shaped to
+   * avoid.
+   */
+  sendChat(screenId: string, raw: unknown): { ok: boolean; delivered: boolean; message?: ChatWire } {
+    const text = cleanOutgoing(raw);
+    if (!text) return { ok: false, delivered: false };
+    const record = this.state.screens.find((s) => s.screenId === screenId);
+    if (!record) return { ok: false, delivered: false };
+
+    const wire: ChatWire = { id: newMessageId(), text, at: Date.now() };
+    const delivered = this.deliverableTo(screenId) && this.sendTo(screenId, { t: 'chat', msg: wire });
+    recordOutgoing(screenId, record.label, wire, delivered);
+    return { ok: true, delivered, message: wire };
+  }
+
+  /** Push anything that was written while a screen was away. */
+  private flushChat(screenId: string): void {
+    if (!this.deliverableTo(screenId)) return;
+    const waiting = takeOutbox(screenId);
+    if (!waiting.length) return;
+    const sent: string[] = [];
+    for (const msg of waiting) {
+      if (this.sendTo(screenId, { t: 'chat', msg })) sent.push(msg.id);
+    }
+    markDelivered(screenId, sent);
+    if (sent.length) console.log(`[chat] delivered ${sent.length} queued message(s)`);
   }
 
   /** Settings changed under us, e.g. the share-project-names toggle. */

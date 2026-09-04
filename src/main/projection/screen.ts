@@ -16,8 +16,11 @@
  * without their age once they stop being live.
  */
 
+import { cleanIncoming, cleanOutgoing, SOURCE_PEER } from '../../shared/chat';
+import type { ChatWire } from '../../shared/chat';
+import { forgetAll, markDelivered, recordIncoming, recordOutgoing, takeOutbox } from './chat-store';
 import { fromWire, type ProjectedUsage } from '../../shared/projection-wire';
-import { open, seal } from './crypto';
+import { open, seal, newMessageId } from './crypto';
 import { RelaySocket, type SocketStatus } from './relay-socket';
 import { clearProjection, loadLastFrame, saveLastFrame, saveProjection, type ScreenState } from './store';
 
@@ -69,6 +72,8 @@ export class ScreenReceiver {
     private readonly onUsage: (usage: Record<string, unknown>) => void,
     private readonly onStatus: (s: ScreenStatus) => void,
     private readonly onNotice: (title: string, body: string) => void,
+    /** Told about a message that arrived, so the UI and tray can react. */
+    private readonly onChat?: (peerId: string, label: string) => void,
   ) {
     this.key = Buffer.from(state.key, 'base64');
     this.socket = new RelaySocket({
@@ -126,12 +131,21 @@ export class ScreenReceiver {
   }
 
   private onSocket(s: SocketStatus): void {
+    // A dropped socket says nothing about the source, so stop claiming it does.
+    if (s.phase !== 'open') this.sourceOnline = false;
     if (s.phase === 'closed' && s.closeCode === 4003) this.terminal = 'revoked';
     if (s.phase === 'closed' && s.closeCode === 4004) this.terminal = 'space-closed';
     if (this.terminal === 'revoked' || this.terminal === 'space-closed') {
       // Its key can decrypt nothing further, so keeping it buys nothing and
       // leaving it is a stale secret on disk.
       void clearProjection();
+      /*
+       * And the conversation goes with it. clearProjection() deletes the chat
+       * file, but the threads were still in memory, so the next save recreated
+       * the whole history: opening the window, typing, or a label change was
+       * enough. The pairing is over, so the words from it do not linger.
+       */
+      forgetAll();
       this.onNotice(
         this.terminal === 'revoked' ? 'Removed by the source' : 'Projection stopped',
         this.terminal === 'revoked'
@@ -144,7 +158,20 @@ export class ScreenReceiver {
 
   private async handle(msg: Record<string, unknown>): Promise<void> {
     if (msg.t === 'source-online' || msg.t === 'source-offline' || msg.t === 'ready') {
-      // Presence is a HINT for the reason line, never proof of liveness.
+      /*
+       * Presence is a HINT for the reason line, never proof of liveness: only a
+       * decrypted frame sets lastAuthAt.
+       *
+       * It IS however the best available answer to "would a message I send now
+       * arrive", because the relay forwards nothing to a source that is not
+       * connected and stores nothing it could not forward. Trusting the relay
+       * here is trusting it about its own connectivity, which is the one thing
+       * it cannot be wrong about without simply dropping the message anyway.
+       */
+      if (msg.t === 'source-online') this.sourceOnline = true;
+      else if (msg.t === 'source-offline') this.sourceOnline = false;
+      else this.sourceOnline = msg.sourceOnline === true;
+      if (this.sourceOnline) this.flushChat();
       this.publish();
       return;
     }
@@ -197,6 +224,19 @@ export class ScreenReceiver {
       }
       const ct = seal(this.key, Date.now(), { t: 'hello-ack', label: hostLabel() });
       this.socket.send({ t: 'up', ct });
+      // The link is proved as of this moment, so anything queued can go.
+      this.flushChat();
+      this.persist();
+      this.publish();
+      return;
+    }
+
+    if (body.t === 'chat') {
+      const wire = cleanIncoming((body as { msg?: unknown }).msg);
+      if (wire) {
+        const saved = recordIncoming(SOURCE_PEER, this.state.sourceLabel || 'the source machine', wire);
+        if (saved) this.onChat?.(SOURCE_PEER, this.state.sourceLabel || 'the source machine');
+      }
       this.persist();
       this.publish();
       return;
@@ -225,6 +265,55 @@ export class ScreenReceiver {
    * residual replay window is whatever arrived after the last write that
    * completed, which is one message unless the disk is failing.
    */
+  /**
+   * Whether a message would actually reach the source right now.
+   *
+   * A screen has no equivalent of the source's confirmed flag: it proved the
+   * key by opening the hello, and it only ever had one peer. So an open socket
+   * is the whole condition.
+   */
+  /** Relay-reported presence of the source. See the handler for why it is used. */
+  private sourceOnline = false;
+
+  private deliverable(): boolean {
+    return this.socket.phase === 'open' && this.sourceOnline;
+  }
+
+  /** Send a typed message to the source, or queue it if the socket is down. */
+  sendChat(raw: unknown): { ok: boolean; delivered: boolean; message?: ChatWire } {
+    const text = cleanOutgoing(raw);
+    if (!text) return { ok: false, delivered: false };
+    const label = this.state.sourceLabel || 'the source machine';
+    const wire: ChatWire = { id: newMessageId(), text, at: Date.now() };
+    const delivered = this.deliverable() && this.sendUp({ t: 'chat', msg: wire });
+    recordOutgoing(SOURCE_PEER, label, wire, delivered);
+    return { ok: true, delivered, message: wire };
+  }
+
+  /** Push anything written while the socket was down. */
+  private flushChat(): void {
+    if (!this.deliverable()) return;
+    const waiting = takeOutbox(SOURCE_PEER);
+    if (!waiting.length) return;
+    const sent: string[] = [];
+    for (const msg of waiting) {
+      if (this.sendUp({ t: 'chat', msg })) sent.push(msg.id);
+    }
+    markDelivered(SOURCE_PEER, sent);
+    if (sent.length) console.log(`[chat] delivered ${sent.length} queued message(s)`);
+  }
+
+  /** Seal for the source and put it on the up channel. */
+  private sendUp(body: unknown): boolean {
+    try {
+      const ct = seal(this.key, Date.now(), body);
+      return this.socket.send({ t: 'up', ct });
+    } catch (err) {
+      console.warn('[chat] could not seal a message:', (err as Error).message);
+      return false;
+    }
+  }
+
   private persist(): void {
     const seq = this.lastSeq;
     const payload = this.lastPayload;

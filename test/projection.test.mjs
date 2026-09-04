@@ -69,6 +69,11 @@ const T = (r) => ({
   requests: r,
   webSearch: 0,
   webFetch: 0,
+  // Added when the cost stat shipped. The "totals survive exactly" assertion
+  // below is an exact JSON comparison, so it failed the moment the wire gained
+  // these two, which is the assertion doing its job.
+  costUsd: r * 0.001,
+  unpricedTokens: 0,
 });
 
 const index = {

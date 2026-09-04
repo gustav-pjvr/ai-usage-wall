@@ -14,6 +14,7 @@
  * other apps cover it, so a covered wall costs nothing at all.
  */
 
+import { formatCost } from '../shared/pricing';
 import { velocityOf } from '../shared/velocity';
 import type { UsageIndex, TokenTotals } from '../main/data/usage';
 import type { ProjectionStatus } from '../main/projection';
@@ -203,6 +204,7 @@ export function derive(idx: UsageIndex): Derived {
   const weekTotals: TokenTotals = {
     input: 0, output: 0, cacheCreate: 0, cacheRead: 0,
     thinking: 0, requests: 0, webSearch: 0, webFetch: 0,
+    costUsd: 0, unpricedTokens: 0,
   };
   for (let i = 0; i < 7; i++) {
     const key = new Date(now - i * 86_400_000).toISOString().slice(0, 10);
@@ -579,6 +581,25 @@ export class StatsView {
     live.appendChild(liveWrap);
     grid.appendChild(live);
 
+    /*
+     * Right hand column of the top row: cost above velocity.
+     *
+     * A wrapper rather than two grid cells, so velocity keeps exactly the width
+     * it had and only gives up height. Nothing else on the grid moves.
+     */
+    const stack = el('div', 'panel-stack');
+
+    const cost = panel('Total cost', 'derived', 'panel-cost');
+    const costBody = el('div', 'cost-body');
+    const costValue = el('div', 'cost-value', '$0.00');
+    costBody.appendChild(costValue);
+    costBody.appendChild(el('div', 'cost-note', 'at API list prices, all projects'));
+    const costGap = el('div', 'cost-gap');
+    costGap.hidden = true;
+    costBody.appendChild(costGap);
+    cost.appendChild(costBody);
+    stack.appendChild(cost);
+
     // Velocity + today.
     const vel = panel('Velocity', 'derived', 'panel-vel');
     const velBody = el('div', 'vel-body');
@@ -597,7 +618,8 @@ export class StatsView {
     peak.appendChild(el('span', 'vel-peak-when', ''));
     velBody.appendChild(peak);
     vel.appendChild(velBody);
-    grid.appendChild(vel);
+    stack.appendChild(vel);
+    grid.appendChild(stack);
 
     // Counters.
     const counters = panel('Totals', 'measured', 'panel-counters');
@@ -860,6 +882,7 @@ export class StatsView {
     this.odos.output.set(t.output, animate);
     this.odos.thinking.set(t.thinking, animate);
     this.odos.velocity.set(d.velocity, animate);
+    this.paintCost();
     this.paintPeak();
     this.odos.cache.set(d.cacheHitRate * 100, animate);
 
@@ -1084,6 +1107,24 @@ export class StatsView {
    * one place so that a screen showing a projected dashboard reports the
    * SOURCE's record rather than quietly starting its own.
    */
+  /**
+   * The running total, floored to a tenth of a dollar.
+   *
+   * Not animated like the token odometer: an odometer rolling on a money figure
+   * reads as a meter running, and this is an estimate of past spend, not a
+   * live charge.
+   */
+  private paintCost(): void {
+    const node = this.root.querySelector('.cost-value') as HTMLElement | null;
+    const gap = this.root.querySelector('.cost-gap') as HTMLElement | null;
+    if (!node || !this.idx) return;
+    node.textContent = formatCost(this.idx.totals?.costUsd ?? 0);
+    if (!gap) return;
+    const unpriced = this.idx.totals?.unpricedTokens ?? 0;
+    gap.hidden = unpriced <= 0;
+    if (unpriced > 0) gap.textContent = `${compact(unpriced)} tokens from an unpriced model are not counted`;
+  }
+
   private paintPeak(): void {
     const node = this.root.querySelector('.vel-peak') as HTMLElement | null;
     if (!node) return;

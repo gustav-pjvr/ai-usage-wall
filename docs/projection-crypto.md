@@ -118,10 +118,22 @@ source restart without persisting a counter. One counter serves all screens, so
 each screen sees gaps, which is fine because the check is strictly greater, not
 consecutive. The screen discards any frame with `seq <= lastSeq`.
 
-The `up` channel (screen to source) is sealed with `seq = Date.now()` and the
-source does **not** check the sequence when opening it. A replayed hello-ack
-would re-confirm and re-label an already confirmed screen and trigger one extra
-frame push; nothing beyond that. Read from the code, not tested.
+The `up` channel (screen to source) is sealed with `seq = Date.now()`, and the
+source **now checks it**, against a `lastUpSeq` persisted per screen in
+`projection.json`.
+
+It did not always. While that channel carried only one hello-ack per
+connection, an unchecked sequence cost a re-confirm and one extra frame push,
+which was noted and accepted. Messaging made `up` frames frequent and gave them
+content worth replaying, and a security review drew out the consequence: dedupe
+by message id is bounded, so a relay holding an old sealed frame could
+re-present it once the original had scrolled out of that window, and the source
+would show it as new and unread at the bottom of the thread. An authentic old
+message re-presented out of context is not a forgery, but it is not nothing.
+
+The boundary is persisted for the same reason the screen's is: one held only in
+memory resets to zero on restart, which is exactly when a relay sitting on old
+ciphertext would use it.
 
 ## The replay boundary, and how it survives a screen restart
 
@@ -288,7 +300,9 @@ open any ciphertext for those screens they also managed to capture.
   revocation. A key obtained later opens every earlier frame for that screen
   that was recorded. Revocation stops new frames; it does not un-record old
   ones.
-- **The `up` channel has no replay check.**
+- **The `up` channel's replay check is newer than the down channel's** and,
+  like it, depends on the sender's clock only ever rising. A screen whose clock
+  is set back far enough has its messages refused until it catches up.
 - **The source's presence counts trust the relay.** The tray's "X of Y screens"
   is what the relay said, not what was proven.
 - **Relay credentials are bearer tokens in the clear inside TLS.** The source

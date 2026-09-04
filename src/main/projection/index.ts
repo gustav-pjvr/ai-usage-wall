@@ -217,10 +217,12 @@ function consent(role: 'source' | 'screen', relayUrl: string = DEFAULT_RELAY): b
     role === 'source'
       ? `${PRODUCT_NAME} will connect to ${host} and send this machine's dashboard, encrypted, to screens you pair with a code.\n\n` +
         'Sent: token totals, daily and hourly activity, model names, session times, project folder names, Claude Code version.\n\n' +
+        'Also sent, but only when you type one: text messages, from the Messages window in the tray.\n\n' +
         'Never sent: file paths, your Windows username, prompts, or any transcript text.\n\n' +
         `${host} forwards ciphertext it cannot read, keeps no message content, and has request logging turned off. Nothing is sent until you pair a screen, and you can stop from the tray at any time.`
       : `${PRODUCT_NAME} will connect to ${host} and display a paired machine's dashboard.\n\n` +
         'While this machine is a screen it does not read its own Claude Code transcripts.\n\n' +
+        'You can also exchange text messages with it, from the Messages window in the tray.\n\n' +
         'You can unpair from the tray at any time.';
 
   const choice = dialog.showMessageBoxSync({

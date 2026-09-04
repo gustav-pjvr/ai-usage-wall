@@ -29,6 +29,7 @@ cannot read it.
 | [projection.md](projection.md) | Roles, pairing, the socket lifecycle, liveness, revocation |
 | [projection-crypto.md](projection-crypto.md) | The key schedule, the replay boundary, the threat model, and the version 1 flaw |
 | [privacy-wire.md](privacy-wire.md) | Exactly what crosses the network and what never does |
+| [messaging.md](messaging.md) | Text messages between the two paired machines |
 
 ## Shipping
 

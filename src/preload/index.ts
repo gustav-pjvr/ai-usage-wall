@@ -34,6 +34,8 @@ const api = {
     return () => ipcRenderer.removeListener('wall:update', listener);
   },
   installUpdate: () => ipcRenderer.invoke('wall:installUpdate'),
+  /** Borrow keyboard focus while the notes bar has an open edit. */
+  notesEdit: (active: boolean) => ipcRenderer.invoke('wall:notesEdit', active),
   onState: (cb: (state: unknown) => void) => {
     const listener = (_e: unknown, state: unknown) => cb(state);
     ipcRenderer.on('wall:state', listener);

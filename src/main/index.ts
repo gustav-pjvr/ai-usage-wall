@@ -17,7 +17,7 @@ import { execFile } from 'node:child_process';
 import { watch as watchFs, type FSWatcher } from 'node:fs';
 
 import { detectCapability, type Capability } from './capability';
-import { loadSettings, saveSettings, type Settings } from './settings';
+import { loadSettings, saveSettings, type Settings, normaliseSettings } from './settings';
 import { PRODUCT_NAME, isStatsOnly } from '../shared/edition';
 import {
   checkNow,
@@ -64,6 +64,21 @@ interface WallWindow {
   effectiveMode: LayerMode;
   /** Whether Windows hit-tests to this window, i.e. whether clicks work. */
   inputReachable: boolean;
+  /**
+   * True while the notes bar in this window has an open edit.
+   *
+   * The wall is `focusable: false` and carries `WS_EX_NOACTIVATE`, which is
+   * what lets it sit behind everything without stealing focus, and which also
+   * means it can never receive a keystroke. A text input in it would otherwise
+   * be exactly the trap the pairing window exists to avoid: the field would
+   * paint its editing state, show no caret, and every character typed would go
+   * to whatever window was actually active.
+   *
+   * So an edit borrows focus for its duration and gives it straight back. While
+   * this is set, `applyLayer` leaves the window alone, because re-asserting
+   * WS_EX_NOACTIVATE mid-edit would take the caret away without telling anyone.
+   */
+  notesEditing: boolean;
 }
 
 let windows: WallWindow[] = [];
@@ -816,7 +831,14 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     console.error('[main] renderer failed to load:', err);
   });
 
-  const wall: WallWindow = { win, displayId: display.id, hwnd: null, effectiveMode: settings.layerMode, inputReachable: false };
+  const wall: WallWindow = {
+    win,
+    displayId: display.id,
+    hwnd: null,
+    effectiveMode: settings.layerMode,
+    inputReachable: false,
+    notesEditing: false,
+  };
 
   win.once('ready-to-show', () => {
     win.showInactive();
@@ -909,6 +931,10 @@ function maybeCapture(wall: WallWindow): void {
  */
 function applyLayer(wall: WallWindow): { ok: boolean; reason?: string } {
   if (!wall.hwnd) return { ok: false, reason: 'no HWND yet' };
+  // An open notes edit holds focus on purpose. Re-asserting WS_EX_NOACTIVATE
+  // here would silently end it, and saving the note calls updateSettings, which
+  // calls this for every window, so the edit would kill itself on the way out.
+  if (wall.notesEditing) return { ok: true };
   const mode: LayerMode = focusMode ? 'top' : settings.layerMode;
   const display = screen.getAllDisplays().find((d) => d.id === wall.displayId);
 
@@ -1355,7 +1381,17 @@ async function reloadData(): Promise<void> {
 
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
   const before = settings;
-  settings = { ...settings, ...patch };
+  /*
+   * Normalised here, not only in saveSettings.
+   *
+   * The in-memory object is what `wallState()` pushes to every renderer, so an
+   * unnormalised patch reached the UI even though it could never reach disk.
+   * `{ notes: 12345 }` would throw inside the notes bar on the first push and
+   * take the whole render with it, on every window, until a restart. Only the
+   * app's own IPC can produce a patch today, so this is depth rather than a
+   * live hole, but the cost of closing it is one function call.
+   */
+  settings = normaliseSettings({ ...settings, ...patch });
 
   /*
    * The write moved to the END of this function on purpose.
@@ -1557,6 +1593,30 @@ function registerIpc(): void {
     return wall ? wallState(wall) : null;
   });
   ipcMain.handle('wall:updateSettings', (_e, patch: Partial<Settings>) => updateSettings(patch ?? {}));
+
+  /*
+   * Lend the wall keyboard focus for the length of a notes edit.
+   *
+   * `setFocusable(true)` is what actually clears WS_EX_NOACTIVATE; without it
+   * the field would take DOM focus, paint the editing state, and route every
+   * keystroke to whichever application was really in front. Giving it back runs
+   * applyLayer again, which re-asserts the ex-styles and the z-order anchor, so
+   * the window returns to being the thing that never steals focus.
+   */
+  ipcMain.handle('wall:notesEdit', (event, active: boolean) => {
+    const wall = windows.find((w) => w.win.webContents.id === event.sender.id);
+    if (!wall || wall.win.isDestroyed()) return false;
+    if (active) {
+      wall.notesEditing = true;
+      wall.win.setFocusable(true);
+      wall.win.focus();
+      return wall.win.isFocused();
+    }
+    wall.notesEditing = false;
+    wall.win.setFocusable(false);
+    applyLayer(wall);
+    return false;
+  });
   ipcMain.handle('wall:reload', () => reloadData());
   ipcMain.handle('wall:getUsage', () => usageForRenderer());
   ipcMain.handle('wall:setMode', (_e, mode: 'stats' | 'clients') =>

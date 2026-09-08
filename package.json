@@ -20,7 +20,8 @@
     "build:stats": "node build.mjs --edition=stats",
     "start:stats": "npm run build:stats && electron .",
     "package:stats": "npm run build:stats && electron-builder --win --config electron-builder.stats.js",
-    "test:e2e": "electron test/projection-e2e.cjs"
+    "test:e2e": "electron test/projection-e2e.cjs",
+    "test:render": "npm run build && electron test/render-fit.cjs"
   },
   "dependencies": {
     "chokidar": "^4.0.3",

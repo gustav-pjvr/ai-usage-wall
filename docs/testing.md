@@ -1,21 +1,22 @@
 # Testing
 
-**Last updated:** 2026-09-03
-**Code snapshot:** commit `a696f5d`. Counts below were produced by running the
-suites on that date.
+**Last updated:** 2026-09-08
+**Code snapshot:** commit `2090e79` plus the responsive and notes bar work.
+Counts below were produced by running the suites on that date.
 **Primary sources:** `test/run.mjs`, `test/projection.test.mjs`,
 `test/projection-crypto.test.mjs`, `test/stats-projection.test.mjs`,
 `test/usage-append.test.mjs`, `test/chat.test.mjs`, `test/pricing.test.mjs`,
-`test/projection-e2e.cjs`, `package.json`
+`test/projection-e2e.cjs`, `test/render-fit.cjs`, `package.json`
 
 ## Summary
 
-Five suites, no test framework. Four of them run in isolation and are wired into
-`npm test`; the fifth drives the real projection classes against the **deployed
-Cloudflare relay** and is run separately. Each suite bundles the TypeScript it
-needs with esbuild into a temp directory, requires the result, and asserts with a
-six-line `ok()` helper. That is affordable because `src/shared/` deliberately
-imports nothing from Electron.
+Nine suites, no test framework. Seven run in isolation and are wired into
+`npm test`. Two need a real Electron process and are run separately: one drives
+the projection classes against the **deployed Cloudflare relay**, the other opens
+a real window and measures the rendered layout. Each isolated suite bundles the
+TypeScript it needs with esbuild into a temp directory, requires the result, and
+asserts with a six-line `ok()` helper. That is affordable because `src/shared/`
+deliberately imports nothing from Electron.
 
 The recurring hazard in this project is not flaky tests. It is **tests that assert
 a proxy for the thing rather than the thing**: a property the code just set, one
@@ -30,12 +31,13 @@ useful thing here.
 ## How to run
 
 ```
-npm test              # the four isolated suites
+npm test              # the seven isolated suites
 npm run typecheck     # tsc --noEmit across src/**/*.ts and build.mjs
 npm run test:e2e      # electron test/projection-e2e.cjs, hits the DEPLOYED relay
+npm run test:render   # electron test/render-fit.cjs, opens a real window
 ```
 
-**Measured on 2026-09-03**, `npm test`:
+**Measured on 2026-09-08**, `npm test`:
 
 | Suite | Checks | Result |
 |---|---|---|
@@ -48,15 +50,29 @@ npm run test:e2e      # electron test/projection-e2e.cjs, hits the DEPLOYED rela
 | `test/pricing.test.mjs` | 23 | 0 failed |
 | **total** | **216** | |
 
+And `npm run test:render`, separately, because it needs a window:
+
+| Suite | Checks | Result |
+|---|---|---|
+| `test/render-fit.cjs` | 63 | 0 failed |
+
 Two practical notes:
 
 - `package.json` chains the suites with `&&` and every one ends in
   `process.exit(fail ? 1 : 0)`, so **the first failing suite stops the rest**. A
   red run tells you nothing about the suites after the one that failed.
-- The three newest suites came from things that had already shipped broken:
+- The four newest suites came from things that had already shipped broken:
   `usage-append` from transcripts being counted twice, `chat` from a security
-  review, and `pricing` from a price table that could only be trusted by
-  checking it against numbers Claude Code had already priced.
+  review, `pricing` from a price table that could only be trusted by checking it
+  against numbers Claude Code had already priced, and `render-fit` from text
+  being clipped on a screen smaller than the one the CSS was written on.
+- **`render-fit` is the first suite that measures pixels.** Everything above it
+  checks values, which is why none of them could have caught a layout that only
+  breaks at a size nobody here runs. It loads the real renderer at eight window
+  sizes and asks the layout engine whether anything overflows, rather than
+  reading a font size and reasoning about it. See
+  [responsive-layout.md](responsive-layout.md) and [notes-bar.md](notes-bar.md).
+  Both halves were confirmed to FAIL when the fix was reverted.
 
 `npm run typecheck` is worth listing beside the tests, because for most of the
 main process (`win32/`, `settings.ts`, `updater.ts`, `capability.ts`, the store)

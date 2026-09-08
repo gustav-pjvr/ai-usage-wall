@@ -51,6 +51,15 @@ export interface Settings {
   useVault: boolean;
   /** Show the diagnostics overlay. */
   debug: boolean;
+  /**
+   * The one line note across the top of the wall.
+   *
+   * It lives in settings rather than a file of its own because it is one short
+   * string, settings is already written atomically, and it already reaches the
+   * renderer on every state push. Capped so a paste cannot turn the settings
+   * file into a document.
+   */
+  notes: string;
 }
 
 const DEFAULTS: Settings = {
@@ -72,9 +81,18 @@ const DEFAULTS: Settings = {
   vaultPath: null,
   useVault: true,
   debug: false,
+  notes: '',
 };
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+
+/**
+ * Matches NOTES_MAX in the renderer. Enforced here too: the renderer's cap is a
+ * courtesy, this one is the guarantee, because settings.json is a supported
+ * thing to hand edit. Counted in code POINTS, with Array.from, to agree with
+ * the input's own `maxlength`, which counts graphemes rather than code units.
+ */
+const NOTES_MAX = 400;
 
 function settingsPath(): string {
   return path.join(app.getPath('userData'), 'settings.json');
@@ -112,6 +130,8 @@ export function normaliseSettings(raw: unknown): Settings {
     vaultPath: typeof r.vaultPath === 'string' ? r.vaultPath : null,
     useVault: r.useVault !== false,
     debug: r.debug === true,
+    notes:
+      typeof r.notes === 'string' ? Array.from(r.notes).slice(0, NOTES_MAX).join('') : DEFAULTS.notes,
   };
 }
 

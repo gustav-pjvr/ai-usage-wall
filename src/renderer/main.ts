@@ -16,6 +16,7 @@ import { deriveBrandTokens, type BrandTokens } from '../shared/color';
 import type { Client } from '../shared/schema';
 import type { UsageIndex } from '../main/data/usage';
 import { StatsView } from './stats';
+import { NotesBar } from './notes';
 import { isStatsOnly } from '../shared/edition';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
@@ -33,6 +34,7 @@ interface WallState {
     opacity: number;
     background: 'none' | 'plain' | 'gradient';
     backgroundOpacity: number;
+    notes: string;
   };
   capability: { tier: 'low' | 'balanced' | 'high'; cores: number; memoryGb: number; gpuAccelerated: boolean; reasons: string[] };
   focusMode: boolean;
@@ -59,6 +61,7 @@ declare global {
       onUsageProgress(cb: (p: { done: number; total: number; bytesDone: number; bytesTotal: number }) => void): () => void;
       onUpdate(cb: (s: { phase: string; version?: string; percent?: number }) => void): () => void;
       installUpdate(): Promise<void>;
+      notesEdit(active: boolean): Promise<boolean>;
     };
   }
 }
@@ -81,6 +84,20 @@ let pageTimer: number | null = null;
 let firstRender = true;
 let mode: 'stats' | 'clients' = 'stats';
 const statsView = new StatsView();
+
+/*
+ * The notes bar belongs to the shell, not to either view, so it is mounted on
+ * the body and survives a mode switch. Saving goes through updateSettings like
+ * every other setting, which means the other monitor's wall window picks the
+ * text up on the state push that follows.
+ */
+const notesBar = new NotesBar({
+  save: (text) => window.wall.updateSettings({ notes: text }),
+  // The wall cannot receive a keystroke unless it is made focusable first. See
+  // the WallWindow.notesEditing comment in src/main/index.ts.
+  setEditing: (active) => window.wall.notesEdit(active),
+});
+document.body.appendChild(notesBar.root);
 statsMount.appendChild(statsView.root);
 
 /*
@@ -583,6 +600,9 @@ function render(): void {
   if (!state) return;
 
   document.body.dataset.perf = state.capability.tier;
+  // Before the stats-only early return: the note is shell furniture and shows
+  // in both editions and both views.
+  notesBar.setText(state.settings.notes);
   // Everything past the body-level settings is the client wall, which the
   // shareable build does not have. Laying out zero cards on every state push
   // and every resize is work for nobody.
@@ -598,8 +618,13 @@ function render(): void {
   document.body.style.setProperty('--backdrop-opacity', String(state.settings.backgroundOpacity ?? 1));
   document.body.classList.toggle('wall-interactive', !state.settings.clickThrough || state.focusMode);
 
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  // The wall's own box, not the window's. #wall is inset from the top by the
+  // notes bar, and laying out against the full window height would push the
+  // bottom row off the surface by exactly that much. The fallback covers a
+  // display:none ancestor, where the rect is all zeroes.
+  const wallRect = wallEl.getBoundingClientRect();
+  const width = wallRect.width || window.innerWidth;
+  const height = wallRect.height || window.innerHeight;
 
   const layout = computeLayout(
     state.clients.map((c) => ({

@@ -393,8 +393,12 @@ The wall runs 24/7. Every effect is paid continuously.
     write one, `JSON.parse` rejects it, and the failure is invisible: the file
     looks perfect and is silently ignored. This has now bitten twice.
 12. **Never invent a usage metric.** If a number cannot be read out of the
-    transcripts, it does not go on the dashboard. Quota, headroom and cost are
-    all unobtainable locally and are stated as such rather than estimated.
+    transcripts, or COMPUTED from them by a rule the panel states, it does not
+    go on the dashboard. Quota and headroom are unobtainable locally and are
+    stated as absent rather than estimated. Cost is different and this line used
+    to get it wrong: token counts are in the transcripts and a dated price table
+    turns them into a figure, so cost is shown, tagged DERIVED, floored to the
+    cent, and captioned as list prices rather than as what a subscription bills.
 13. **Never break the usage-index offset invariant.** After a refresh every
     tracked offset must equal its file size, or records get counted twice.
 14. **Hide an inactive view with `visibility: hidden`, not just
@@ -478,6 +482,26 @@ The wall runs 24/7. Every effect is paid continuously.
     ago, which is the one failure that makes the whole feature untrustworthy.
     Phase wording is a pure function and is tested in
     `test/stats-projection.test.mjs`; keep it that way.
+29. **Every size in `stats.css` is a multiple of `--u`.** A bare `px` font size
+    or margin there is a bug, not a style: the grid is fluid and fixed contents
+    inside it are exactly how text got clipped on a smaller screen. `--u` is one
+    pixel at the 1920x1080 reference and takes the smaller of the width-derived
+    and height-derived unit, so it tracks whichever axis actually ran out.
+    `clamp()` against `vw` alone is worse than nothing here and is what was
+    removed: two screens of equal width and different height are the common case
+    on this kind of surface. See `docs/responsive-layout.md`.
+30. **When there is no room left, drop a caption. Never clip a number.** Both
+    floors, `--u` at 0.7 and the 8px minimum on the label tier, exist so that
+    shrinking stops before text becomes unreadable. Past that point the
+    short-screen media queries remove explanatory text and keep every value.
+    Verify with `npm run test:render`, which measures real overflow in a real
+    window at eight sizes rather than reading a font size and reasoning about it.
+31. **The notes bar stays on this machine.** It is not in `toWire()` and must not
+    be: it holds whatever Gustav happens to be thinking about, and a paired
+    screen is another building. Adding it to projection would make
+    `docs/privacy-wire.md` false. It also stays `readonly` until a double click,
+    because the wall collects stray clicks all day and a field that quietly
+    accepts them corrupts the note long before anyone notices.
 29. **Discard any frame whose sequence is not strictly greater than the last one
     accepted.** Not "not equal", not "close enough". The sequence is inside the
     GCM AAD so it cannot be edited in flight, but a relay can still replay an old

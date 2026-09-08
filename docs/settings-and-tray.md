@@ -76,6 +76,7 @@ every state push (`src/main/index.ts:1081`).
 | `vaultPath` | string or null | `null` | string else null | the Obsidian bridge, `src/main/index.ts:1168` |
 | `useVault` | boolean | `true` | strict `!== false`, so it defaults on | `src/main/index.ts:1169` |
 | `debug` | boolean | `false` | strict `=== true` | diagnostics overlay, `src/renderer/main.ts:769` |
+| `notes` | string | `''` | string, truncated to 400 characters | the notes bar across the top of the wall, [notes-bar.md](notes-bar.md) |
 
 Note the two different boolean idioms. Everything defaults off with
 `r.x === true`, except `useVault`, which defaults on with `r.useVault !== false`.

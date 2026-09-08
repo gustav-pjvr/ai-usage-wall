@@ -12,6 +12,29 @@
  * for decoration alone.
  */
 
+/*
+ * SIZES IN THIS FILE ARE MULTIPLES OF --u, WHICH IS DEFINED IN shell.css.
+ *
+ * The grid is fluid: twelve columns of 1fr and rows of minmax(0, 1fr), so a
+ * panel is always a fraction of the window. Its CONTENTS were not. Font sizes,
+ * padding and vertical rhythm were fixed pixels, so on a smaller screen the
+ * boxes shrank and the text did not, and `overflow: hidden` on .panel turned
+ * that straight into clipped words. Gustav saw it on another machine.
+ *
+ * Five values did try to adapt, with clamp() against `vw`. That was worse than
+ * doing nothing, because a dashboard that fills the window is constrained by
+ * HEIGHT, not width: 1920x1080 and 1920x1200 have identical `vw` and very
+ * different room per row. Those clamps have been folded into the unit.
+ *
+ * --u is one pixel at the 1920x1080 reference, so `calc(var(--u) * 11.5)`
+ * still reads as "11.5px on the reference screen".
+ *
+ * The label tier carries `max(8px, ...)` as well, because below that a word
+ * stops being a word. Once both floors are reached there is no shrinking left,
+ * and the short-screen rules near the bottom of this file drop captions rather
+ * than clip numbers.
+ */
+
 .stats {
   --sig: oklch(0.78 0.14 195);
   --sig-dim: oklch(0.62 0.1 200);
@@ -27,9 +50,10 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  /* Top clearance so the floating mode switch never lands on a panel title. */
-  padding: 58px 26px 12px;
+  gap: calc(var(--u) * 10);
+  /* Top clearance for the notes bar and the floating mode switch under it, so
+     neither ever lands on a panel title. */
+  padding: var(--top-chrome) calc(var(--u) * 26) calc(var(--u) * 12);
   color: oklch(0.93 0.01 220);
   overflow: hidden;
 }
@@ -53,7 +77,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  gap: 12px;
+  gap: calc(var(--u) * 12);
   grid-template-columns: repeat(12, 1fr);
   grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr);
 }
@@ -66,7 +90,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 14px 16px;
+  padding: calc(var(--u) * 14) calc(var(--u) * 16);
   border-radius: 12px;
   background: var(--panel-bg);
   border: 1px solid var(--panel-edge);
@@ -99,13 +123,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: calc(var(--u) * 10);
   flex: 0 0 auto;
-  margin-bottom: 10px;
+  margin-bottom: calc(var(--u) * 10);
 }
 
 .panel-title {
-  font-size: 11.5px;
+  font-size: calc(var(--u) * 11.5);
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -119,10 +143,10 @@
  */
 .tag {
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: max(8px, calc(var(--u) * 9.5));
   font-weight: 600;
   letter-spacing: 0.12em;
-  padding: 2px 6px;
+  padding: calc(var(--u) * 2) calc(var(--u) * 6);
   border-radius: 3px;
   border: 1px solid currentColor;
   opacity: 0.75;
@@ -147,10 +171,16 @@
   grid-row: span 1;
   display: flex;
   flex-direction: column;
-  gap: 12px; /* matches the grid gap so the seam is invisible */
+  gap: calc(var(--u) * 12); /* matches the grid gap so the seam is invisible */
   min-height: 0;
 }
-.panel-stack .panel-cost { flex: 0 0 auto; --pi: 2; }
+/*
+ * `flex: 0 1 auto`, not `0 0 auto`. At its natural height the cost panel could
+ * take the whole stack on a short screen and leave velocity with nothing, and
+ * because .panel clips, "nothing" means an empty box rather than a visibly
+ * squashed one. It may now give height back to its sibling.
+ */
+.panel-stack .panel-cost { flex: 0 1 auto; min-height: 0; --pi: 2; }
 .panel-stack .panel-vel  { flex: 1 1 auto; min-height: 0; --pi: 3; }
 .panel-counters { grid-column: span 4; grid-row: span 1; --pi: 4; }
 .panel-daily    { grid-column: span 5; grid-row: span 1; --pi: 4; }
@@ -171,7 +201,7 @@
 
 .hero-value {
   font-family: var(--mono);
-  font-size: clamp(38px, 6.2vw, 92px);
+  font-size: calc(var(--u) * 92);
   font-weight: 700;
   line-height: 0.92;
   letter-spacing: -0.035em;
@@ -182,21 +212,21 @@
 }
 
 .hero-meta {
-  margin-top: 12px;
+  margin-top: calc(var(--u) * 12);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: calc(var(--u) * 3);
 }
 
 .hero-exact {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: calc(var(--u) * 12);
   color: var(--sig-dim);
   font-variant-numeric: tabular-nums;
 }
 
 .hero-sub {
-  font-size: 12.5px;
+  font-size: calc(var(--u) * 12.5);
   color: oklch(0.66 0.015 230);
 }
 
@@ -206,7 +236,7 @@
  * than buried in a caption.
  */
 .hero-comp {
-  margin-top: 16px;
+  margin-top: calc(var(--u) * 16);
 }
 
 .comp-bar {
@@ -219,7 +249,10 @@
 
 .comp-seg {
   width: var(--w, 0%);
-  /* Sub-percent segments would otherwise vanish entirely. */
+  /* Sub-percent segments would otherwise vanish entirely. Deliberately NOT
+     scaled with --u: at the floor it would come out at 0.7px, which Chromium
+     paints at partial coverage on a dark bar, which is the vanishing this line
+     exists to prevent. */
   min-width: 1px;
   transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -232,10 +265,10 @@
 .comp-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px 16px;
-  margin-top: 9px;
+  gap: calc(var(--u) * 5) calc(var(--u) * 16);
+  margin-top: calc(var(--u) * 9);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: max(8px, calc(var(--u) * 10.5));
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: oklch(0.6 0.015 235);
@@ -247,7 +280,7 @@
   width: 6px;
   height: 6px;
   border-radius: 1px;
-  margin-right: 5px;
+  margin-right: calc(var(--u) * 5);
   vertical-align: middle;
 }
 
@@ -266,7 +299,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: calc(var(--u) * 6);
 }
 
 .activity-canvas {
@@ -281,7 +314,7 @@
   /* One child since the scale label went: keep the state hard right. */
   justify-content: flex-end;
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: max(8px, calc(var(--u) * 10.5));
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: oklch(0.6 0.015 230);
@@ -295,8 +328,8 @@
 /* Plain-English caption. A chart that needs explaining should explain itself. */
 .live-explain {
   flex: 0 0 auto;
-  margin-top: 3px;
-  font-size: 10.5px;
+  margin-top: calc(var(--u) * 3);
+  font-size: max(8px, calc(var(--u) * 10.5));
   color: oklch(0.56 0.015 240);
   line-height: 1.3;
 }
@@ -310,7 +343,7 @@
   height: 5px;
   border-radius: 50%;
   background: var(--sig);
-  margin-right: 6px;
+  margin-right: calc(var(--u) * 6);
   vertical-align: middle;
   animation: sig-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
@@ -332,7 +365,7 @@
 
 .vel-value {
   font-family: var(--mono);
-  font-size: clamp(24px, 2.6vw, 44px);
+  font-size: calc(var(--u) * 44);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1;
@@ -342,16 +375,16 @@
 
 .vel-unit {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: max(8px, calc(var(--u) * 10));
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: oklch(0.66 0.02 230);
-  margin-top: 6px;
+  margin-top: calc(var(--u) * 6);
 }
 
 .vel-note {
-  margin-top: 8px;
-  font-size: 11px;
+  margin-top: calc(var(--u) * 8);
+  font-size: max(8px, calc(var(--u) * 11));
   line-height: 1.35;
   color: oklch(0.58 0.015 240);
 }
@@ -363,7 +396,7 @@
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px 14px;
+  gap: calc(var(--u) * 10) calc(var(--u) * 14);
   align-content: center;
 }
 
@@ -374,7 +407,7 @@
 .stat-value {
   display: block;
   font-family: var(--mono);
-  font-size: clamp(15px, 1.5vw, 24px);
+  font-size: calc(var(--u) * 24);
   font-weight: 700;
   letter-spacing: -0.02em;
   color: oklch(0.95 0.015 210);
@@ -383,8 +416,8 @@
 }
 
 .stat-label {
-  margin-top: 4px;
-  font-size: 11px;
+  margin-top: calc(var(--u) * 4);
+  font-size: max(8px, calc(var(--u) * 11));
   font-weight: 600;
   letter-spacing: 0.11em;
   text-transform: uppercase;
@@ -392,9 +425,9 @@
 }
 
 .stat-hint {
-  font-size: 10px;
+  font-size: max(8px, calc(var(--u) * 10));
   color: oklch(0.52 0.012 240);
-  margin-top: 1px;
+  margin-top: calc(var(--u) * 1);
 }
 
 /* ── Column charts ──────────────────────────────────────────────────────── */
@@ -411,7 +444,7 @@
   min-height: 0;
   display: flex;
   align-items: flex-end;
-  gap: 2px;
+  gap: calc(var(--u) * 2);
 }
 
 .col {
@@ -445,9 +478,9 @@
 
 .chart-legend {
   flex: 0 0 auto;
-  margin-top: 8px;
+  margin-top: calc(var(--u) * 8);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: max(8px, calc(var(--u) * 10.5));
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: oklch(0.55 0.015 240);
@@ -457,15 +490,15 @@
 .hour-axis {
   flex: 0 0 auto;
   display: flex;
-  margin-top: 5px;
-  gap: 2px;
+  margin-top: calc(var(--u) * 5);
+  gap: calc(var(--u) * 2);
 }
 
 .hour-tick {
   flex: 1;
   min-width: 0;
   font-family: var(--mono);
-  font-size: 9.5px;
+  font-size: max(8px, calc(var(--u) * 9.5));
   color: oklch(0.5 0.012 240);
   text-align: left;
   letter-spacing: 0.04em;
@@ -479,7 +512,7 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 7px;
+  gap: calc(var(--u) * 7);
   width: 100%;
   /* A panel must never spill past its own box, whatever the row count. */
   overflow: hidden;
@@ -491,12 +524,12 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 10px;
-  margin-bottom: 4px;
+  gap: calc(var(--u) * 10);
+  margin-bottom: calc(var(--u) * 4);
 }
 
 .bd-label {
-  font-size: 12px;
+  font-size: calc(var(--u) * 12);
   color: oklch(0.86 0.012 225);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -505,7 +538,7 @@
 
 .bd-value {
   font-family: var(--mono);
-  font-size: 11.5px;
+  font-size: calc(var(--u) * 11.5);
   color: var(--sig-dim);
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
@@ -534,9 +567,9 @@
 }
 
 .bd-sub {
-  margin-top: 3px;
+  margin-top: calc(var(--u) * 3);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: max(8px, calc(var(--u) * 10));
   color: oklch(0.5 0.012 240);
 }
 
@@ -552,7 +585,7 @@
 
 .eff-value {
   font-family: var(--mono);
-  font-size: clamp(24px, 2.8vw, 46px);
+  font-size: calc(var(--u) * 46);
   font-weight: 700;
   letter-spacing: -0.025em;
   line-height: 1;
@@ -561,13 +594,13 @@
 }
 
 .eff-label {
-  margin-top: 6px;
-  font-size: 10.5px;
+  margin-top: calc(var(--u) * 6);
+  font-size: max(8px, calc(var(--u) * 10.5));
   color: oklch(0.68 0.02 225);
 }
 
 .eff-track {
-  margin-top: 10px;
+  margin-top: calc(var(--u) * 10);
   height: 4px;
   border-radius: 2px;
   background: oklch(1 0 0 / 0.07);
@@ -585,8 +618,8 @@
 }
 
 .eff-note {
-  margin-top: 8px;
-  font-size: 10.5px;
+  margin-top: calc(var(--u) * 8);
+  font-size: max(8px, calc(var(--u) * 10.5));
   line-height: 1.4;
   color: oklch(0.55 0.015 240);
 }
@@ -599,11 +632,11 @@
   flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  gap: 18px;
-  padding-top: 8px;
+  gap: calc(var(--u) * 18);
+  padding-top: calc(var(--u) * 8);
   border-top: 1px solid oklch(1 0 0 / 0.06);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: max(8px, calc(var(--u) * 11));
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: oklch(0.6 0.014 240);
@@ -635,8 +668,18 @@
   .eff-fill { transition: none; }
 }
 
-/* Narrow screens: collapse to a simpler stack rather than crushing panels. */
-@media (max-width: 1500px) {
+/*
+ * Narrow screens: collapse to a simpler stack rather than crushing panels.
+ *
+ * The `min-height` half is the part that matters and it was missing. This
+ * branch adds a FOURTH row, which is the right trade when the window is narrow
+ * but tall, and exactly the wrong one when it is narrow because the whole
+ * screen is small: a 1366x768 laptop has 768px to divide, and taking it in
+ * four rather than three cuts every panel's usable height by about a quarter
+ * for no gain in width. Such a screen keeps the three row layout and lets --u
+ * do the adapting.
+ */
+@media (max-width: 1500px) and (min-height: 1000px) {
   .stats-grid { grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); }
   .panel-hero     { grid-column: span 7; }
   .panel-live     { grid-column: span 5; }
@@ -647,6 +690,50 @@
   .panel-models   { grid-column: span 4; }
   .panel-hours    { grid-column: span 4; }
   .panel-projects { grid-column: span 4; }
+}
+
+
+/* ── Short screens: show less, rather than shrink further ───────────────── */
+
+/*
+ * Below this height --u has hit its floor and the label tier has hit its 8px
+ * minimum, so there is no shrinking left to do. The only honest move is to
+ * carry less.
+ *
+ * What goes is exactly the tier that explains a number to someone reading the
+ * dashboard for the first time. What stays is every number, every unit, and the
+ * caption under the live chart, because that one answers "what am I looking at"
+ * rather than "how was this worked out". A panel that clips its own headline is
+ * a bug; a panel that drops its footnote is a small screen.
+ *
+ * `.cost-gap` is NOT in this list and must not be added to it. It reads
+ * "N tokens from an unpriced model are not counted", which is the only thing on
+ * the dashboard that says the cost headline is understated. It is already
+ * hidden when there is nothing to report, so it costs nothing when it is quiet,
+ * and hiding it when there IS something to report leaves a confident figure
+ * with the caveat removed. A 1080p laptop at 125% scaling has an 864px viewport
+ * and would have sat under this rule permanently.
+ */
+@media (max-height: 940px) {
+  .cost-note,
+  .eff-note,
+  .vel-note,
+  .stat-hint,
+  .bd-sub {
+    display: none;
+  }
+}
+
+/* Tighter still: the composition legend goes, but the bar it labels stays, so
+   the proportions are still visible even once the words have gone. */
+@media (max-height: 820px) {
+  .comp-legend {
+    display: none;
+  }
+  .vel-peak {
+    margin-top: calc(var(--u) * 8);
+    padding-top: calc(var(--u) * 6);
+  }
 }
 
 
@@ -662,8 +749,8 @@
   top: 0;
   left: 0;
   z-index: 80;
-  min-width: 148px;
-  padding: 9px 11px;
+  min-width: calc(var(--u) * 148);
+  padding: calc(var(--u) * 9) calc(var(--u) * 11);
   border-radius: 8px;
   background: oklch(0.16 0.014 245 / 0.97);
   border: 1px solid oklch(1 0 0 / 0.14);
@@ -680,12 +767,12 @@
 
 .tip-title {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: max(8px, calc(var(--u) * 11));
   font-weight: 600;
   letter-spacing: 0.05em;
   color: oklch(0.96 0.01 210);
-  margin-bottom: 6px;
-  padding-bottom: 5px;
+  margin-bottom: calc(var(--u) * 6);
+  padding-bottom: calc(var(--u) * 5);
   border-bottom: 1px solid oklch(1 0 0 / 0.1);
   white-space: nowrap;
 }
@@ -693,9 +780,9 @@
 .tip-row {
   display: flex;
   justify-content: space-between;
-  gap: 16px;
+  gap: calc(var(--u) * 16);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: max(8px, calc(var(--u) * 11));
   line-height: 1.65;
 }
 
@@ -761,8 +848,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
-  min-width: 320px;
+  gap: calc(var(--u) * 14);
+  min-width: calc(var(--u) * 320);
 }
 
 /*
@@ -772,8 +859,8 @@
 .loading-marks {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-bottom: 4px;
+  gap: calc(var(--u) * 5);
+  margin-bottom: calc(var(--u) * 4);
 }
 
 .loading-mark {
@@ -792,8 +879,8 @@
 .loading-mark.is-loose {
   --rot: -24deg;
   width: 17px;
-  margin-right: 9px;
-  margin-bottom: 7px;
+  margin-right: calc(var(--u) * 9);
+  margin-bottom: calc(var(--u) * 7);
 }
 
 .loading-mark:nth-child(1) { background: oklch(0.72 0.14 185); }
@@ -815,7 +902,7 @@
 }
 
 .loading-title {
-  font-size: 15px;
+  font-size: calc(var(--u) * 15);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: oklch(0.94 0.01 220);
@@ -823,11 +910,11 @@
 
 .loading-sub {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: max(8px, calc(var(--u) * 10.5));
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: oklch(0.58 0.015 235);
-  margin-top: -8px;
+  margin-top: calc(var(--u) * -8);
 }
 
 .loading-track {
@@ -850,7 +937,7 @@
 
 .loading-count {
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: max(8px, calc(var(--u) * 10.5));
   letter-spacing: 0.06em;
   color: oklch(0.6 0.015 235);
   font-variant-numeric: tabular-nums;
@@ -904,24 +991,24 @@
   display: grid;
   place-items: center;
   font-family: var(--mono);
-  font-size: 19px;
+  font-size: calc(var(--u) * 19);
   font-weight: 700;
   color: oklch(0.2 0.03 75);
   background: var(--warn);
-  margin-bottom: 4px;
+  margin-bottom: calc(var(--u) * 4);
 }
 
 .nodata-body {
   max-width: 46ch;
   text-align: center;
-  font-size: 12.5px;
+  font-size: calc(var(--u) * 12.5);
   line-height: 1.6;
   color: oklch(0.66 0.015 235);
 }
 
 .nodata-path {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: max(8px, calc(var(--u) * 10));
   color: oklch(0.55 0.05 75);
   max-width: 70ch;
   text-align: center;
@@ -949,7 +1036,7 @@
   top: 14px;
   right: 92px;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: max(8px, calc(var(--u) * 9));
   letter-spacing: 0.14em;
   color: var(--warn);
   z-index: 3;
@@ -966,8 +1053,8 @@
 .status-proj {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 2px 8px;
+  gap: calc(var(--u) * 7);
+  padding: calc(var(--u) * 2) calc(var(--u) * 8);
   border-radius: 3px;
   border: 1px solid currentColor;
   text-transform: none;
@@ -1011,12 +1098,12 @@
 .vel-peak {
   display: flex;
   align-items: baseline;
-  gap: 7px;
-  margin-top: 14px;
-  padding-top: 11px;
+  gap: calc(var(--u) * 7);
+  margin-top: calc(var(--u) * 14);
+  padding-top: calc(var(--u) * 11);
   border-top: 1px solid oklch(0.3 0.02 250 / 0.55);
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: max(8px, calc(var(--u) * 11));
   letter-spacing: 0.06em;
 }
 
@@ -1026,7 +1113,7 @@
 }
 
 .vel-peak-value {
-  font-size: 14px;
+  font-size: calc(var(--u) * 14);
   font-weight: 600;
   letter-spacing: 0.02em;
   color: oklch(0.78 0.13 75);
@@ -1047,7 +1134,7 @@
 
 .cost-value {
   font-family: var(--mono);
-  font-size: clamp(18px, 1.5vw, 26px);
+  font-size: calc(var(--u) * 26);
   font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1;
@@ -1056,16 +1143,16 @@
 }
 
 .cost-note {
-  margin-top: 6px;
-  font-size: 11px;
+  margin-top: calc(var(--u) * 6);
+  font-size: max(8px, calc(var(--u) * 11));
   line-height: 1.35;
   color: oklch(0.58 0.015 240);
 }
 
 .cost-gap {
-  margin-top: 8px;
+  margin-top: calc(var(--u) * 8);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: max(8px, calc(var(--u) * 10));
   letter-spacing: 0.04em;
   color: oklch(0.72 0.13 75);
 }

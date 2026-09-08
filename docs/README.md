@@ -11,6 +11,8 @@ reversed; these are the depth behind it.
 | [window-layering.md](window-layering.md) | Layer modes, why the wall is a tool window, how it is placed against the desktop, and the Show Desktop watchdog |
 | [settings-and-tray.md](settings-and-tray.md) | The settings schema and how it heals, the tray menu, hotkeys, start with Windows, performance tiers |
 | [editions.md](editions.md) | The full and stats builds, what differs, and how the edition is injected at build time |
+| [responsive-layout.md](responsive-layout.md) | How the dashboard adapts to the screen, the one unit everything is a multiple of, and why the original `vw` clamps made it worse |
+| [notes-bar.md](notes-bar.md) | The one line note across the top, why it locks, and why it stays on this machine |
 
 ## The numbers
 
@@ -63,6 +65,9 @@ adjacent to the thing that mattered:
 - An element's `hidden` property was read back and reported true while the
   element was visible, because an author `display: flex` rule beats the user
   agent's `[hidden]` rule.
+- Panel sizes were checked against the grid and the CONTENTS were assumed, so a
+  dashboard that had always been fluid shipped text that was clipped on any
+  screen smaller than the one it was written on.
 
 Each of those passed a test. Writing down why the test was satisfied by the
 wrong thing is worth more than writing down the fix.

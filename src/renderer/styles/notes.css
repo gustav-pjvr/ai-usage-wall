@@ -1,0 +1,165 @@
+/*
+ * The notes bar. One line, full width, at the very top of the window.
+ *
+ * It has two jobs that pull against each other: be readable at a glance from
+ * across the room, and be invisible enough that an ambient wall does not turn
+ * into a form. So it carries no box of its own when locked, just text on a
+ * hairline, and only becomes an obvious field once it has been unlocked.
+ *
+ * Sizes come from --u (defined in shell.css), so the bar shrinks with
+ * everything else rather than eating a fixed slice of a small screen.
+ */
+
+#notes-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 70;
+  height: calc(var(--u) * 30);
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 14);
+  padding: 0 calc(var(--u) * 26);
+  border-bottom: 1px solid oklch(1 0 0 / 0.05);
+  background: linear-gradient(180deg, oklch(0.14 0.014 250 / 0.72), oklch(0.14 0.014 250 / 0.18));
+  transition:
+    background 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * An ID selector with `display: flex` beats the user agent's
+ * `[hidden] { display: none }`. This project has shipped that bug four times,
+ * most recently as a 3px sliver of the mode switch, so say it explicitly.
+ */
+#notes-bar[hidden] {
+  display: none;
+}
+
+.notes-input {
+  flex: 1;
+  min-width: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: max(9px, calc(var(--u) * 12));
+  letter-spacing: 0.02em;
+  color: oklch(0.82 0.02 220);
+  /* The caret would otherwise blink on a field nobody can type into. */
+  caret-color: transparent;
+  cursor: default;
+  text-overflow: ellipsis;
+  transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.notes-input:focus {
+  outline: none;
+}
+
+.notes-input::placeholder {
+  color: oklch(0.45 0.012 245);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: max(8px, calc(var(--u) * 10));
+}
+
+/* The keyboard legend, present only while the field is live. */
+.notes-hint {
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 9.5));
+  letter-spacing: 0.12em;
+  color: oklch(0.6 0.1 195);
+  opacity: 0;
+  transition: opacity 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* ── Locked ─────────────────────────────────────────────────────────────── */
+
+/*
+ * A placeholder only renders while the field is EMPTY, which makes it exactly
+ * the right thing to leave on. An empty bar with the hint hidden is invisible,
+ * and a control nobody can find is not quiet, it is missing. So the hint sits
+ * there until there is a note to read, and steps forward on hover.
+ */
+#notes-bar[data-state='locked'] .notes-input::placeholder {
+  opacity: 0.7;
+  transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#notes-bar[data-state='locked']:hover .notes-input::placeholder {
+  opacity: 1;
+}
+
+#notes-bar[data-state='locked']:hover {
+  background: linear-gradient(180deg, oklch(0.17 0.016 248 / 0.85), oklch(0.15 0.015 250 / 0.3));
+  border-bottom-color: oklch(1 0 0 / 0.1);
+}
+
+/* ── Editing ────────────────────────────────────────────────────────────── */
+
+#notes-bar[data-state='editing'] {
+  background: linear-gradient(180deg, oklch(0.19 0.02 245 / 0.96), oklch(0.17 0.018 248 / 0.9));
+  border-bottom-color: oklch(0.78 0.14 195 / 0.5);
+}
+
+#notes-bar[data-state='editing'] .notes-input {
+  color: oklch(0.97 0.01 220);
+  caret-color: oklch(0.78 0.14 195);
+  cursor: text;
+}
+
+#notes-bar[data-state='editing'] .notes-hint {
+  opacity: 1;
+}
+
+#notes-bar[data-state='editing'] .notes-input::placeholder {
+  opacity: 0.55;
+}
+
+/* ── A save that did not land ───────────────────────────────────────────── */
+
+/*
+ * The bar locks the instant focus leaves, which is well before the write lands.
+ * If it fails, the note looks kept and is gone at the next launch, so say so on
+ * the bar itself rather than only in the console.
+ */
+#notes-bar[data-save='failed'] {
+  border-bottom-color: oklch(0.72 0.17 25 / 0.7);
+}
+
+#notes-bar[data-save='failed'] .notes-input {
+  color: oklch(0.78 0.13 30);
+}
+
+#notes-bar[data-save='failed'] .notes-hint {
+  opacity: 1;
+  color: oklch(0.72 0.17 25);
+}
+
+#notes-bar[data-save='failed'] .notes-hint::after {
+  content: '  ·  NOT SAVED';
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #notes-bar,
+  .notes-input,
+  .notes-hint,
+  .notes-input::placeholder {
+    transition: none;
+  }
+}
+
+/*
+ * Focus mode paints an opaque window over everything and used to be a trap. The
+ * bar keeps its full presence there so the way out is never the only control on
+ * screen.
+ */
+body.is-focus #notes-bar {
+  background: linear-gradient(180deg, oklch(0.17 0.018 248 / 0.98), oklch(0.15 0.016 250 / 0.92));
+}

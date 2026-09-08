@@ -96,10 +96,23 @@ body {
 
 /* ── Wall ───────────────────────────────────────────────────────────────── */
 
+/*
+ * Inset from the top by exactly the notes bar.
+ *
+ * The layout engine centres a page vertically inside whatever height it is
+ * given, and a full page lands its top row at the 28px padding, which is under
+ * the bar. The mode switch has always floated over this surface and a card
+ * passing behind a small translucent pill was fine; a full width bar is not.
+ *
+ * `render()` measures THIS element rather than the window, so the inset and the
+ * layout cannot drift apart: change the height here and the cards follow.
+ */
 #wall {
-  position: relative;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: calc(var(--u) * 30);
+  left: 0;
+  right: 0;
+  bottom: 0;
 }
 
 /*

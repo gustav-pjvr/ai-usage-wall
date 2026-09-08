@@ -7,6 +7,37 @@
  * replay the entrance animation.
  */
 
+/*
+ * ONE UNIT, AND WHY EVERY SIZE IN THIS FILE IS A MULTIPLE OF IT
+ *
+ * The grid is fluid: twelve columns of 1fr and rows of minmax(0, 1fr), so a
+ * panel is always a fraction of the window. Its CONTENTS were not. Font sizes,
+ * padding and vertical rhythm were fixed pixels, so on a smaller screen the
+ * boxes shrank and the text did not, and `overflow: hidden` on .panel turned
+ * that straight into clipped words. Gustav saw it on another machine.
+ *
+ * Five values did try to adapt, with clamp() against `vw`. That was worse than
+ * doing nothing, because a dashboard that fills the window is constrained by
+ * HEIGHT, not width: 1920x1080 and 1920x1200 have identical `vw` and very
+ * different room per row. Those clamps have been folded into this unit.
+ *
+ * --u is one pixel at the 1920x1080 reference, so `calc(var(--u) * 11.5)`
+ * still reads as "11.5px on the reference screen". It takes the SMALLER of the
+ * width-derived and height-derived unit, so whichever axis is tighter wins.
+ *
+ * The floor and the ceiling are both deliberate. Below about 0.7 the labels
+ * stop being readable, and the answer on a screen that small is to show less
+ * rather than to shrink further, which is what the short-screen rules at the
+ * bottom of this file do. Above 1.35 the dashboard would just be a poster.
+ */
+:root {
+  --u: clamp(0.7px, min(0.0520833vw, 0.0925926vh), 1.35px);
+  /* Height of the notes bar plus the mode switch beneath it, in units. Kept
+     here because .stats has to reserve exactly that much and nothing else
+     should have to know the arithmetic. */
+  --top-chrome: calc(var(--u) * 80);
+}
+
 #stage {
   position: absolute;
   inset: 0;
@@ -79,14 +110,16 @@
  */
 #mode-switch {
   position: fixed;
-  top: 16px;
+  /* Under the notes bar, and scaled with everything else so the two never
+     overlap on a small screen. --top-chrome reserves room for both. */
+  top: calc(var(--u) * 38);
   left: 50%;
   transform: translateX(-50%);
   z-index: 60;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 3px;
+  padding: calc(var(--u) * 3);
   border-radius: 999px;
   background: oklch(0.19 0.014 245 / 0.72);
   border: 1px solid oklch(1 0 0 / 0.09);
@@ -119,11 +152,18 @@
   background: transparent;
   color: oklch(0.72 0.02 230);
   font-family: inherit;
-  font-size: 11px;
+  /*
+   * Scaled, like the offset above it. These were fixed while `top` shrank, so
+   * the pill kept its ~34px height as the space above the panels closed: at
+   * 1366x768 it sat 4 to 5px into the hero panel's top edge, and at 1920x1080
+   * under Windows' default 125% scaling it was already touching. The offset and
+   * the height have to move together or the clearance is fiction.
+   */
+  font-size: max(9px, calc(var(--u) * 11));
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  padding: 6px 17px;
+  padding: calc(var(--u) * 6) calc(var(--u) * 17);
   border-radius: 999px;
   cursor: pointer;
   white-space: nowrap;
@@ -195,12 +235,12 @@ body.is-focus #mode-switch {
   appearance: none;
   border: 0;
   margin-left: 4px;
-  padding: 6px 14px;
+  padding: calc(var(--u) * 6) calc(var(--u) * 14);
   border-radius: 999px;
   background: oklch(0.42 0.12 70);
   color: oklch(0.98 0.02 80);
   font-family: inherit;
-  font-size: 11px;
+  font-size: max(9px, calc(var(--u) * 11));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;

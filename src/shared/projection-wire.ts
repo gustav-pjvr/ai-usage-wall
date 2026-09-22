@@ -96,6 +96,44 @@ export interface ProjectedUsage {
    * talking to an older source gets no links rather than an error.
    */
   projectLinks?: Link[];
+  /**
+   * How much of the totals comes from history rather than transcripts still on
+   * disk (docs/design/history-archive.md). Counts and totals only; the phrase
+   * naming the reconstruction's source is fixed text, and anything that looks
+   * like a path is dropped. Optional like `projectLinks`.
+   */
+  history?: WireHistory;
+}
+
+export interface WireHistory {
+  archivedFiles: number;
+  archivedSessions: number;
+  reconstructedSessions: number;
+  reconstructedFiles: number;
+  archived: WireTotals;
+  reconstructed: WireTotals;
+  reconstructedFrom: string | null;
+  unattributedTokens: number;
+}
+
+const count = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+
+/** A human phrase, never a path: it is shown on the wall and crosses the wire. */
+const phrase = (v: unknown): string | null =>
+  typeof v === 'string' && v.length > 0 && v.length <= 80 && !/[\\/:]/.test(v) ? v : null;
+
+function wireHistory(h: any): WireHistory | undefined {
+  if (!h || typeof h !== 'object') return undefined;
+  return {
+    archivedFiles: count(h.archivedFiles),
+    archivedSessions: count(h.archivedSessions),
+    reconstructedSessions: count(h.reconstructedSessions),
+    reconstructedFiles: count(h.reconstructedFiles),
+    archived: totals(h.archived),
+    reconstructed: totals(h.reconstructed),
+    reconstructedFrom: phrase(h.reconstructedFrom),
+    unattributedTokens: count(h.unattributedTokens),
+  };
 }
 
 /**
@@ -282,6 +320,7 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
     projectLinks: opts.shareProjectNames
       ? buildLinks(Object.values(idx.sessions ?? {}) as any[], (cwd) => labelOfKey.get(cwd.toLowerCase()) ?? null).slice(0, MAX_WIRE_LINKS)
       : [],
+    ...(idx.history ? { history: wireHistory(idx.history) } : {}),
   };
 }
 
@@ -355,5 +394,7 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
         )
       : [],
     ...(w.unavailableReason ? { unavailableReason: w.unavailableReason } : {}),
+    // Re-validated on arrival, like the links.
+    ...(w.history ? { history: wireHistory(w.history) } : {}),
   };
 }

@@ -62,9 +62,23 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * Bump when the aggregate shape changes, to invalidate old caches.
  *
  * 4 (2026-09-22): `projectHourly` and `activeDays`, for the work time-lapse and
- * the streak milestone. One cold reindex on first launch after the update.
+ * the streak milestone.
+ *
+ * 5 (2026-09-22): every file carries its own `contrib`, so a transcript that is
+ * deleted can have its numbers moved to the history store instead of vanishing.
+ *
+ * A BUMP NO LONGER LOSES ANYTHING, and that is the point of version 5. Version
+ * 4's bump discarded a cache that remembered about 350 transcripts Claude Code
+ * had already deleted, and the wall dropped from 39.35B tokens to 19.79B.
+ * `loadIndex` now hands a mismatched cache's per-file contributions back as
+ * `staleFiles`, and the first refresh archives the ones whose file is gone.
+ * (Version 4 caches have no contributions to hand back; that history came back
+ * through a one-off seed, see docs/design/history-archive.md.)
  */
-const INDEX_VERSION = 4;
+export const INDEX_VERSION = 5;
+
+/** Schema of one file's contribution. Independent of INDEX_VERSION: history outlives the cache. */
+export const CONTRIB_VERSION = 1;
 
 /** Hourly buckets are kept for this many days. Daily buckets are kept forever. */
 const HOURLY_DAYS = 14;
@@ -106,11 +120,39 @@ export interface SessionInfo {
   models: string[];
 }
 
+/**
+ * Everything one transcript put into the index.
+ *
+ * Kept per file so that when the transcript disappears its numbers can be
+ * MOVED to the history store (src/main/data/history.ts) rather than lost. The
+ * live aggregates cannot subtract a file, so a disappearance is handled by
+ * archiving its contribution and rebuilding from the files that remain; the
+ * contribution is what makes the archive exact instead of a guess.
+ *
+ * Not kept: hourly, projectHourly, recent, latest. Those are short windows,
+ * and a file old enough to be deleted is outside them.
+ */
+export interface FileContribution {
+  cv: number;
+  totals: TokenTotals;
+  daily: Record<string, TokenTotals>;
+  models: Record<string, TokenTotals>;
+  projects: Record<string, TokenTotals & { lastSeen: string; display: string }>;
+  sessions: Record<string, SessionInfo>;
+  activeDays: Record<string, number>;
+}
+
+export interface FileEntry {
+  size: number;
+  offset: number;
+  contrib: FileContribution;
+}
+
 export interface UsageIndex {
   version: number;
   builtAt: string;
-  /** Byte offsets so a refresh only reads what was appended. */
-  files: Record<string, { size: number; offset: number }>;
+  /** Byte offsets so a refresh only reads what was appended, and what each file contributed. */
+  files: Record<string, FileEntry>;
   totals: TokenTotals;
   daily: Record<string, TokenTotals>;
   hourly: Record<string, TokenTotals>;
@@ -139,7 +181,15 @@ export interface UsageIndex {
    * Kept forever, like `daily`; it is one number per day.
    */
   activeDays: Record<string, number>;
-  prompts: { total: number; daily: Record<string, number>; lastAt: string | null; offset: number; size: number };
+  prompts: {
+    total: number;
+    daily: Record<string, number>;
+    lastAt: string | null;
+    offset: number;
+    size: number;
+    /** history.jsonl was seen shorter, at this size; reconciled once it holds still. */
+    pendingShrink?: number;
+  };
   latest: { ts: string | null; model: string | null; sessionId: string | null; version: string | null; cwd: string | null };
   /** Wall-clock ms of parse work in the last refresh. */
   lastScanMs: number;
@@ -149,6 +199,12 @@ export interface UsageIndex {
    * whole index, and a record must outlive that. See src/main/data/peak.ts.
    */
   peak?: PeakVelocity | null;
+  /**
+   * Contributions an older-version cache handed over that could not be settled
+   * yet (store unreadable, archive failed, file locked). Saved with the cache
+   * so a restart cannot drop them; loadIndex hands them back as `staleFiles`.
+   */
+  pendingStale?: Record<string, FileContribution>;
   /** True when the source directory could not be read at all. */
   unavailable: boolean;
   unavailableReason?: string;
@@ -178,6 +234,97 @@ function addInto(target: TokenTotals, u: TokenTotals): void {
   target.webFetch += u.webFetch;
   target.costUsd += u.costUsd;
   target.unpricedTokens += u.unpricedTokens;
+}
+
+export function emptyContrib(): FileContribution {
+  return { cv: CONTRIB_VERSION, totals: emptyTotals(), daily: {}, models: {}, projects: {}, sessions: {}, activeDays: {} };
+}
+
+/** The aggregates a record lands in, shared by the index and each file's contribution. */
+type Aggregates = Pick<UsageIndex, 'totals' | 'daily' | 'models' | 'projects' | 'sessions' | 'activeDays'>;
+
+/**
+ * Fold one record into a set of aggregates.
+ *
+ * The index and the file's own contribution go through this ONE function, so
+ * the two can never disagree about what a record added. If they could, an
+ * archived file would carry different numbers from the ones it is replacing
+ * and the totals would move on deletion, which is the exact failure this
+ * exists to prevent.
+ */
+function fold(
+  into: Aggregates,
+  rec: TokenTotals,
+  m: { model: string; ts: string | null; tsMs: number; cwd: string | null; sid: string | null },
+): void {
+  addInto(into.totals, rec);
+  into.models[m.model] ??= emptyTotals();
+  addInto(into.models[m.model], rec);
+
+  if (m.cwd !== null) {
+    const key = m.cwd.toLowerCase();
+    into.projects[key] ??= { ...emptyTotals(), lastSeen: m.ts ?? '', display: m.cwd };
+    addInto(into.projects[key], rec);
+    if (m.ts && m.ts > into.projects[key].lastSeen) into.projects[key].lastSeen = m.ts;
+  }
+
+  if (m.ts) {
+    const day = m.ts.slice(0, 10);
+    into.daily[day] ??= emptyTotals();
+    addInto(into.daily[day], rec);
+    if (Number.isFinite(m.tsMs)) {
+      const local = localDayKey(m.tsMs);
+      into.activeDays[local] = (into.activeDays[local] || 0) + 1;
+    }
+  }
+
+  if (m.sid && m.ts) {
+    const s = (into.sessions[m.sid] ??= {
+      id: m.sid,
+      start: m.ts,
+      end: m.ts,
+      requests: 0,
+      output: 0,
+      total: 0,
+      cwd: m.cwd,
+      models: [],
+    });
+    if (m.ts < s.start) s.start = m.ts;
+    if (m.ts > s.end) s.end = m.ts;
+    s.requests += 1;
+    s.output += rec.output;
+    s.total += rec.input + rec.output + rec.cacheCreate + rec.cacheRead;
+    if (!s.models.includes(m.model)) s.models.push(m.model);
+  }
+}
+
+/**
+ * Add a whole file's contribution back into aggregates, for a file a rebuild
+ * could not re-read. Sessions are unioned, since one id can span files.
+ */
+function absorb(into: Aggregates, c: FileContribution): void {
+  addInto(into.totals, c.totals);
+  for (const [k, v] of Object.entries(c.daily)) addInto((into.daily[k] ??= emptyTotals()), v);
+  for (const [k, v] of Object.entries(c.models)) addInto((into.models[k] ??= emptyTotals()), v);
+  for (const [k, v] of Object.entries(c.projects)) {
+    const cur = (into.projects[k] ??= { ...emptyTotals(), lastSeen: v.lastSeen, display: v.display });
+    addInto(cur, v);
+    if (v.lastSeen > cur.lastSeen) cur.lastSeen = v.lastSeen;
+  }
+  for (const [k, n] of Object.entries(c.activeDays)) into.activeDays[k] = (into.activeDays[k] || 0) + n;
+  for (const [id, sv] of Object.entries(c.sessions)) {
+    const cur = into.sessions[id];
+    if (!cur) {
+      into.sessions[id] = { ...sv, models: [...sv.models] };
+      continue;
+    }
+    if (sv.start < cur.start) cur.start = sv.start;
+    if (sv.end > cur.end) cur.end = sv.end;
+    cur.requests += sv.requests;
+    cur.output += sv.output;
+    cur.total += sv.total;
+    for (const m of sv.models) if (!cur.models.includes(m)) cur.models.push(m);
+  }
 }
 
 export function emptyIndex(): UsageIndex {
@@ -249,7 +396,13 @@ async function listTranscripts(dir: string): Promise<string[]> {
  * So the returned offset is walked back to the end of the last complete line,
  * and the partial tail is read again next pass, when it is whole.
  */
-async function ingestFile(index: UsageIndex, file: string, fromOffset: number, size: number): Promise<number> {
+async function ingestFile(
+  index: UsageIndex,
+  contrib: FileContribution,
+  file: string,
+  fromOffset: number,
+  size: number,
+): Promise<number> {
   if (size <= fromOffset) return fromOffset;
 
   const hourlyCutoff = Date.now() - HOURLY_DAYS * 86_400_000;
@@ -326,32 +479,28 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
             : 0,
       };
 
-      addInto(index.totals, rec);
-
       const ts: string | null = typeof o.timestamp === 'string' ? o.timestamp : null;
-
-      index.models[model] ??= emptyTotals();
-      addInto(index.models[model], rec);
-
-      if (typeof o.cwd === 'string') {
-        /*
-         * Group case-insensitively. Claude Code records the working directory
-         * with whatever drive-letter case the shell used, so the same folder
-         * shows up as both "C:\..." and "c:\..." and was being counted as two
-         * separate projects with the same display name.
-         */
-        const key = o.cwd.toLowerCase();
-        index.projects[key] ??= { ...emptyTotals(), lastSeen: ts ?? '', display: o.cwd };
-        addInto(index.projects[key], rec);
-        if (ts && ts > index.projects[key].lastSeen) index.projects[key].lastSeen = ts;
-      }
+      const tsMs = ts ? Date.parse(ts) : NaN;
+      /*
+       * Projects group case-insensitively (inside `fold`). Claude Code records
+       * the working directory with whatever drive-letter case the shell used,
+       * so the same folder shows up as both "C:\..." and "c:\..." and was being
+       * counted as two separate projects with the same display name.
+       */
+      const meta = {
+        model,
+        ts,
+        tsMs,
+        cwd: typeof o.cwd === 'string' ? o.cwd : null,
+        sid: typeof o.sessionId === 'string' ? o.sessionId : null,
+      };
+      // Into the index AND into this file's own record of what it added. Both
+      // through the same function, so the archive can never disagree with the
+      // numbers it replaces.
+      fold(index, rec, meta);
+      fold(contrib, rec, meta);
 
       if (ts) {
-        const day = ts.slice(0, 10);
-        index.daily[day] ??= emptyTotals();
-        addInto(index.daily[day], rec);
-
-        const tsMs = Date.parse(ts);
         if (Number.isFinite(tsMs) && tsMs >= hourlyCutoff) {
           const hour = ts.slice(0, 13);
           index.hourly[hour] ??= emptyTotals();
@@ -364,11 +513,6 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
             cell[1] += rec.input + rec.output + rec.cacheCreate + rec.cacheRead;
             cell[2] += rec.output;
           }
-        }
-
-        if (Number.isFinite(tsMs)) {
-          const day = localDayKey(tsMs);
-          index.activeDays[day] = (index.activeDays[day] || 0) + 1;
         }
 
         if (Number.isFinite(tsMs)) {
@@ -387,25 +531,6 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
         }
       }
 
-      const sid: string | null = typeof o.sessionId === 'string' ? o.sessionId : null;
-      if (sid && ts) {
-        const s = (index.sessions[sid] ??= {
-          id: sid,
-          start: ts,
-          end: ts,
-          requests: 0,
-          output: 0,
-          total: 0,
-          cwd: typeof o.cwd === 'string' ? o.cwd : null,
-          models: [],
-        });
-        if (ts < s.start) s.start = ts;
-        if (ts > s.end) s.end = ts;
-        s.requests += 1;
-        s.output += rec.output;
-        s.total += rec.input + rec.output + rec.cacheCreate + rec.cacheRead;
-        if (!s.models.includes(model)) s.models.push(model);
-      }
     }
     rl.close();
 
@@ -422,22 +547,70 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
   }
 }
 
-/** Prompts the user actually submitted, from history.jsonl. Append-only too. */
-async function ingestHistory(index: UsageIndex): Promise<void> {
-  let size = 0;
-  try {
-    size = (await fs.stat(HISTORY_FILE)).size;
-  } catch {
-    return;
-  }
-  if (size < index.prompts.offset) {
-    // Rewritten, start over.
-    index.prompts = { total: 0, daily: {}, lastAt: null, offset: 0, size: 0 };
-  }
-  if (size <= index.prompts.offset) return;
+/**
+ * What the indexer needs from the history store, and nothing more. Implemented
+ * by src/main/data/history.ts; tests pass their own.
+ *
+ * THE INVARIANT: a transcript path is in exactly one of `index.files` and the
+ * history store. That is what makes double counting impossible rather than
+ * merely unlikely: history is not a running sum to be corrected, it is the set
+ * of contributions whose file is gone.
+ */
+export interface HistoryPort {
+  /** False when the store could not be read. Then nothing is archived and nothing removed. */
+  readonly ready: boolean;
+  has(path: string): boolean;
+  /** Persist these contributions. Resolves true only once they are safely on disk. */
+  archive(entries: { path: string; contrib: FileContribution; reason: 'deleted' | 'stale-cache' }[]): Promise<boolean>;
+  /** A held path is back on disk: drop it from history so it is measured live instead. */
+  release(paths: string[]): Promise<boolean>;
+  /** Prompt counts per day that a rewritten history.jsonl no longer contains. */
+  archivePrompts(lost: Record<string, number>): Promise<boolean>;
+}
 
+export interface RefreshOptions {
+  history?: HistoryPort;
+  /** Contributions from a cache of another version, handed over by loadIndex. */
+  staleFiles?: Record<string, FileContribution>;
+}
+
+/**
+ * Is this path really gone, as opposed to unreadable for a moment?
+ *
+ * Only "not found" counts. A lock (EPERM, EBUSY) from an antivirus or a backup
+ * scanner must never archive anything: the file is still there, and archiving
+ * it would move its numbers out, rebuild, then read it again a minute later.
+ * Absence from the directory listing is not evidence either, because
+ * listTranscripts quietly skips any folder it cannot read.
+ */
+async function isGone(p: string): Promise<boolean> {
   try {
-    const stream = createReadStream(HISTORY_FILE, { encoding: 'utf8', start: index.prompts.offset });
+    await fs.stat(p);
+    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
+}
+
+/**
+ * Read history.jsonl from `from` up to `size`, into fresh counts.
+ *
+ * Returns null unless the read reached `size`: a partial read must never be
+ * treated as the file's contents, or a rewrite caught halfway would look like
+ * prompts that no longer exist.
+ */
+async function readPrompts(
+  from: number,
+  size: number,
+): Promise<{ total: number; daily: Record<string, number>; lastAt: string | null } | null> {
+  const out = { total: 0, daily: {} as Record<string, number>, lastAt: null as string | null };
+  let read = from;
+  try {
+    const stream = createReadStream(HISTORY_FILE, { encoding: 'utf8', start: from, end: size - 1 });
+    stream.on('data', (chunk) => {
+      read += Buffer.byteLength(chunk as string, 'utf8');
+    });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
     for await (const line of rl) {
       if (line.length < 10) continue;
@@ -445,20 +618,74 @@ async function ingestHistory(index: UsageIndex): Promise<void> {
         const o = JSON.parse(line) as { timestamp?: number };
         if (typeof o.timestamp !== 'number') continue;
         const iso = new Date(o.timestamp).toISOString();
-        index.prompts.total += 1;
+        out.total += 1;
         const day = iso.slice(0, 10);
-        index.prompts.daily[day] = (index.prompts.daily[day] || 0) + 1;
-        if (!index.prompts.lastAt || iso > index.prompts.lastAt) index.prompts.lastAt = iso;
+        out.daily[day] = (out.daily[day] || 0) + 1;
+        if (!out.lastAt || iso > out.lastAt) out.lastAt = iso;
       } catch {
         /* skip */
       }
     }
     rl.close();
-    index.prompts.offset = size;
-    index.prompts.size = size;
   } catch {
-    /* leave the offset alone and retry next pass */
+    return null;
   }
+  return read >= size ? out : null;
+}
+
+/** Prompts the user actually submitted, from history.jsonl. Append-only, until it is not. */
+async function ingestHistory(index: UsageIndex, port?: HistoryPort): Promise<void> {
+  let size = 0;
+  try {
+    size = (await fs.stat(HISTORY_FILE)).size;
+  } catch {
+    return;
+  }
+  const p = index.prompts;
+
+  if (size < p.offset || p.pendingShrink !== undefined) {
+    /*
+     * Rewritten shorter. This used to start over at zero, so a trimmed
+     * history.jsonl made the prompt count fall. Now the prompts it no longer
+     * holds are moved into history, day by day. Two guards, because a single
+     * look at a file being rewritten is not evidence of anything:
+     *
+     * 1. Act only once the size has held still for a whole pass. Seen mid
+     *    rewrite (0 bytes, or half written), the "lost" prompts would be
+     *    archived and then read again when the writer finished.
+     * 2. Apply only a read that reached the end. A failed read changes nothing.
+     *
+     * Without a ready store the old counts are kept: stale beats lower.
+     */
+    if (p.pendingShrink !== size) {
+      index.prompts = { ...p, pendingShrink: size };
+      return;
+    }
+    if (!port?.ready) return;
+    const fresh = size > 0 ? await readPrompts(0, size) : { total: 0, daily: {}, lastAt: null };
+    if (!fresh) return;
+    const lost: Record<string, number> = {};
+    for (const [day, n] of Object.entries(p.daily)) {
+      const gone = n - (fresh.daily[day] || 0);
+      if (gone > 0) lost[day] = gone;
+    }
+    if (Object.keys(lost).length && !(await port.archivePrompts(lost))) return; // retried next pass
+    index.prompts = { ...fresh, offset: size, size };
+    return;
+  }
+  if (size === p.offset) return;
+
+  const more = await readPrompts(p.offset, size);
+  if (!more) return; // leave the offset alone and retry next pass
+  const daily = { ...p.daily };
+  for (const [d, n] of Object.entries(more.daily)) daily[d] = (daily[d] || 0) + n;
+  index.prompts = {
+    total: p.total + more.total,
+    daily,
+    lastAt: more.lastAt && (!p.lastAt || more.lastAt > p.lastAt) ? more.lastAt : p.lastAt,
+    offset: size,
+    size,
+  };
 }
 
 /** Trim unbounded structures so the cache stays small and load stays fast. */
@@ -492,8 +719,10 @@ export interface IndexProgress {
 export async function refreshIndex(
   index: UsageIndex,
   onProgress?: (p: IndexProgress) => void,
+  opts: RefreshOptions = {},
 ): Promise<{ index: UsageIndex; rebuilt: boolean }> {
   const started = Date.now();
+  const port = opts.history;
 
   let files: string[];
   try {
@@ -509,9 +738,47 @@ export async function refreshIndex(
   index.unavailable = false;
   delete index.unavailableReason;
 
+  /*
+   * History first: nothing the wall has counted may be lost to a deletion.
+   *
+   * 1. RESTORES. A path history holds that is back on disk is released, so it
+   *    is measured live instead, never counted in both. If the release cannot
+   *    be saved, the file is left unread this pass for the same reason.
+   * 2. DELETIONS. A path the index knew (or a stale cache handed over) that is
+   *    confirmed gone has its contribution archived, and only once that is on
+   *    disk is it dropped and the index rebuilt from the files that remain.
+   *    The live aggregates cannot subtract, so rebuilding is the only exact
+   *    way; deletions arrive in batches at Claude Code startup, so it is rare.
+   *
+   * Without a ready store, none of this runs: the index stays incremental and
+   * keeps counting a deleted file's numbers, which is the old behaviour and
+   * loses nothing.
+   */
+  const unreadThisPass = new Set<string>();
+  if (port?.ready) {
+    const held = files.filter((f) => port.has(f));
+    if (held.length && !(await port.release(held))) for (const f of held) unreadThisPass.add(f);
+
+    const listed = new Set(files);
+    const candidates: { path: string; contrib: FileContribution; reason: 'deleted' | 'stale-cache' }[] = [];
+    for (const [p, e] of Object.entries(index.files)) {
+      if (!listed.has(p) && e?.contrib) candidates.push({ path: p, contrib: e.contrib, reason: 'deleted' });
+    }
+    for (const [p, c] of Object.entries(opts.staleFiles ?? {})) {
+      if (!listed.has(p) && !index.files[p] && !port.has(p)) candidates.push({ path: p, contrib: c, reason: 'stale-cache' });
+    }
+    const gone: typeof candidates = [];
+    for (const c of candidates) if (await isGone(c.path)) gone.push(c);
+
+    if (gone.length && (await port.archive(gone)) && gone.some((g) => g.reason === 'deleted')) {
+      return rebuildKeeping(index, onProgress, port);
+    }
+  }
+
   // A shrunk file means its contents changed underneath us, and incremental
   // aggregates cannot be reversed. Rebuild from scratch rather than serve
-  // numbers we know are wrong.
+  // numbers we know are wrong. (A deleted file that could not be archived is
+  // carried through the rebuild by rebuildKeeping, never dropped.)
   for (const f of files) {
     const known = index.files[f];
     if (!known) continue;
@@ -521,11 +788,7 @@ export async function refreshIndex(
     } catch {
       continue;
     }
-    if (size < known.size) {
-      const fresh = emptyIndex();
-      const rebuilt = await refreshIndex(fresh, onProgress);
-      return { index: rebuilt.index, rebuilt: true };
-    }
+    if (size < known.size) return rebuildKeeping(index, onProgress, port);
   }
 
   /*
@@ -568,24 +831,27 @@ export async function refreshIndex(
 
   for (const f of files) {
     const size = sizes.get(f);
-    if (size === undefined) continue;
-    const known = index.files[f] ?? { size: 0, offset: 0 };
-    if (size <= known.offset) {
-      index.files[f] = { size, offset: known.offset };
+    if (size === undefined || unreadThisPass.has(f)) continue;
+    const known = index.files[f];
+    // A path new to the index starts a fresh contribution, never one left over.
+    const contrib = known?.contrib ?? emptyContrib();
+    const from = known?.offset ?? 0;
+    if (size <= from) {
+      index.files[f] = { size, offset: from, contrib };
       done++;
       bytesDone += size;
       report();
       continue;
     }
-    const offset = await ingestFile(index, f, known.offset, size);
-    index.files[f] = { size, offset };
+    const offset = await ingestFile(index, contrib, f, from, size);
+    index.files[f] = { size, offset, contrib };
     done++;
     bytesDone += size;
     report();
   }
   report(true);
 
-  await ingestHistory(index);
+  await ingestHistory(index, port);
   prune(index);
 
   index.builtAt = new Date().toISOString();
@@ -593,17 +859,59 @@ export async function refreshIndex(
   return { index, rebuilt: false };
 }
 
+/**
+ * Rebuild from the files on disk WITHOUT losing a file the rebuild cannot see.
+ *
+ * A rebuild only reads what is listed and readable now. A file that is gone
+ * but could not be archived (the store failed to save), or that is present
+ * but unlisted or locked, would otherwise be in neither the index nor
+ * history: its numbers lost, and nothing left to retry. Such a file is carried
+ * over with its contribution, so the next pass archives it or reads on from
+ * its offset. Prompts are carried too: they come from history.jsonl, not the
+ * transcripts, and re-reading them from zero would forget a trimmed file.
+ */
+async function rebuildKeeping(
+  old: UsageIndex,
+  onProgress: ((p: IndexProgress) => void) | undefined,
+  port: HistoryPort | undefined,
+): Promise<{ index: UsageIndex; rebuilt: boolean }> {
+  const fresh = emptyIndex();
+  fresh.prompts = old.prompts;
+  const { index } = await refreshIndex(fresh, onProgress, { history: port });
+  for (const [p, e] of Object.entries(old.files)) {
+    if (index.files[p] || !e?.contrib || port?.has(p)) continue;
+    index.files[p] = e;
+    absorb(index, e.contrib);
+  }
+  return { index, rebuilt: true };
+}
+
 // ── Cache ──────────────────────────────────────────────────────────────────
 
-export async function loadIndex(cacheFile: string): Promise<UsageIndex> {
+/**
+ * Load the cache. A cache of another INDEX_VERSION is still discarded, but its
+ * per-file contributions are handed back as `staleFiles`, so the first refresh
+ * can archive the ones whose transcript no longer exists. Discarding them
+ * outright is what halved the wall in 0.9.13.
+ */
+export async function loadIndex(
+  cacheFile: string,
+): Promise<{ index: UsageIndex; staleFiles: Record<string, FileContribution> }> {
   try {
     const text = await fs.readFile(cacheFile, 'utf8');
     const parsed = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as UsageIndex;
-    if (parsed?.version !== INDEX_VERSION) return emptyIndex();
+    if (parsed?.version !== INDEX_VERSION) {
+      const staleFiles: Record<string, FileContribution> = {};
+      for (const [p, e] of Object.entries(parsed?.files ?? {})) {
+        if (e?.contrib?.cv === CONTRIB_VERSION) staleFiles[p] = e.contrib;
+      }
+      return { index: emptyIndex(), staleFiles };
+    }
     // Shallow-heal anything a hand edit or partial write could have removed.
-    return { ...emptyIndex(), ...parsed };
+    const { pendingStale, ...rest } = parsed;
+    return { index: { ...emptyIndex(), ...rest }, staleFiles: pendingStale ?? {} };
   } catch {
-    return emptyIndex();
+    return { index: emptyIndex(), staleFiles: {} };
   }
 }
 

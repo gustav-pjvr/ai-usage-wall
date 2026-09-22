@@ -54,6 +54,13 @@ export interface Achieved {
 export interface Ledger {
   v: 1;
   seededAt: string;
+  /**
+   * The reconstructed history seed this ledger has already absorbed, by its
+   * creation time. A seed can put the totals past rungs the live index never
+   * reached; those are recorded silently as "earlier", exactly like the first
+   * run, and never announced. See docs/design/history-archive.md section 5.
+   */
+  seededHistoryAt?: string;
   achieved: Record<string, Achieved>;
   /** Keys announced but not yet seen. The badge is its length. */
   unseen: string[];
@@ -141,14 +148,16 @@ export function evaluate(
   input: MilestoneInput,
   ledger: Ledger | null,
   now: number = Date.now(),
+  silent = false,
 ): { ledger: Ledger; fresh: Achieved[]; changed: boolean } {
   const at = new Date(now).toISOString();
-  const seeding = ledger === null;
+  // `silent`: a pass that must record without announcing (a history seed arriving).
+  const seeding = ledger === null || silent;
   const next: Ledger = ledger
     ? { ...ledger, achieved: { ...ledger.achieved }, unseen: [...ledger.unseen] }
     : { v: 1, seededAt: at, achieved: {}, unseen: [] };
   const fresh: Achieved[] = [];
-  let changed = seeding;
+  let changed = ledger === null;
 
   for (const c of crossed(input)) {
     if (next.achieved[c.key]) continue;

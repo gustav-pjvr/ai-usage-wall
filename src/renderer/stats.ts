@@ -22,6 +22,7 @@ import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
 /** Minutes in the velocity window, for turning the rate back into a total. */
 const VELOCITY_WINDOW_MIN = VELOCITY_WINDOW_MS / 60_000;
 import type { UsageIndex, TokenTotals } from '../main/data/usage';
+import type { HistorySummary } from '../shared/usage-merge';
 import type { ProjectionStatus } from '../main/projection';
 import type { ScreenStatus } from '../main/projection/screen';
 
@@ -35,6 +36,17 @@ export function compact(n: number): string {
   if (a >= 1e6) return `${(n / 1e6).toFixed(a >= 1e7 ? 1 : 2)}M`;
   if (a >= 1e4) return `${(n / 1e3).toFixed(0)}K`;
   return n.toLocaleString('en-US');
+}
+
+/** The history block the main process attaches (src/shared/usage-merge.ts), if any. */
+function historyOf(idx: UsageIndex): HistorySummary | null {
+  return (idx as unknown as { history?: HistorySummary }).history ?? null;
+}
+
+/** Transcripts no longer on disk whose numbers the wall kept: archived exactly, or reconstructed. */
+function archivedCount(idx: UsageIndex): number {
+  const h = historyOf(idx);
+  return h ? h.archivedFiles + h.reconstructedFiles : 0;
 }
 
 /**
@@ -624,6 +636,8 @@ export class StatsView {
     const heroMeta = el('div', 'hero-meta');
     heroMeta.appendChild(el('span', 'hero-exact', ''));
     heroMeta.appendChild(el('span', 'hero-sub', 'across every session on this machine'));
+    // Said, not hidden: part of the total is reconstructed (rule 12). Empty otherwise.
+    heroMeta.appendChild(el('span', 'hero-hist', ''));
     heroBody.appendChild(heroMeta);
 
     /*
@@ -801,6 +815,7 @@ export class StatsView {
     // Projects.
     const projects = panel('Top projects', 'measured', 'panel-projects');
     projects.appendChild(el('div', 'chart-slot chart-projects'));
+    projects.appendChild(el('div', 'chart-legend proj-foot', ''));
     grid.appendChild(projects);
 
     this.root.appendChild(grid);
@@ -1003,7 +1018,8 @@ export class StatsView {
     const animate = this.mounted;
     this.odos.total.set(totalOf(t), animate);
     this.odos.requests.set(t.requests, animate);
-    this.odos.sessions.set(Object.keys(idx.sessions).length, animate);
+    // Sessions known only as a count from reconstructed history are added, never invented.
+    this.odos.sessions.set(Object.keys(idx.sessions).length + (historyOf(idx)?.reconstructedSessions ?? 0), animate);
     this.odos.prompts.set(idx.prompts.total, animate);
     this.odos.days.set(Object.keys(idx.daily).length, animate);
     this.odos.output.set(t.output, animate);
@@ -1015,6 +1031,14 @@ export class StatsView {
 
     const exact = this.root.querySelector('.hero-exact');
     if (exact) exact.textContent = `${full(totalOf(t))} tokens`;
+    const hist = historyOf(idx);
+    const rebuilt = hist ? totalOf(hist.reconstructed) : 0;
+    const histNode = this.root.querySelector('.hero-hist');
+    if (histNode) {
+      histNode.textContent = rebuilt > 0
+        ? `includes ${compact(rebuilt)} tokens reconstructed from ${hist?.reconstructedFrom ?? 'an earlier snapshot'}`
+        : '';
+    }
 
     // Composition, so the headline cannot be mistaken for consumption.
     const grand = totalOf(t) || 1;
@@ -1199,6 +1223,15 @@ export class StatsView {
 
     const pslot = this.root.querySelector('.chart-projects');
     if (pslot) pslot.replaceChildren(breakdown(projects, 5, this.tip));
+    // Reconstructed history that could not be tied to a project is stated, not spread.
+    const foot = this.root.querySelector('.proj-foot');
+    const orphan = historyOf(idx)?.unattributedTokens ?? 0;
+    const grand = totalOf(idx.totals);
+    if (foot) {
+      foot.textContent = orphan > 0 && grand > 0
+        ? `${((orphan / grand) * 100).toFixed(orphan / grand < 0.01 ? 2 : 1)}% of tokens are in archived history with no project`
+        : '';
+    }
   }
 
   /**
@@ -1292,7 +1325,9 @@ export class StatsView {
       '.status-source',
       idx.unavailable
         ? `SOURCE UNAVAILABLE  ${idx.unavailableReason ?? ''}`
-        : `${full(fileCount)} transcripts indexed`,
+        : archivedCount(idx) > 0
+          ? `${full(fileCount)} transcripts on disk, ${full(archivedCount(idx))} archived`
+          : `${full(fileCount)} transcripts indexed`,
     );
     set('.status-scan', `scan ${idx.lastScanMs}ms`);
     set('.status-ver', idx.latest.version ? `claude code ${idx.latest.version}` : '');

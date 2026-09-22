@@ -5,7 +5,7 @@
 Counts below were produced by running the suites on that date.
 **Primary sources:** `test/run.mjs`, `test/projection.test.mjs`,
 `test/projection-crypto.test.mjs`, `test/stats-projection.test.mjs`,
-`test/usage-append.test.mjs`, `test/chat.test.mjs`, `test/pricing.test.mjs`,
+`test/usage-append.test.mjs`, `test/usage-history.test.mjs`, `test/chat.test.mjs`, `test/pricing.test.mjs`,
 `test/settings.test.mjs`, `test/constellation.test.mjs`, `test/milestones.test.mjs`,
 `test/timelapse.test.mjs`, `test/projection-e2e.cjs`, `test/render-fit.cjs`, `package.json`
 
@@ -47,19 +47,20 @@ npm run test:render   # electron test/render-fit.cjs, opens a real window
 | `test/projection-crypto.test.mjs` | 37 | 0 failed |
 | `test/stats-projection.test.mjs` | 28 | 0 failed |
 | `test/usage-append.test.mjs` | 10 | 0 failed |
+| `test/usage-history.test.mjs` | 40 | 0 failed |
 | `test/chat.test.mjs` | 43 | 0 failed |
 | `test/pricing.test.mjs` | 23 | 0 failed |
 | `test/settings.test.mjs` | 34 | 0 failed |
 | `test/constellation.test.mjs` | 38 | 0 failed |
 | `test/milestones.test.mjs` | 38 | 0 failed |
 | `test/timelapse.test.mjs` | 23 | 0 failed |
-| **total** | **372** | |
+| **total** | **412** | |
 
 And `npm run test:render`, separately, because it needs a window:
 
 | Suite | Checks | Result |
 |---|---|---|
-| `test/render-fit.cjs` | 143 | 0 failed |
+| `test/render-fit.cjs` | 167 | 0 failed |
 
 Two practical notes:
 

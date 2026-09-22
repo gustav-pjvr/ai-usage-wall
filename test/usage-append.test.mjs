@@ -183,9 +183,9 @@ console.log('\nindex version 4: per-project hours and local active days');
 
   const cache = path.join(tmp, 'v3-cache.json');
   await fs.writeFile(cache, JSON.stringify({ ...index, version: 3 }), 'utf8');
-  const loaded = await loadIndex(cache);
+  const { index: loaded } = await loadIndex(cache);
   ok('a version 3 cache is discarded, so the new fields are built from scratch',
-     loaded.version === 4 && Object.keys(loaded.projectHourly).length === 0 && loaded.totals.requests === 0);
+     loaded.version === require(out).INDEX_VERSION && Object.keys(loaded.projectHourly).length === 0 && loaded.totals.requests === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

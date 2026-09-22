@@ -30,7 +30,7 @@ const ok = (name, cond, detail = '') => {
   else { fail++; console.log(`  FAIL  ${name}${detail ? '  ->  ' + detail : ''}`); }
 };
 
-const { projectionPill, cleanLabel } = await load('src/renderer/stats.ts');
+const { projectionPill, cleanLabel, projectLabels } = await load('src/renderer/stats.ts');
 
 const now = Date.now();
 const screen = (phase, extra = {}) => ({
@@ -96,6 +96,31 @@ ok('zero-width characters are dropped', cleanLabel('Gus\u200Btav\u2060-PC\uFEFF'
 ok('control characters are dropped', cleanLabel('Gustav\u0000-PC\n') === 'Gustav-PC');
 ok('an all-invisible label falls back to a name', cleanLabel('\u202E\u200B') === 'the source machine');
 ok('ordinary unicode survives', cleanLabel('B\u00FCro-Rechner \u00E9') === 'B\u00FCro-Rechner \u00E9');
+
+console.log('\nproject labels');
+{
+  const local = projectLabels(
+    ['C:\\Users\\me\\Desktop\\code', 'C:\\Users\\me\\Work\\code', 'C:\\Users\\me\\Desktop\\wall'],
+    false,
+  );
+  ok('a unique folder name is shown alone', local.get('C:\\Users\\me\\Desktop\\wall') === 'wall');
+  ok('a shared folder name gets its parent',
+     local.get('C:\\Users\\me\\Desktop\\code') === 'Desktop / code' &&
+     local.get('C:\\Users\\me\\Work\\code') === 'Work / code',
+     JSON.stringify([...local]));
+
+  // On a screen the names arrive ALREADY labelled. Running the rule again split
+  // "Desktop / code" on its own slash and rebuilt it as "Desktop  /  code".
+  const onScreen = projectLabels(['Desktop / code', 'Work / code', 'wall'], true);
+  ok('a screen shows a disambiguated label intact', onScreen.get('Desktop / code') === 'Desktop / code',
+     JSON.stringify(onScreen.get('Desktop / code')));
+  ok('and a plain one unchanged', onScreen.get('wall') === 'wall');
+
+  // The regression itself, pinned: relabelling a label is what broke.
+  const relabelled = projectLabels(['Desktop / code', 'Work / code'], false);
+  ok('(relabelling a label really does mangle it, which is why screens skip it)',
+     relabelled.get('Desktop / code') !== 'Desktop / code', JSON.stringify(relabelled.get('Desktop / code')));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await fs.rm(tmp, { recursive: true, force: true });

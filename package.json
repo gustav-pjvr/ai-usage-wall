@@ -12,7 +12,7 @@
     "dev": "node build.mjs --watch",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "node test/run.mjs && node test/projection.test.mjs && node test/projection-crypto.test.mjs && node test/stats-projection.test.mjs && node test/usage-append.test.mjs && node test/chat.test.mjs && node test/pricing.test.mjs",
+    "test": "node test/run.mjs && node test/projection.test.mjs && node test/projection-crypto.test.mjs && node test/stats-projection.test.mjs && node test/usage-append.test.mjs && node test/chat.test.mjs && node test/pricing.test.mjs && node test/settings.test.mjs",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win dir",
     "logo": "electron scripts/logo.mjs",
@@ -20,8 +20,8 @@
     "build:stats": "node build.mjs --edition=stats",
     "start:stats": "npm run build:stats && electron .",
     "package:stats": "npm run build:stats && electron-builder --win --config electron-builder.stats.js",
-    "test:e2e": "electron test/projection-e2e.cjs",
-    "test:render": "npm run build && electron test/render-fit.cjs"
+    "test:e2e": "node --check test/projection-e2e.cjs && electron test/projection-e2e.cjs",
+    "test:render": "npm run build && node --check test/render-fit.cjs && electron test/render-fit.cjs"
   },
   "dependencies": {
     "chokidar": "^4.0.3",

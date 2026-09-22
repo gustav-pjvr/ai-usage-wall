@@ -15,6 +15,7 @@
  */
 
 import { formatCost } from '../shared/pricing';
+import { labelProjects } from '../shared/project-label';
 import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
 
 /** Minutes in the velocity window, for turning the rate back into a total. */
@@ -111,6 +112,25 @@ const totalOf = (t: TokenTotals) => t.input + t.output + t.cacheCreate + t.cache
  * else entirely, so control and direction-forcing characters are dropped at
  * this boundary rather than trusted to have been dropped upstream.
  */
+/**
+ * The label each project row shows.
+ *
+ * This used to be a second hand-written copy of `labelProjects`, kept in step
+ * with src/shared/project-label.ts by nothing but care. It is now the shared
+ * function, so the local wall and a paired screen cannot drift apart.
+ *
+ * `alreadyLabelled` is the part that was a real bug in BOTH copies. A screen
+ * receives labels, not paths: the source ran them through the rule before they
+ * crossed the wire. Running the rule again split a disambiguated label such as
+ * "Desktop / code" on its own slash and rebuilt it as "Desktop  /  code", with
+ * the spaces doubled, and a lone one came out as " code". Measured, not
+ * assumed: the stats-projection suite pins it.
+ */
+export function projectLabels(paths: string[], alreadyLabelled: boolean): Map<string, string> {
+  if (alreadyLabelled) return new Map(paths.map((p) => [p, p]));
+  return labelProjects(paths);
+}
+
 export function cleanLabel(label: string): string {
   const cleaned = label.replace(/[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, '').trim();
   return cleaned || 'the source machine';
@@ -1091,24 +1111,17 @@ export class StatsView {
      * in the same segment, which listed "Travel Game" twice with different
      * numbers. Fall back to parent/child for any name that is not unique.
      */
-    const segsOf = (p: string) => p.split(/[\\/]/).filter(Boolean);
     // The map key is lowercased so a path recorded with a different drive-letter
     // case groups as one project. `display` carries the original casing, which
     // is what a person should actually read.
     const entries = Object.entries(idx.projects).map(([key, v]) => ({ path: v.display || key, v }));
-    const leafCounts = new Map<string, number>();
-    for (const e of entries) {
-      const leaf = (segsOf(e.path).pop() || e.path).toLowerCase();
-      leafCounts.set(leaf, (leafCounts.get(leaf) || 0) + 1);
-    }
+    const labels = projectLabels(
+      entries.map((e) => e.path),
+      this.projection.role === 'screen',
+    );
     const projects = entries
       .map(({ path: p, v }) => {
-        const segs = segsOf(p);
-        const leaf = segs.pop() || p;
-        const label =
-          (leafCounts.get(leaf.toLowerCase()) || 0) > 1 && segs.length
-            ? `${segs[segs.length - 1]} / ${leaf}`
-            : leaf;
+        const label = labels.get(p) ?? p;
         return {
           label,
           value: totalOf(v),

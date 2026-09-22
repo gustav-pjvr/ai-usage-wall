@@ -35,6 +35,32 @@
  */
 
 const { app, BrowserWindow, ipcMain } = require('electron');
+
+/*
+ * A crash must END the run, never park it behind a dialog.
+ *
+ * Electron's default for an uncaught exception in the main process is a modal
+ * "A JavaScript error occurred" box that waits for a click. On 2026-09-08 a
+ * broken test did exactly that and left two whole Electron process trees, GPU
+ * and network helpers included, sitting on Gustav's desktop until he noticed.
+ *
+ * Three layers, because each covers a case the others cannot:
+ *   1. these handlers, for anything thrown or rejected once the file is running;
+ *   2. a watchdog, for a run that hangs without throwing;
+ *   3. `node --check` in the npm script, for a SYNTAX error, which stops the
+ *      file before line one and so before any handler here exists.
+ */
+const die = (what, err) => {
+  console.error(`\n  FATAL  ${what}: ${err && err.stack ? err.stack : err}`);
+  // app.exit before the app is ready ends in a segfault (exit 139), which reads
+  // like a different failure. Before ready, a plain process exit is the clean one.
+  if (app.isReady()) app.exit(2);
+  else process.exit(2);
+};
+process.on('uncaughtException', (err) => die('uncaught exception', err));
+process.on('unhandledRejection', (err) => die('unhandled rejection', err));
+const WATCHDOG_MS = 240000;
+setTimeout(() => die('watchdog', new Error(`still running after ${WATCHDOG_MS / 1000}s`)), WATCHDOG_MS).unref();
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');

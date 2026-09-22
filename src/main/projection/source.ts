@@ -22,7 +22,7 @@ import { forgetPeer, markDelivered, recordIncoming, recordOutgoing, takeOutbox }
 import type { KeyObject } from 'node:crypto';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { toWire, type ProjectedUsage } from '../../shared/projection-wire';
+import { frameKey, toWire, type ProjectedUsage } from '../../shared/projection-wire';
 import { CODE_TTL_MS, formatCode, generateCode } from '../../shared/pairing-code';
 import { deriveScreenKey, lookupFromStretched, newKeyPair, open, randomBytes, seal, stretchCode, newMessageId } from './crypto';
 import { RelaySocket, type SocketStatus } from './relay-socket';
@@ -97,7 +97,8 @@ export class SourceProjector {
   private timer: NodeJS.Timeout | null = null;
   private beat: NodeJS.Timeout | null = null;
   private latest: ProjectedUsage | null = null;
-  private lastHash = '';
+  /** The last frame sent, minus the fields that change on every build. See frameKey. */
+  private lastKey = '';
   private seq = 0;
   private lastSentAt: number | null = null;
   private lastFrameBytes: number | null = null;
@@ -437,18 +438,21 @@ export class SourceProjector {
 
   private flush(): void {
     if (!this.dirty || !this.latest) return;
-    const json = JSON.stringify(this.latest);
     /*
      * Skip a send when nothing a screen can SEE has changed. The local index
      * changes whenever a byte is appended, but the wire format has offsets and
-     * paths stripped, so many of those changes are invisible downstream.
+     * paths stripped, so many of those changes are invisible downstream, and the
+     * periodic sweep refreshes even when nothing was appended at all.
+     *
+     * This never fired before: see frameKey for why, and for why the old
+     * length-plus-ends comparison could not simply be kept once it did.
      */
-    const hash = `${json.length}:${json.slice(0, 256)}:${json.slice(-256)}`;
-    if (hash === this.lastHash) {
+    const key = frameKey(this.latest);
+    if (key === this.lastKey) {
       this.dirty = false;
       return;
     }
-    this.lastHash = hash;
+    this.lastKey = key;
     this.dirty = false;
     this.lastSend = Date.now();
 
@@ -553,7 +557,7 @@ export class SourceProjector {
   /** Settings changed under us, e.g. the share-project-names toggle. */
   update(state: SourceState): void {
     this.state = state;
-    this.lastHash = ''; // force the next frame through
+    this.lastKey = ''; // force the next frame through
     this.dirty = true;
     this.schedule();
   }

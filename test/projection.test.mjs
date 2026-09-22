@@ -44,7 +44,7 @@ const ok = (name, cond, detail = '') => {
   }
 };
 
-const { toWire, fromWire, WIRE_VERSION } = await load('src/shared/projection-wire.ts');
+const { toWire, fromWire, frameKey, WIRE_VERSION } = await load('src/shared/projection-wire.ts');
 const { labelProjects } = await load('src/shared/project-label.ts');
 
 /*
@@ -199,6 +199,35 @@ console.log('\nproject labels');
   ok('labelling depends on the set, not the order',
      JSON.stringify([...labelProjects([...paths].reverse())].sort()) ===
        JSON.stringify([...m].sort()));
+}
+
+console.log('\nprojection: skipping frames a screen would not see change');
+{
+  const opts = { shareProjectNames: true, sourceLabel: 'Main machine', indexing: false };
+  const a = toWire(index, { ...opts, sentAt: 1_000 });
+  const b = toWire({ ...index, lastScanMs: 97, builtAt: '2026-09-22T10:00:00.000Z' }, { ...opts, sentAt: 2_000 });
+
+  // The bug: sentAt sits in the first 40 characters, so the whole-frame
+  // comparison never matched and the skip never fired.
+  ok('two builds of the same data differ as whole frames (why the old skip never fired)',
+     JSON.stringify(a) !== JSON.stringify(b));
+  ok('but have the same frame key, so the send is skipped', frameKey(a) === frameKey(b));
+
+  // The trap the fix had to avoid: a change in the middle of the frame that
+  // keeps the length. The old length-plus-ends "hash" could not see it.
+  const before = structuredClone(a);
+  const after = structuredClone(a);
+  const day = Object.keys(before.daily)[0];
+  before.daily[day].output = 1000;
+  after.daily[day].output = 1001;
+  ok('(fixture check: the change keeps the frame the same length)',
+     JSON.stringify(before).length === JSON.stringify(after).length);
+  ok('a same-length change in the middle of the frame changes the key', frameKey(before) !== frameKey(after));
+
+  const liveChange = toWire({ ...index, recent: [...index.recent, [Date.now(), 5, 1]] }, opts);
+  ok('new live records change the key', frameKey(a) !== frameKey(liveChange));
+  ok('toggling project names changes the key',
+     frameKey(a) !== frameKey(toWire(index, { ...opts, shareProjectNames: false })));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

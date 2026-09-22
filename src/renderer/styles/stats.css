@@ -230,13 +230,6 @@
   color: oklch(0.66 0.015 230);
 }
 
-/* Reconstructed history, said plainly under the headline (rule 12). */
-.hero-hist {
-  font-size: max(8px, calc(var(--u) * 11));
-  line-height: 1.35;
-  color: oklch(0.72 0.09 75);
-}
-.hero-hist:empty,
 .proj-foot:empty {
   display: none;
 }

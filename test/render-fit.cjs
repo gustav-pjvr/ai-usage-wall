@@ -509,8 +509,9 @@ app.whenReady().then(async () => {
     ok(`${size.label}   status strip inside the view (${r.stripOver}px past)`, r.stripOver <= 1);
     ok(`${size.label}   mode switch clears the panels (${r.switchOver}px into them)`, r.switchOver <= 0);
 
-    // Reconstructed history must be SAID wherever the total is shown (rule 12):
-    // present, painted, and inside its own panel at every size.
+    // Reconstructed history is disclosed by the strip's archived count and the
+    // projects footnote (rule 12). Gustav removed the hero caption as noise on
+    // 2026-09-22; these two are what carry it, so they are measured here.
     const hist = await win.webContents.executeJavaScript(`(() => {
       const shown = (sel, panelSel) => {
         const n = document.querySelector(sel), p = document.querySelector(panelSel);
@@ -518,11 +519,9 @@ app.whenReady().then(async () => {
         const r = n.getBoundingClientRect(), b = p.getBoundingClientRect();
         return { text: n.textContent, inside: r.width > 0 && r.height > 0 && r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.bottom <= b.bottom + 0.5 };
       };
-      return { cap: shown('.hero-hist', '.panel-hero'), foot: shown('.proj-foot', '.panel-projects'),
+      return { foot: shown('.proj-foot', '.panel-projects'),
                strip: (document.querySelector('.status-source') || {}).textContent || '' };
     })()`);
-    ok(`${size.label}   reconstructed history is captioned under the total ("${hist.cap.text}")`,
-       /reconstructed from a snapshot/.test(hist.cap.text) && hist.cap.inside);
     ok(`${size.label}   unattributed history is footnoted on the projects panel`, /no project/.test(hist.foot.text) && hist.foot.inside, hist.foot.text);
     ok(`${size.label}   the strip counts archived transcripts ("${hist.strip}")`, /463 transcripts on disk, 361 archived/.test(hist.strip));
 

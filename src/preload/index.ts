@@ -34,6 +34,8 @@ const api = {
     return () => ipcRenderer.removeListener('wall:update', listener);
   },
   installUpdate: () => ipcRenderer.invoke('wall:installUpdate'),
+  /** Clear the milestone badge, after the list has been opened. */
+  milestonesSeen: () => ipcRenderer.invoke('wall:milestonesSeen'),
   /** Borrow keyboard focus while the notes bar has an open edit. */
   notesEdit: (active: boolean) => ipcRenderer.invoke('wall:notesEdit', active),
   onState: (cb: (state: unknown) => void) => {

@@ -23,8 +23,12 @@
  */
 
 import { labelProjects } from './project-label';
+import { buildLinks, type Link } from './constellation';
 
 export const WIRE_VERSION = 1;
+
+/** The most constellation links a frame carries. See toWire. */
+export const MAX_WIRE_LINKS = 300;
 
 export interface WireTotals {
   input: number;
@@ -81,6 +85,17 @@ export interface ProjectedUsage {
    * data it is only displaying.
    */
   peak?: { velocity: number; at: string } | null;
+  /**
+   * The constellation's links: [labelA, labelB, sharedDays]. LABELS ONLY, the
+   * same masked labels as `projects`, and empty whenever project names are not
+   * shared. A screen cannot derive these itself, because the sessions it
+   * receives have their working directory stripped (rule 26). Computed on the
+   * source, so "same day" means the SOURCE's local day.
+   *
+   * Optional: a screen older than this field ignores it, and a newer screen
+   * talking to an older source gets no links rather than an error.
+   */
+  projectLinks?: Link[];
 }
 
 /**
@@ -157,12 +172,15 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
    * too, because the renderer reads `display` and must never see a path.
    */
   const projects: ProjectedUsage['projects'] = {};
+  /** Project key (the lowercased cwd) to the label that goes on the wire. */
+  const labelOfKey = new Map<string, string>();
   if (opts.shareProjectNames) {
     const raw = Object.entries(idx.projects ?? {}) as [string, any][];
     const paths = raw.map(([key, v]) => (typeof v?.display === 'string' && v.display) || key);
     const labels = labelProjects(paths);
     raw.forEach(([key, v], i) => {
       const label = maskHome(labels.get(paths[i]) ?? `project ${i + 1}`, opts.homeDirName);
+      labelOfKey.set(key, label);
       // Two paths can label the same only if they are genuinely the same
       // folder name in the same parent, so fold rather than overwrite.
       const existing = projects[label];
@@ -256,6 +274,14 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
     // The real reason names the path that failed to read. It is replaced with a
     // fixed string rather than omitted, so the screen can still say something.
     ...(idx.unavailable ? { unavailableReason: 'the source cannot read its transcripts' } : {}),
+    // Only ever built from labelOfKey, which is empty when names are not
+    // shared, so an unshared source sends an empty list and never a path.
+    // Capped: a busy source with years of history could otherwise put tens of
+    // thousands of pairs in every frame. The screen draws at most 40 stars, and
+    // buildLinks returns the strongest first, so the cap loses nothing drawn.
+    projectLinks: opts.shareProjectNames
+      ? buildLinks(Object.values(idx.sessions ?? {}) as any[], (cwd) => labelOfKey.get(cwd.toLowerCase()) ?? null).slice(0, MAX_WIRE_LINKS)
+      : [],
   };
 }
 
@@ -320,6 +346,14 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
     indexing: w.indexing,
     unavailable: w.unavailable,
     peak: w.peak ?? null,
+    // Re-validated on arrival: the frame decrypted, but a source on another
+    // version could still send a malformed list, and the renderer draws from it.
+    projectLinks: Array.isArray(w.projectLinks)
+      ? w.projectLinks.filter(
+          (l): l is Link =>
+            Array.isArray(l) && typeof l[0] === 'string' && typeof l[1] === 'string' && Number.isFinite(l[2]),
+        )
+      : [],
     ...(w.unavailableReason ? { unavailableReason: w.unavailableReason } : {}),
   };
 }

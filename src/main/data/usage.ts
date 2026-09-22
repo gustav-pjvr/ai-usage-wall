@@ -44,6 +44,7 @@
 import type { PeakVelocity } from '../../shared/velocity';
 import { promises as fs, createReadStream } from 'node:fs';
 import { costOf } from '../../shared/pricing';
+import { localDayKey } from '../../shared/day';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as readline from 'node:readline';
@@ -57,8 +58,13 @@ export const CLAUDE_HOME = process.env.MBW_CLAUDE_HOME || path.join(os.homedir()
 const PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
 
-/** Bump when the aggregate shape changes, to invalidate old caches. */
-const INDEX_VERSION = 3;
+/**
+ * Bump when the aggregate shape changes, to invalidate old caches.
+ *
+ * 4 (2026-09-22): `projectHourly` and `activeDays`, for the work time-lapse and
+ * the streak milestone. One cold reindex on first launch after the update.
+ */
+const INDEX_VERSION = 4;
 
 /** Hourly buckets are kept for this many days. Daily buckets are kept forever. */
 const HOURLY_DAYS = 14;
@@ -113,6 +119,26 @@ export interface UsageIndex {
   sessions: Record<string, SessionInfo>;
   /** [epochMs, totalTokens, outputTokens] for the most recent records. */
   recent: [number, number, number][];
+  /**
+   * Per project, per UTC hour: [requests, totalTokens, outputTokens].
+   *
+   * The work time-lapse replays today project by project, and nothing else in
+   * the index knows WHICH project was busy in which hour. Spreading a session's
+   * tokens evenly across its span would be inventing a shape, so this is
+   * measured at ingest instead. Keyed like `hourly` (UTC hour, then the same
+   * lowercased cwd key as `projects`) and pruned with it, so it stays small.
+   */
+  projectHourly: Record<string, Record<string, [number, number, number]>>;
+  /**
+   * LOCAL calendar days with at least one request, and how many.
+   *
+   * `daily` is keyed by the UTC date and deliberately stays that way. The
+   * streak milestone needs the day on the wall's own clock, and sessions cannot
+   * stand in for it: a resumed session keeps its id, so its start and end can
+   * be weeks apart and every day between would silently vanish from a streak.
+   * Kept forever, like `daily`; it is one number per day.
+   */
+  activeDays: Record<string, number>;
   prompts: { total: number; daily: Record<string, number>; lastAt: string | null; offset: number; size: number };
   latest: { ts: string | null; model: string | null; sessionId: string | null; version: string | null; cwd: string | null };
   /** Wall-clock ms of parse work in the last refresh. */
@@ -166,6 +192,8 @@ export function emptyIndex(): UsageIndex {
     projects: {},
     sessions: {},
     recent: [],
+    projectHourly: {},
+    activeDays: {},
     prompts: { total: 0, daily: {}, lastAt: null, offset: 0, size: 0 },
     latest: { ts: null, model: null, sessionId: null, version: null, cwd: null },
     lastScanMs: 0,
@@ -328,6 +356,19 @@ async function ingestFile(index: UsageIndex, file: string, fromOffset: number, s
           const hour = ts.slice(0, 13);
           index.hourly[hour] ??= emptyTotals();
           addInto(index.hourly[hour], rec);
+
+          if (typeof o.cwd === 'string') {
+            const bucket = (index.projectHourly[hour] ??= {});
+            const cell = (bucket[o.cwd.toLowerCase()] ??= [0, 0, 0]);
+            cell[0] += 1;
+            cell[1] += rec.input + rec.output + rec.cacheCreate + rec.cacheRead;
+            cell[2] += rec.output;
+          }
+        }
+
+        if (Number.isFinite(tsMs)) {
+          const day = localDayKey(tsMs);
+          index.activeDays[day] = (index.activeDays[day] || 0) + 1;
         }
 
         if (Number.isFinite(tsMs)) {
@@ -428,6 +469,7 @@ function prune(index: UsageIndex): void {
   }
   const cutoff = new Date(Date.now() - HOURLY_DAYS * 86_400_000).toISOString().slice(0, 13);
   for (const k of Object.keys(index.hourly)) if (k < cutoff) delete index.hourly[k];
+  for (const k of Object.keys(index.projectHourly)) if (k < cutoff) delete index.projectHourly[k];
 }
 
 /**

@@ -16,6 +16,7 @@
 
 import { formatCost } from '../shared/pricing';
 import { labelProjects } from '../shared/project-label';
+import { ConstellationPanel } from './constellation';
 import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
 
 /** Minutes in the velocity window, for turning the rate back into a total. */
@@ -415,9 +416,33 @@ class Tooltip {
     target.addEventListener('pointerleave', () => this.node.classList.remove('is-on'));
   }
 
+  /**
+   * Show at a point rather than over an element. The constellation's stars are
+   * drawn on a canvas, so there is no element per star to attach to.
+   */
+  showAt(x: number, y: number, title: string, rows: [string, string][]): void {
+    this.node.replaceChildren();
+    this.node.appendChild(el('div', 'tip-title', title));
+    for (const [k, v] of rows) {
+      const r = el('div', 'tip-row');
+      r.appendChild(el('span', 'tip-k', k));
+      r.appendChild(el('span', 'tip-v', v));
+      this.node.appendChild(r);
+    }
+    this.node.classList.add('is-on');
+    this.placeRect({ left: x, right: x, top: y, bottom: y, width: 0 });
+  }
+
+  hide(): void {
+    this.node.classList.remove('is-on');
+  }
+
   /** Above the target, clamped inside the viewport so it never runs off-screen. */
   private position(target: HTMLElement): void {
-    const r = target.getBoundingClientRect();
+    this.placeRect(target.getBoundingClientRect());
+  }
+
+  private placeRect(r: { left: number; right: number; top: number; bottom: number; width: number }): void {
     const t = this.node.getBoundingClientRect();
     const margin = 8;
     let left = r.left + r.width / 2 - t.width / 2;
@@ -568,6 +593,10 @@ export class StatsView {
   readonly root: HTMLElement;
   private canvas = new ActivityCanvas();
   private tip = new Tooltip();
+  private constellation = new ConstellationPanel(this.tip);
+  private topPanel: 'constellation' | 'throughput' = 'constellation';
+  /** Called when the user flips the top panel, so the choice can be saved. */
+  onTopPanel: ((mode: 'constellation' | 'throughput') => void) | null = null;
   private odos: Record<string, Odometer> = {};
   private mounted = false;
   private visible = false;
@@ -581,6 +610,7 @@ export class StatsView {
   constructor() {
     this.root = el('div', 'stats');
     this.build();
+    this.setTopPanel(this.topPanel);
   }
 
   private build(): void {
@@ -617,8 +647,30 @@ export class StatsView {
     hero.appendChild(heroBody);
     grid.appendChild(hero);
 
-    // Live activity.
-    const live = panel('Live throughput', 'measured', 'panel-live');
+    /*
+     * The top row's big panel holds two things: the project constellation and
+     * the live throughput trace. Gustav asked for the constellation to take the
+     * place of the trace without losing it, so the header carries a two-way
+     * toggle, remembered in settings.topPanel. Only the visible one does work:
+     * the trace's animation loop stops while the sky is showing, and the sky
+     * only ever repaints on data or size changes.
+     */
+    const live = panel('Constellation', 'measured', 'panel-live');
+    const switcher = el('div', 'panel-toggle');
+    switcher.setAttribute('role', 'tablist');
+    for (const [mode, label] of [['constellation', 'Constellation'], ['throughput', 'Live']] as const) {
+      const b = el('button', 'panel-toggle-btn', label);
+      b.type = 'button';
+      b.dataset.mode = mode;
+      b.addEventListener('click', () => {
+        this.setTopPanel(mode);
+        this.onTopPanel?.(mode);
+      });
+      switcher.appendChild(b);
+    }
+    live.querySelector('.panel-head')!.insertBefore(switcher, live.querySelector('.panel-head .tag'));
+    live.appendChild(this.constellation.node);
+
     const liveWrap = el('div', 'live-wrap');
     liveWrap.appendChild(this.canvas.node);
     const liveFoot = el('div', 'live-foot');
@@ -857,7 +909,8 @@ export class StatsView {
     if (v === this.visible) return;
     this.visible = v;
     if (v) {
-      this.canvas.start();
+      if (this.topPanel === 'throughput') this.canvas.start();
+      this.constellation.setShown(this.topPanel === 'constellation');
       if (!this.clockTimer) {
         // Only the relative-time labels need a clock, and once every 20s is
         // plenty for "3m ago". Nothing else polls.
@@ -868,6 +921,7 @@ export class StatsView {
       }
     } else {
       this.canvas.stop();
+      this.constellation.setShown(false);
       if (this.clockTimer) {
         window.clearInterval(this.clockTimer);
         this.clockTimer = 0;
@@ -1007,6 +1061,7 @@ export class StatsView {
     }
 
     this.canvas.update(idx, d.intensity);
+    this.constellation.update(idx as never, projection.role === 'screen');
 
     // Charts are rebuilt only when their inputs actually changed, so a refresh
     // during an active session does not restart every bar animation.
@@ -1314,6 +1369,28 @@ export class StatsView {
         );
     }
     set('.nodata-path', screen.reason ?? '');
+  }
+
+  /**
+   * Show the constellation or the live trace in the top row's big panel.
+   * Idempotent, so a state push repeating the saved choice costs nothing.
+   */
+  setTopPanel(mode: 'constellation' | 'throughput'): void {
+    this.topPanel = mode;
+    const live = this.root.querySelector('.panel-live');
+    if (!live) return;
+    live.setAttribute('data-top', mode);
+    const title = live.querySelector('.panel-title');
+    if (title) title.textContent = mode === 'constellation' ? 'Constellation' : 'Live throughput';
+    for (const b of live.querySelectorAll<HTMLButtonElement>('.panel-toggle-btn')) {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-selected', String(on));
+    }
+    const showSky = mode === 'constellation';
+    this.constellation.setShown(showSky && this.visible);
+    if (showSky || !this.visible) this.canvas.stop();
+    else this.canvas.start();
   }
 
   destroy(): void {

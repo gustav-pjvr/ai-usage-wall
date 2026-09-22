@@ -78,6 +78,7 @@ const SHOTS = process.env.CSW_SHOTS || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
 const saved = [];
+let seenCalls = 0;
 let pass = 0;
 let fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -172,11 +173,30 @@ function fixture(emptyIndex) {
     'r4tw-website-production',
     'kickstart-football-migration',
   ];
+  // Keyed like the real index: the lowercased cwd, with the original casing in
+  // `display`. Uppercase keys here once meant the active project and the links
+  // were never exercised, because nothing could find them by the real key.
+  // Sizes spread across the log buckets so every star size is drawn.
+  const scales = [1, 0.4, 0.12, 0.05, 0.012, 0.004];
   projects.forEach((name, i) => {
-    idx.projects[`C:\\Users\\HP 865 G10\\Desktop\\Claude WorkSpace\\${name}`] = {
-      ...t(9_000_000 - i * 900_000, 11_000_000, 130_000_000, 4_600_000_000, 12_000, 240.5 - i * 30),
-      lastSeen: new Date(now - i * 3_600_000).toISOString(),
-      display: name,
+    const cwd = `C:\\Users\\HP 865 G10\\Desktop\\Claude WorkSpace\\${name}`;
+    const k = scales[i];
+    idx.projects[cwd.toLowerCase()] = {
+      ...t(9_000_000 * k, 11_000_000 * k, 130_000_000 * k, 4_600_000_000 * k, 12_000, 240.5 - i * 30),
+      lastSeen: new Date(now - i * 2 * 86_400_000).toISOString(),
+      display: cwd,
+    };
+    // Sessions landing on shared days, so the sky has links to draw.
+    const start = now - (i % 3) * 86_400_000;
+    idx.sessions[`s${i}`] = {
+      id: `s${i}`,
+      start: new Date(start).toISOString(),
+      end: new Date(start + 3_600_000).toISOString(),
+      requests: 100,
+      output: 1000,
+      total: 1e6,
+      cwd,
+      models: ['claude-opus-5'],
     };
   });
 
@@ -192,7 +212,38 @@ function fixture(emptyIndex) {
 
   idx.prompts = { total: 4_812, daily: {}, lastAt: new Date(now - 90_000).toISOString(), offset: 0, size: 0 };
   idx.peak = { velocity: 26_400_000, at: new Date(now - 3 * 86_400_000).toISOString() };
-  idx.sessions = {};
+
+  // Today's work, per project per hour, keyed by UTC hour exactly as usage.ts
+  // writes it. Up to seven local hours ending now, so the replay has a real
+  // span whatever time of day the suite runs.
+  const cur = new Date(now);
+  const nowHour = cur.getHours();
+  for (let h = Math.max(0, nowHour - 6); h <= nowHour; h++) {
+    const key = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate(), h).toISOString().slice(0, 13);
+    idx.projectHourly[key] = {};
+    projects.slice(0, 3).forEach((name, i) => {
+      if ((h + i) % 3 === 0 && h !== nowHour) return; // not every project every hour
+      const cwd = `C:\\Users\\HP 865 G10\\Desktop\\Claude WorkSpace\\${name}`.toLowerCase();
+      idx.projectHourly[key][cwd] = [40, 30_000_000 * (i + 1), 200_000];
+    });
+  }
+
+  // A ledger as the main process would hand it over: one unseen, one dated,
+  // one seeded, with the longest titles the ladders can produce.
+  idx.milestones = {
+    achieved: [
+      { key: 'processed:25B', title: '25B tokens processed', sub: 'as the headline counts them, mostly cache reads', at: new Date(now).toISOString(), seeded: false },
+      { key: 'model:claude-haiku-4-5-20251001', title: 'First use of claude-haiku-4-5-20251001', sub: 'a model this machine had not used before', at: new Date(now - 5 * 86_400_000).toISOString(), seeded: false },
+      { key: 'requests:50K', title: '50K requests', sub: 'assistant replies, all projects', at: new Date(now - 40 * 86_400_000).toISOString(), seeded: true },
+    ],
+    unseen: ['processed:25B'],
+    next: [
+      { title: '50B tokens processed', progress: 0.04, remaining: '23.9B to go' },
+      { title: '100M tokens generated', progress: 0.25, remaining: '37.6M to go' },
+      { title: '100K requests', progress: 0.44, remaining: '27.9K to go' },
+      { title: '30 day streak', progress: 0.5, remaining: '16 days to go' },
+    ],
+  };
   return idx;
 }
 
@@ -373,6 +424,9 @@ app.whenReady().then(async () => {
     saved.push(patch);
   });
   ipcMain.handle('wall:setMode', () => undefined);
+  ipcMain.handle('wall:milestonesSeen', () => {
+    seenCalls++;
+  });
   ipcMain.handle('wall:reload', () => undefined);
   ipcMain.handle('wall:toggleFocus', () => undefined);
   ipcMain.handle('wall:exitFocus', () => undefined);
@@ -443,6 +497,68 @@ app.whenReady().then(async () => {
     ok(`${size.label}   smallest text is legible (>= 8px, on .${r.smallestOn})`, r.smallest >= 8);
     ok(`${size.label}   status strip inside the view (${r.stripOver}px past)`, r.stripOver <= 1);
     ok(`${size.label}   mode switch clears the panels (${r.switchOver}px into them)`, r.switchOver <= 0);
+
+    /*
+     * The constellation draws on a canvas, so the DOM checks above cannot see
+     * its stars or its labels. It exposes the layout it actually painted, and
+     * these check that, not a recomputation of it.
+     */
+    const c = await win.webContents.executeJavaScript(`(() => {
+      const g = window.__cswConstellation && window.__cswConstellation();
+      if (!g || !g.layout) return { missing: true };
+      const W = g.layout.width, H = g.layout.height;
+      const stars = g.layout.stars;
+      const outStar = stars.filter((s) => s.x - s.size / 2 < -0.5 || s.y - s.size / 2 < -0.5 || s.x + s.size / 2 > W + 0.5 || s.y + s.size / 2 > H + 0.5).length;
+      const outLabel = g.labels.filter((l) => l.x < 0 || l.y < 0 || l.x + l.w > W || l.y + l.h > H).length;
+      let overlap = 0;
+      for (let i = 0; i < g.labels.length; i++) for (let j = i + 1; j < g.labels.length; j++) {
+        const a = g.labels[i], b = g.labels[j];
+        if (a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y) overlap++;
+      }
+      // The pulse is a DOM element over the canvas; a layout flag saying "active"
+      // proves nothing about whether the ring is on screen over the right star.
+      const pulse = document.querySelector('.const-pulse');
+      const act = stars.find((s) => s.active);
+      let pulseOk = false;
+      if (pulse && act && !pulse.hidden && getComputedStyle(pulse).display !== 'none') {
+        const pr = pulse.getBoundingClientRect();
+        const cx = g.canvas.x + act.x, cy = g.canvas.y + act.y;
+        pulseOk = pr.width > 0 && Math.abs(pr.x + pr.width / 2 - cx) < 1.5 && Math.abs(pr.y + pr.height / 2 - cy) < 1.5;
+      }
+      return { stars: stars.length, links: g.layout.links.length, labels: g.labels.length, active: stars.filter((s) => s.active).length, pulseOk,
+               outStar, outLabel, overlap, paintMs: g.paintMs, minLabelH: Math.min(...g.labels.map((l) => l.h), 99) };
+    })()`);
+    ok(`${size.label}   constellation drew (${c.stars} stars, ${c.links} links, ${c.labels} labels, paint ${c.paintMs}ms)`,
+       !c.missing && c.stars > 0 && c.links > 0 && c.labels > 0);
+    ok(`${size.label}   every star and label is inside the panel`, c.outStar === 0 && c.outLabel === 0,
+       `${c.outStar} stars and ${c.outLabel} labels outside`);
+    ok(`${size.label}   no two constellation labels overlap`, c.overlap === 0, `${c.overlap} overlapping pairs`);
+    ok(`${size.label}   constellation labels are legible (line ${c.minLabelH}px)`, c.minLabelH >= 10);
+    const act = await win.webContents.executeJavaScript(`(() => {
+      const a = document.querySelector('#wall-actions');
+      if (!a) return { missing: true };
+      const r = a.getBoundingClientRect();
+      const bar = document.querySelector('#notes-bar').getBoundingClientRect();
+      const sw = document.querySelector('#mode-switch').getBoundingClientRect();
+      const top = Math.min(...[...document.querySelectorAll('#view-stats .panel')].map((p) => p.getBoundingClientRect().top));
+      const badge = a.querySelector('.wall-badge');
+      return {
+        inside: r.left >= 0 && r.right <= innerWidth + 0.5 && r.top >= 0,
+        belowBar: r.top >= bar.bottom - 0.5,
+        abovePanels: r.bottom <= top + 0.5,
+        clearOfSwitch: r.left >= sw.right + 4 || r.right <= sw.left - 4,
+        buttons: [...a.querySelectorAll('.wall-action')].filter((b) => getComputedStyle(b).display !== 'none').length,
+        badge: badge && getComputedStyle(badge).display !== 'none' ? badge.textContent : null,
+        fontPx: Math.min(...[...a.querySelectorAll('.wall-action')].map((b) => parseFloat(getComputedStyle(b).fontSize))),
+      };
+    })()`);
+    ok(`${size.label}   Today and Milestones buttons shown, badge reads ${act.badge}`,
+       !act.missing && act.buttons === 2 && act.badge === '1');
+    ok(`${size.label}   the buttons sit under the notes bar, above the panels, clear of the switch`,
+       act.inside && act.belowBar && act.abovePanels && act.clearOfSwitch, JSON.stringify(act));
+    ok(`${size.label}   button text is legible (${act.fontPx}px)`, act.fontPx >= 8);
+    ok(`${size.label}   exactly one star is marked active, and the pulse ring sits on it`, c.active === 1 && c.pulseOk,
+       `${c.active} active, pulse ${c.pulseOk ? 'placed' : 'missing or misplaced'}`);
     ok(`${size.label}   notes bar clears the mode switch (${r.barOverSwitch}px into it)`, r.barOverSwitch <= 0);
   }
 
@@ -662,6 +778,93 @@ app.whenReady().then(async () => {
     'enter saved the new text',
     saved.filter((x) => x && x.notes === 'committed with enter').length === 1,
   );
+
+  // ── Milestones and the work time-lapse ─────────────────────────────────
+  //
+  // Driven with REAL clicks through Chromium's input pipeline, like the notes
+  // bar's stray-click check above, because a synthetic click does not exercise
+  // the outside-click close that keeps the list from becoming a trap.
+  const centre = (sel) => win.webContents.executeJavaScript(`(() => {
+    const e = document.querySelector(${JSON.stringify(sel)});
+    if (!e) return null;
+    const r = e.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  })()`);
+  const clickEl = async (sel) => {
+    const p = await centre(sel);
+    if (p) await clickAt(p.x, p.y, 1);
+    await wait(120);
+    return p;
+  };
+
+  const seenBefore = seenCalls;
+  await clickEl('#wall-actions .wall-action:nth-child(2)');
+  const list = await win.webContents.executeJavaScript(`(() => {
+    const pop = document.querySelector('.ms-pop');
+    const r = pop.getBoundingClientRect();
+    return {
+      open: getComputedStyle(pop).display !== 'none',
+      inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5,
+      rows: pop.querySelectorAll('.ms-row').length,
+      next: pop.querySelectorAll('.ms-next').length,
+      newRows: pop.querySelectorAll('.ms-row.is-new').length,
+      seededWhen: [...pop.querySelectorAll('.ms-row')].map((r) => r.querySelector('.ms-row-when').textContent),
+      smallest: Math.min(...[...pop.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent.trim()).map((e) => parseFloat(getComputedStyle(e).fontSize))),
+    };
+  })()`);
+  const shot = async (name) => {
+    if (SHOTS) fs.writeFileSync(path.join(SHOTS, name), (await win.webContents.capturePage()).toPNG());
+  };
+  await shot('milestones-open.png');
+  ok('clicking Milestones opens the list, inside the window', list.open && list.inside, JSON.stringify(list));
+  ok(`it lists what was achieved and what is next (${list.rows} achieved, ${list.next} next)`, list.rows === 3 && list.next === 4);
+  ok('the unseen one is marked new, the seeded one says "earlier" rather than a date',
+     list.newRows === 1 && list.seededWhen.includes('new') && list.seededWhen.includes('earlier'), JSON.stringify(list.seededWhen));
+  ok(`the list's smallest text is legible (${list.smallest}px)`, list.smallest >= 8);
+  ok('opening it tells the main process the milestones were seen', seenCalls === seenBefore + 1);
+
+  await clickEl('#view-stats .panel-daily');
+  const closed = await win.webContents.executeJavaScript(
+    `getComputedStyle(document.querySelector('.ms-pop')).display === 'none'`,
+  );
+  ok('a click anywhere else closes it', closed);
+
+  // Expected end state, computed here from the fixture rather than read back
+  // from the replay: every project's measured total for today, summed.
+  const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  let todayTotal = 0;
+  for (const [k, byProject] of Object.entries(idx.projectHourly)) {
+    const ms = Date.parse(`${k}:00:00Z`);
+    if (ms < todayStart || ms > Date.now()) continue;
+    for (const cell of Object.values(byProject)) todayTotal += cell[1];
+  }
+  const compactTokens = (n) =>
+    n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n));
+
+  for (const size of [{ w: 1366, h: 768 }, { w: 2560, h: 1440 }]) {
+    await measure(win, size);
+    await clickEl('#wall-actions .wall-action:nth-child(1)');
+    // Let the 450ms fade-in finish first. Measured mid-fade, the first
+    // screenshot showed the dashboard through the replay and looked like a bug.
+    await wait(600);
+    const mid = await win.webContents.executeJavaScript('window.__cswTimelapse(10000)');
+    await wait(80);
+    await shot(`replay-${size.w}x${size.h}.png`);
+    const inWin = (r) => r && r.left >= 0 && r.top >= 0 && r.right <= size.w + 0.5 && r.bottom <= size.h + 0.5;
+    ok(`${size.w}x${size.h}   Today opens the replay`, !!mid);
+    if (!mid) continue;
+    ok(`${size.w}x${size.h}   its header, hour trace and caption are inside the window`,
+       inWin(mid.head) && inWin(mid.trace) && inWin(mid.caption), JSON.stringify({ head: mid.head, trace: mid.trace, caption: mid.caption }));
+    ok(`${size.w}x${size.h}   the caption is legible (${mid.captionPx}px) and ${mid.stars} projects are in the sky`, mid.captionPx >= 8 && mid.stars === 3);
+    const end = await win.webContents.executeJavaScript('window.__cswTimelapse(20000)');
+    ok(`${size.w}x${size.h}   at the end it shows today's measured total exactly (${end.total})`,
+       end.total === `${compactTokens(todayTotal)} tokens`, `expected ${compactTokens(todayTotal)} tokens`);
+    await win.webContents.executeJavaScript('window.__cswTimelapse(null)');
+    await clickEl('.replay');
+    await wait(600);
+    const gone = await win.webContents.executeJavaScript(`!document.querySelector('.replay')`);
+    ok(`${size.w}x${size.h}   a click anywhere ends it`, gone);
+  }
 
   win.destroy();
   console.log(`\n${pass} passed, ${fail} failed\n`);

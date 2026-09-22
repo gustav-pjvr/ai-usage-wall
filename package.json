@@ -12,7 +12,7 @@
     "dev": "node build.mjs --watch",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "node test/run.mjs && node test/projection.test.mjs && node test/projection-crypto.test.mjs && node test/stats-projection.test.mjs && node test/usage-append.test.mjs && node test/chat.test.mjs && node test/pricing.test.mjs && node test/settings.test.mjs",
+    "test": "node test/run.mjs && node test/projection.test.mjs && node test/projection-crypto.test.mjs && node test/stats-projection.test.mjs && node test/usage-append.test.mjs && node test/chat.test.mjs && node test/pricing.test.mjs && node test/settings.test.mjs && node test/constellation.test.mjs && node test/milestones.test.mjs && node test/timelapse.test.mjs",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win dir",
     "logo": "electron scripts/logo.mjs",

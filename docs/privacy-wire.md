@@ -79,6 +79,7 @@ through the same DPAPI writer that protects the keys. See
 | `prompts` | total count, counts by day, timestamp of the last one |
 | `latest` | ts, model, Claude Code version, project **label** or null |
 | `peak` | the source's all time peak tokens per minute, and when it was reached |
+| `projectLinks` | constellation links: `[labelA, labelB, sharedDays]`, **labels only**, the same masked labels as `projects`; always empty when sharing is off. Added 2026-09-22 |
 | `fileCount` | how many transcript files exist, as a number |
 | `lastScanMs` | scan duration |
 | `indexing` | whether the source is still cold-indexing |

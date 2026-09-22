@@ -104,6 +104,11 @@ const capped = normaliseSettings({ notes: emoji }).notes;
 ok('the cap counts code points, 400 rockets not 200', Array.from(capped).length === 400, String(Array.from(capped).length));
 ok('and never splits a character in half', !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(capped));
 
+console.log('\nsettings: the top panel');
+ok('defaults to the constellation', normaliseSettings({}).topPanel === 'constellation');
+ok('the live trace is kept when chosen', normaliseSettings({ topPanel: 'throughput' }).topPanel === 'throughput');
+ok('anything else falls back to the constellation', normaliseSettings({ topPanel: 'clients' }).topPanel === 'constellation');
+
 console.log('\nsettings: round trip');
 const once = normaliseSettings({ mode: 'clients', opacity: 0.5, notes: 'hi', monitors: [2] });
 ok('normalising twice changes nothing', same(normaliseSettings(once), once));

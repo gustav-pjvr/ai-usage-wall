@@ -17,6 +17,7 @@ import type { Client } from '../shared/schema';
 import type { UsageIndex } from '../main/data/usage';
 import { StatsView } from './stats';
 import { NotesBar } from './notes';
+import { WallActions } from './actions';
 import { isStatsOnly } from '../shared/edition';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
@@ -35,6 +36,7 @@ interface WallState {
     background: 'none' | 'plain' | 'gradient';
     backgroundOpacity: number;
     notes: string;
+    topPanel: 'constellation' | 'throughput';
   };
   capability: { tier: 'low' | 'balanced' | 'high'; cores: number; memoryGb: number; gpuAccelerated: boolean; reasons: string[] };
   focusMode: boolean;
@@ -62,6 +64,7 @@ declare global {
       onUpdate(cb: (s: { phase: string; version?: string; percent?: number }) => void): () => void;
       installUpdate(): Promise<void>;
       notesEdit(active: boolean): Promise<boolean>;
+      milestonesSeen(): Promise<void>;
     };
   }
 }
@@ -98,6 +101,22 @@ const notesBar = new NotesBar({
   setEditing: (active) => window.wall.notesEdit(active),
 });
 document.body.appendChild(notesBar.root);
+
+/*
+ * Top right: "Today" plays the work time-lapse and "Milestones" opens the list.
+ * Shell furniture like the notes bar, fed from the same usage push as the
+ * stats view. CSS hides it on the client wall, which has nothing to replay.
+ */
+const wallActions = new WallActions();
+document.body.appendChild(wallActions.root);
+
+// The top panel's Constellation / Live toggle is saved like any other setting,
+// so the choice survives a restart and a second monitor follows it.
+statsView.onTopPanel = (mode) => {
+  void window.wall.updateSettings({ topPanel: mode }).catch((err: unknown) =>
+    console.error('[renderer] could not save the top panel choice:', err),
+  );
+};
 statsMount.appendChild(statsView.root);
 
 /*
@@ -603,6 +622,7 @@ function render(): void {
   // Before the stats-only early return: the note is shell furniture and shows
   // in both editions and both views.
   notesBar.setText(state.settings.notes);
+  statsView.setTopPanel(state.settings.topPanel ?? 'constellation');
   // Everything past the body-level settings is the client wall, which the
   // shareable build does not have. Laying out zero cards on every state push
   // and every resize is work for nobody.
@@ -985,7 +1005,10 @@ window.wall.onState((next) => {
   render();
 });
 
-window.wall.onUsage?.((usage) => statsView.update(usage));
+window.wall.onUsage?.((usage) => {
+  statsView.update(usage);
+  wallActions.update(usage as never);
+});
 window.wall.onUsageProgress?.((p) => statsView.setProgress(p));
 
 window.wall
@@ -1005,7 +1028,10 @@ window.wall
 window.wall
   .getUsage?.()
   .then((u) => {
-    if (u) statsView.update(u);
+    if (u) {
+      statsView.update(u);
+      wallActions.update(u as never);
+    }
   })
   .catch((err) => console.error('[renderer] initial usage failed:', err));
 

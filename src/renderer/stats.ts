@@ -636,8 +636,6 @@ export class StatsView {
     const heroMeta = el('div', 'hero-meta');
     heroMeta.appendChild(el('span', 'hero-exact', ''));
     heroMeta.appendChild(el('span', 'hero-sub', 'across every session on this machine'));
-    // Said, not hidden: part of the total is reconstructed (rule 12). Empty otherwise.
-    heroMeta.appendChild(el('span', 'hero-hist', ''));
     heroBody.appendChild(heroMeta);
 
     /*
@@ -1031,14 +1029,6 @@ export class StatsView {
 
     const exact = this.root.querySelector('.hero-exact');
     if (exact) exact.textContent = `${full(totalOf(t))} tokens`;
-    const hist = historyOf(idx);
-    const rebuilt = hist ? totalOf(hist.reconstructed) : 0;
-    const histNode = this.root.querySelector('.hero-hist');
-    if (histNode) {
-      histNode.textContent = rebuilt > 0
-        ? `includes ${compact(rebuilt)} tokens reconstructed from ${hist?.reconstructedFrom ?? 'an earlier snapshot'}`
-        : '';
-    }
 
     // Composition, so the headline cannot be mistaken for consumption.
     const grand = totalOf(t) || 1;

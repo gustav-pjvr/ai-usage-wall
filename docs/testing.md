@@ -60,7 +60,7 @@ And `npm run test:render`, separately, because it needs a window:
 
 | Suite | Checks | Result |
 |---|---|---|
-| `test/render-fit.cjs` | 167 | 0 failed |
+| `test/render-fit.cjs` | 159 | 0 failed |
 
 Two practical notes:
 

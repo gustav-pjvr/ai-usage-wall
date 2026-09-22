@@ -79,10 +79,14 @@ or they will be counted in both.
 
 ## What the wall shows
 
-- Under the total: *includes 19.6B tokens reconstructed from a snapshot of 22 Sep
-  2026*. Only reconstructed history is captioned; archived history was measured.
 - The status strip: *463 transcripts on disk, 349 archived*. Without it, the drop
-  in the transcript count reads as a second loss.
+  in the transcript count reads as a second loss. With the hero caption gone
+  (below), this and the projects footnote are what disclose the reconstruction.
+- **No caption under the headline.** A first version said *includes 19.6B tokens
+  reconstructed from a snapshot of 22 Sep 2026* under the total. Gustav removed
+  it on 2026-09-22 as unnecessary. Rule 12 is still met: the strip and the
+  footnote say what is archived and what is unattributed, and the seed's own
+  notes record every approximation.
 - The sessions tile adds the reconstructed session count.
 - The projects panel: *x% of tokens are in archived history with no project*,
   only when that is true.
@@ -97,5 +101,5 @@ or they will be counted in both.
   index three transcripts, delete one, then relaunch with an older-version cache.
   Every merged map equals the original. Its control runs the same sequence
   without the store and shows the loss.
-- `test/render-fit.cjs`: the caption, the footer and the strip are present and
-  inside their panels at all eight sizes.
+- `test/render-fit.cjs`: the footnote and the strip are present and inside their
+  panels at all eight sizes.

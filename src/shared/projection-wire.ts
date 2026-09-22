@@ -264,6 +264,44 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
  * not know whether it is showing local or projected data; only the chrome
  * around it changes.
  */
+/**
+ * What a screen would actually see change, as a string to compare.
+ *
+ * The source skips a send when this is identical to the last one sent. Two
+ * things were wrong with how it used to decide that, and they cancelled out,
+ * which is why nobody noticed:
+ *
+ * 1. It hashed the whole frame, and `sentAt` is `Date.now()`, written into the
+ *    first forty characters. The frames were never equal, so the skip never
+ *    fired and every refresh, including the periodic sweep that finds nothing
+ *    new, went out to every screen.
+ * 2. The "hash" was the length plus the first and last 256 characters. Fixing
+ *    only (1) would have switched on a check that misses any change in the
+ *    middle of the frame that keeps the same length, a daily bucket going from
+ *    1234 to 1235 for instance, and the screen would quietly stop updating.
+ *
+ * So this drops the fields that change on every call without meaning anything
+ * a screen should react to, and returns the rest IN FULL. No hash: a frame is
+ * tens of kilobytes, one copy is kept, and a string compare cannot collide.
+ *
+ * Dropped: `sentAt` (the moment of building, not of any event), `builtAt` (set
+ * when the index is rebuilt, never displayed), and `lastScanMs` (how long the
+ * last scan took, which varies on every scan). The last one IS displayed, in
+ * the screen's status strip, so a screen can show a scan time a sweep or two
+ * old. That is the price of the skip working at all, and it is a diagnostic,
+ * not a number anyone reads the dashboard for.
+ *
+ * Liveness does not depend on frames: the source sends a beat every 30 s when
+ * nothing else has gone out, and the screen counts any message it decrypted.
+ */
+export function frameKey(w: ProjectedUsage): string {
+  const { sentAt: _sentAt, builtAt: _builtAt, lastScanMs: _lastScanMs, ...seen } = w;
+  void _sentAt;
+  void _builtAt;
+  void _lastScanMs;
+  return JSON.stringify(seen);
+}
+
 export function fromWire(w: ProjectedUsage): Record<string, unknown> {
   return {
     version: 0,

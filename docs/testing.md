@@ -1,6 +1,6 @@
 # Testing
 
-**Last updated:** 2026-09-08
+**Last updated:** 2026-09-22
 **Code snapshot:** commit `2090e79` plus the responsive and notes bar work.
 Counts below were produced by running the suites on that date.
 **Primary sources:** `test/run.mjs`, `test/projection.test.mjs`,
@@ -10,7 +10,7 @@ Counts below were produced by running the suites on that date.
 
 ## Summary
 
-Nine suites, no test framework. Seven run in isolation and are wired into
+Ten suites, no test framework. Eight run in isolation and are wired into
 `npm test`. Two need a real Electron process and are run separately: one drives
 the projection classes against the **deployed Cloudflare relay**, the other opens
 a real window and measures the rendered layout. Each isolated suite bundles the
@@ -31,24 +31,25 @@ useful thing here.
 ## How to run
 
 ```
-npm test              # the seven isolated suites
+npm test              # the eight isolated suites
 npm run typecheck     # tsc --noEmit across src/**/*.ts and build.mjs
 npm run test:e2e      # electron test/projection-e2e.cjs, hits the DEPLOYED relay
 npm run test:render   # electron test/render-fit.cjs, opens a real window
 ```
 
-**Measured on 2026-09-08**, `npm test`:
+**Measured on 2026-09-22**, `npm test`:
 
 | Suite | Checks | Result |
 |---|---|---|
 | `test/run.mjs` | 52 | 0 failed |
-| `test/projection.test.mjs` | 34 | 0 failed |
+| `test/projection.test.mjs` | 40 | 0 failed |
 | `test/projection-crypto.test.mjs` | 37 | 0 failed |
-| `test/stats-projection.test.mjs` | 23 | 0 failed |
+| `test/stats-projection.test.mjs` | 28 | 0 failed |
 | `test/usage-append.test.mjs` | 4 | 0 failed |
 | `test/chat.test.mjs` | 43 | 0 failed |
 | `test/pricing.test.mjs` | 23 | 0 failed |
-| **total** | **216** | |
+| `test/settings.test.mjs` | 31 | 0 failed |
+| **total** | **258** | |
 
 And `npm run test:render`, separately, because it needs a window:
 
@@ -73,6 +74,13 @@ Two practical notes:
   reading a font size and reasoning about it. See
   [responsive-layout.md](responsive-layout.md) and [notes-bar.md](notes-bar.md).
   Both halves were confirmed to FAIL when the fix was reverted.
+- **The two Electron suites cannot leave a dialog behind.** An uncaught error in
+  an Electron main process raises a modal box that waits for a click, and on
+  2026-09-08 that left two whole process trees running on the desktop. Both
+  suites now exit on an uncaught exception, an unhandled rejection or a
+  watchdog timeout, and their npm scripts run `node --check` first, because a
+  syntax error stops the file before any handler exists. Probed with a copy that
+  throws on purpose: exit 2, no dialog, nothing left running.
 
 `npm run typecheck` is worth listing beside the tests, because for most of the
 main process (`win32/`, `settings.ts`, `updater.ts`, `capability.ts`, the store)

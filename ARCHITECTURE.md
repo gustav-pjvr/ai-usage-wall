@@ -554,6 +554,16 @@ The wall runs 24/7. Every effect is paid continuously.
 40. **A screen never relabels labels.** Projected project names are already
     labels; running `labelProjects` on them again split `Desktop / code` on its
     own slash. `projectLabels(paths, alreadyLabelled)` in `stats.ts` does this for the project list; the constellation does the same with an identity map on a screen.
+41. **A number the wall has shown never falls because a transcript was
+    deleted, a cache was discarded or the index was rebuilt.** The usage index
+    is a cache of transcripts Claude Code deletes after `cleanupPeriodDays`, so
+    it cannot be the record. Each file's contribution is kept in the index and
+    MOVED to the history store (`src/main/data/history.ts`) when the file is
+    confirmed gone (`ENOENT` only, never a lock or a missing listing), history
+    saved first. A path is in exactly one of the two. Every consumer reads
+    `mergeHistory(live, history)`. Reconstructed history is said, never passed
+    off as measured (rule 12). 0.9.13 broke this and halved the wall; see
+    [docs/usage-history.md](docs/usage-history.md).
 
 ## How to add a client
 

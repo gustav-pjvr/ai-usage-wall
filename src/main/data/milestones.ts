@@ -89,13 +89,22 @@ function save(): Promise<void> {
  *
  * Returns how many were newly achieved.
  */
-export async function evaluateMilestones(u: UsageIndex, ready: boolean, now = Date.now()): Promise<number> {
+export async function evaluateMilestones(
+  u: UsageIndex,
+  ready: boolean,
+  now = Date.now(),
+  /** createdAt of the reconstructed history seed in the totals, if any. */
+  seedAt: string | null = null,
+): Promise<number> {
   // A ledger that could not be read at launch is retried here rather than
   // assumed missing. See loadMilestones.
   if (!loaded && file) await loadMilestones(path.dirname(file));
   if (!loaded || !ready) return 0;
-  const r = evaluate(milestoneInput(u), ledger, now);
-  ledger = r.ledger;
+  // The first pass that sees a new seed records what it crosses as "earlier".
+  const absorbingSeed = seedAt !== null && ledger?.seededHistoryAt !== seedAt;
+  const r = evaluate(milestoneInput(u), ledger, now, absorbingSeed);
+  ledger = absorbingSeed ? { ...r.ledger, seededHistoryAt: seedAt } : r.ledger;
+  if (absorbingSeed) r.changed = true;
   if (r.changed) await save();
   for (const a of r.fresh) console.log(`[milestones] ${a.title}`);
   return r.fresh.length;

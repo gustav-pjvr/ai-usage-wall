@@ -37,9 +37,12 @@ import {
   loadIndex,
   refreshIndex,
   saveIndex,
+  type FileContribution,
   type IndexProgress,
   type UsageIndex,
 } from './data/usage';
+import { currentHistory, historyPort, loadHistory } from './data/history';
+import { mergeHistory } from '../shared/usage-merge';
 import {
   applyLayerMode,
   detach,
@@ -94,6 +97,12 @@ let stopWatching: (() => void) | null = null;
 let focusMode = false;
 let hidden = false;
 let usage: UsageIndex = emptyIndex();
+/*
+ * Contributions from a cache of an older INDEX_VERSION, waiting for a refresh
+ * with a readable history store to archive the ones whose transcript is gone.
+ * Kept until then: dropping them is exactly how 0.9.13 halved the wall.
+ */
+let staleFiles: Record<string, FileContribution> = {};
 let usageWatcher: FSWatcher | null = null;
 let usageSweep: NodeJS.Timeout | null = null;
 let usageWatchFailures = 0;
@@ -226,8 +235,17 @@ async function refreshUsage(reason: string): Promise<void> {
   usageBusy = true;
   usageLastRun = Date.now();
   try {
-    const result = await refreshIndex(usage, (p) => pushUsageProgress(p));
+    const port = historyPort();
+    // A store unreadable at launch is retried here, never assumed empty.
+    if (!port.ready) await loadHistory(app.getPath('userData'));
+    const result = await refreshIndex(usage, (p) => pushUsageProgress(p), { history: port, staleFiles });
     usage = result.index;
+    if (port.ready && Object.keys(staleFiles).length) {
+      // Settled: archived, or back in the live index. Anything else (locked) waits.
+      staleFiles = Object.fromEntries(
+        Object.entries(staleFiles).filter(([p]) => !port.has(p) && !usage.files[p]),
+      );
+    }
     usageIndexing = false;
     if (result.rebuilt) console.log('[usage] a transcript shrank, index rebuilt from scratch');
     /*
@@ -244,10 +262,16 @@ async function refreshUsage(reason: string): Promise<void> {
      * this pass is whole; `unavailable` means there is nothing real to judge.
      * A screen never gets here: it does not index while paired.
      */
-    await evaluateMilestones(usage, !usage.unavailable && !usageIndexing);
+    // Not while the history store is unread: the merged totals are short by it.
+    await evaluateMilestones(
+      mergedUsage(),
+      !usage.unavailable && !usageIndexing && port.ready,
+      Date.now(),
+      currentHistory().seed?.createdAt ?? null,
+    );
     if (Date.now() - usageLastSave > USAGE_SAVE_INTERVAL_MS) {
       usageLastSave = Date.now();
-      await saveIndex(usageCacheFile(), usage).catch((err) =>
+      await saveIndex(usageCacheFile(), withPending(usage)).catch((err) =>
         console.warn('[usage] could not write cache:', (err as Error).message),
       );
     }
@@ -1303,12 +1327,29 @@ function wallState(wall: WallWindow) {
   };
 }
 
+/** The index as saved: with any unsettled stale contributions, so a restart keeps them. */
+function withPending(u: UsageIndex): UsageIndex {
+  return Object.keys(staleFiles).length ? { ...u, pendingStale: staleFiles } : u;
+}
+
+/**
+ * The live index plus the history store: what every consumer reads.
+ *
+ * `usage` itself stays live only, because refreshIndex updates it in place and
+ * history merged into it would be counted again on the next pass. The merge is
+ * a few thousand keys, cheap next to a push, so it is recomputed rather than
+ * cached and can never be stale.
+ */
+function mergedUsage(): ReturnType<typeof mergeHistory<UsageIndex>> {
+  return mergeHistory(usage, currentHistory());
+}
+
 /**
  * The renderer never reads the per-file offset map, and that map is half the
  * payload: 170 KB was crossing the IPC boundary on every refresh, roughly once
  * a second during an active session. Send a projection instead.
  */
-function usageForRenderer(): Record<string, unknown> {
+function usageForRenderer(merged = mergedUsage()): Record<string, unknown> {
   /*
    * A SCREEN shows the source's numbers, not its own. It does not index its own
    * transcripts at all while paired, so `usage` here is an empty index and
@@ -1320,13 +1361,15 @@ function usageForRenderer(): Record<string, unknown> {
     // Paired but nothing received yet. Say so rather than showing an empty index.
     return { ...emptyIndex(), fileCount: 0, indexing: false, projection: projection.projectionStatus() };
   }
-  const { files, ...rest } = usage;
+  const { files, pendingStale: _pending, ...rest } = merged;
+  void _pending;
   return {
     ...rest,
     peak: currentPeak(),
     // This machine's own ledger. A screen has none: it is not indexing, and the
     // paired machine's milestones are not projected.
-    milestones: milestonesForRenderer(usage, usageIndexing),
+    milestones: milestonesForRenderer(merged, usageIndexing),
+    // Transcripts on disk. Archived ones are counted in `history`, never here.
     fileCount: Object.keys(files).length,
     indexing: usageIndexing,
     projection: projection.projectionStatus(),
@@ -1352,8 +1395,9 @@ function pushUsage(): void {
    * after setting a flag; the encrypting and sending happen on a later tick, so
    * a relay outage can never slow the local dashboard down (rule 30).
    */
-  projection.offerUsage(usage, usageIndexing);
-  const payload = usageForRenderer();
+  const merged = mergedUsage();
+  projection.offerUsage(merged, usageIndexing);
+  const payload = usageForRenderer(merged);
   for (const w of windows) {
     if (w.win.isDestroyed()) continue;
     w.win.webContents.send('wall:usage', payload);
@@ -1587,7 +1631,7 @@ function quit(): void {
   if (usageTimer) clearTimeout(usageTimer);
   usageWatcher?.close();
   // Persist whatever the periodic save has not yet flushed.
-  void saveIndex(usageCacheFile(), usage).catch(() => undefined);
+  void saveIndex(usageCacheFile(), withPending(usage)).catch(() => undefined);
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
   stopWatching?.();
   globalShortcut.unregisterAll();
@@ -1837,7 +1881,9 @@ if (!app.requestSingleInstanceLock()) {
       },
     });
 
-    usage = await loadIndex(usageCacheFile());
+    // History before the index: the first refresh must be able to archive.
+    await loadHistory(app.getPath('userData'));
+    ({ index: usage, staleFiles } = await loadIndex(usageCacheFile()));
     await loadPeak(app.getPath('userData'));
     await loadMilestones(app.getPath('userData'));
     if (projection.isScreen()) {

@@ -213,6 +213,17 @@ function fixture(emptyIndex) {
   idx.prompts = { total: 4_812, daily: {}, lastAt: new Date(now - 90_000).toISOString(), offset: 0, size: 0 };
   idx.peak = { velocity: 26_400_000, at: new Date(now - 3 * 86_400_000).toISOString() };
 
+  // History as the main process merges it in (src/shared/usage-merge.ts), with
+  // the longest caption and footer it can produce, so both are measured.
+  idx.history = {
+    archivedFiles: 12, archivedSessions: 9, reconstructedSessions: 52, reconstructedFiles: 349,
+    archived: t(1, 1, 1, 1, 1, 0),
+    reconstructed: t(1_000_000, 39_000_000, 530_000_000, 19_000_000_000, 54_000, 16480.82),
+    reconstructedFrom: 'a snapshot of 22 Sep 2026',
+    unattributedTokens: 8_350_000_000,
+  };
+  idx.fileCount = 463;
+
   // Today's work, per project per hour, keyed by UTC hour exactly as usage.ts
   // writes it. Up to seven local hours ending now, so the replay has a real
   // span whatever time of day the suite runs.
@@ -497,6 +508,23 @@ app.whenReady().then(async () => {
     ok(`${size.label}   smallest text is legible (>= 8px, on .${r.smallestOn})`, r.smallest >= 8);
     ok(`${size.label}   status strip inside the view (${r.stripOver}px past)`, r.stripOver <= 1);
     ok(`${size.label}   mode switch clears the panels (${r.switchOver}px into them)`, r.switchOver <= 0);
+
+    // Reconstructed history must be SAID wherever the total is shown (rule 12):
+    // present, painted, and inside its own panel at every size.
+    const hist = await win.webContents.executeJavaScript(`(() => {
+      const shown = (sel, panelSel) => {
+        const n = document.querySelector(sel), p = document.querySelector(panelSel);
+        if (!n || !p || !n.textContent) return { text: '', inside: false };
+        const r = n.getBoundingClientRect(), b = p.getBoundingClientRect();
+        return { text: n.textContent, inside: r.width > 0 && r.height > 0 && r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.bottom <= b.bottom + 0.5 };
+      };
+      return { cap: shown('.hero-hist', '.panel-hero'), foot: shown('.proj-foot', '.panel-projects'),
+               strip: (document.querySelector('.status-source') || {}).textContent || '' };
+    })()`);
+    ok(`${size.label}   reconstructed history is captioned under the total ("${hist.cap.text}")`,
+       /reconstructed from a snapshot/.test(hist.cap.text) && hist.cap.inside);
+    ok(`${size.label}   unattributed history is footnoted on the projects panel`, /no project/.test(hist.foot.text) && hist.foot.inside, hist.foot.text);
+    ok(`${size.label}   the strip counts archived transcripts ("${hist.strip}")`, /463 transcripts on disk, 361 archived/.test(hist.strip));
 
     /*
      * The constellation draws on a canvas, so the DOM checks above cannot see

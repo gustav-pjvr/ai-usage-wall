@@ -250,9 +250,9 @@ so reporting it would only flicker the loading panel.
 
 | Field | What it holds | Why it exists |
 |---|---|---|
-| `version` | `INDEX_VERSION`, currently 4. 3 added the cost fields; 4 (2026-09-22) added `projectHourly` and `activeDays` | `loadIndex` discards a cache with any other value, so each bump costs one cold reindex |
+| `version` | `INDEX_VERSION`, currently 5. 3 added the cost fields; 4 (2026-09-22) added `projectHourly` and `activeDays`; 5 added per-file `contrib` | `loadIndex` discards a cache with any other value but hands its per-file contributions back as `staleFiles`, so a bump costs one cold reindex and loses nothing (see [usage-history.md](usage-history.md)) |
 | `builtAt` | ISO stamp of the last completed pass | |
-| `files` | path to `{ size, offset }` | the whole incremental scheme; stripped before IPC |
+| `files` | path to `{ size, offset, contrib }` | the whole incremental scheme, plus what each file added so a deleted one can be archived exactly; stripped before IPC |
 | `totals` | the eight token counters, plus `costUsd` and `unpricedTokens` (see [derived-metrics.md](derived-metrics.md)) | the hero and the counter tiles |
 | `daily` | `YYYY-MM-DD` to totals | kept forever; drives the daily chart and "days active" |
 | `hourly` | `YYYY-MM-DDTHH` to totals | kept 14 days (`HOURLY_DAYS`, `usage.ts:62`), pooled into a 24 hour profile |
@@ -280,8 +280,12 @@ both have a visible consequence, covered in `docs/derived-metrics.md`.
 - **A UTF-8 BOM is stripped before `JSON.parse`** (`usage.ts:475`), the same rule
   as the client store. `JSON.parse` rejects a BOM and the failure is invisible:
   the file looks perfect and is silently ignored.
-- **A version mismatch discards the cache** rather than migrating it, which is the
-  right call for something rebuildable from the transcripts in 5.5 s.
+- **A version mismatch discards the cache** rather than migrating it. That was
+  called "the right call for something rebuildable from the transcripts in
+  5.5 s", and it was wrong: the transcripts are NOT all there, because Claude
+  Code deletes old ones. 0.9.13's bump halved the wall. The cache is still
+  discarded, but its per-file contributions are handed to the first refresh,
+  which archives the ones whose file is gone. See [usage-history.md](usage-history.md).
 - **The write is atomic**: `.tmp` then `rename` (`usage.ts:485-488`), so a crash
   mid-write cannot leave a truncated cache that then loads as a real one.
 

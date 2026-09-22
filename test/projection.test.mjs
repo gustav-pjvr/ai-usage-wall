@@ -201,6 +201,40 @@ console.log('\nproject labels');
        JSON.stringify([...m].sort()));
 }
 
+console.log('\nprojection: constellation links cross as labels only');
+{
+  const cwdA = 'C:\\Users\\demo user\\Desktop\\Claude WorkSpace\\alpha';
+  const cwdB = 'C:\\Users\\demo user\\Desktop\\Claude WorkSpace\\bravo';
+  const day = '2026-09-20T10:00:00.000Z';
+  const linked = {
+    ...index,
+    projects: {
+      [cwdA.toLowerCase()]: { ...index.totals, lastSeen: day, display: cwdA },
+      [cwdB.toLowerCase()]: { ...index.totals, lastSeen: day, display: cwdB },
+    },
+    sessions: {
+      '11111111-2222-3333-4444-555555555555': { id: 'x', start: day, end: day, requests: 1, output: 1, total: 1, cwd: cwdA, models: [] },
+      '66666666-7777-8888-9999-000000000000': { id: 'y', start: day, end: day, requests: 1, output: 1, total: 1, cwd: cwdB, models: [] },
+    },
+  };
+  const shared = toWire(linked, { shareProjectNames: true, sourceLabel: '', indexing: false, homeDirName: 'demo user' });
+  ok('two projects on the same day produce one link', shared.projectLinks.length === 1 && shared.projectLinks[0][2] === 1,
+     JSON.stringify(shared.projectLinks));
+  ok('the link names the same labels the projects are keyed by',
+     shared.projectLinks[0].slice(0, 2).every((l) => Object.keys(shared.projects).includes(l)));
+  const linkJson = JSON.stringify(shared.projectLinks);
+  ok('no path, backslash, username or session id in the links',
+     !linkJson.includes('\\') && !/demo user/i.test(linkJson) && !/[0-9a-f]{8}-[0-9a-f]{4}/.test(linkJson), linkJson);
+
+  const unshared = toWire(linked, { shareProjectNames: false, sourceLabel: '', indexing: false });
+  ok('project names not shared: no links at all', Array.isArray(unshared.projectLinks) && unshared.projectLinks.length === 0);
+
+  const back = fromWire({ ...shared, projectLinks: [...shared.projectLinks, ['ok', 5, 1], 'junk', ['a', 'b', 'NaN']] });
+  ok('a screen drops malformed links rather than drawing them', back.projectLinks.length === 1, JSON.stringify(back.projectLinks));
+  ok('a frame from an older source with no links becomes an empty list',
+     Array.isArray(fromWire({ ...shared, projectLinks: undefined }).projectLinks));
+}
+
 console.log('\nprojection: skipping frames a screen would not see change');
 {
   const opts = { shareProjectNames: true, sourceLabel: 'Main machine', indexing: false };

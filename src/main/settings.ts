@@ -60,6 +60,12 @@ export interface Settings {
    * file into a document.
    */
   notes: string;
+  /**
+   * What the top row's big panel shows: the project constellation, or the live
+   * throughput trace it replaced. Gustav wanted the constellation there without
+   * losing the trace, so it is a toggle in the panel's header.
+   */
+  topPanel: 'constellation' | 'throughput';
 }
 
 const DEFAULTS: Settings = {
@@ -82,6 +88,7 @@ const DEFAULTS: Settings = {
   useVault: true,
   debug: false,
   notes: '',
+  topPanel: 'constellation',
 };
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -132,6 +139,7 @@ export function normaliseSettings(raw: unknown): Settings {
     debug: r.debug === true,
     notes:
       typeof r.notes === 'string' ? Array.from(r.notes).slice(0, NOTES_MAX).join('') : DEFAULTS.notes,
+    topPanel: r.topPanel === 'throughput' ? 'throughput' : DEFAULTS.topPanel,
   };
 }
 

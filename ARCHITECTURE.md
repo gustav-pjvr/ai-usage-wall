@@ -482,26 +482,6 @@ The wall runs 24/7. Every effect is paid continuously.
     ago, which is the one failure that makes the whole feature untrustworthy.
     Phase wording is a pure function and is tested in
     `test/stats-projection.test.mjs`; keep it that way.
-29. **Every size in `stats.css` is a multiple of `--u`.** A bare `px` font size
-    or margin there is a bug, not a style: the grid is fluid and fixed contents
-    inside it are exactly how text got clipped on a smaller screen. `--u` is one
-    pixel at the 1920x1080 reference and takes the smaller of the width-derived
-    and height-derived unit, so it tracks whichever axis actually ran out.
-    `clamp()` against `vw` alone is worse than nothing here and is what was
-    removed: two screens of equal width and different height are the common case
-    on this kind of surface. See `docs/responsive-layout.md`.
-30. **When there is no room left, drop a caption. Never clip a number.** Both
-    floors, `--u` at 0.7 and the 8px minimum on the label tier, exist so that
-    shrinking stops before text becomes unreadable. Past that point the
-    short-screen media queries remove explanatory text and keep every value.
-    Verify with `npm run test:render`, which measures real overflow in a real
-    window at eight sizes rather than reading a font size and reasoning about it.
-31. **The notes bar stays on this machine.** It is not in `toWire()` and must not
-    be: it holds whatever Gustav happens to be thinking about, and a paired
-    screen is another building. Adding it to projection would make
-    `docs/privacy-wire.md` false. It also stays `readonly` until a double click,
-    because the wall collects stray clicks all day and a field that quietly
-    accepts them corrupts the note long before anyone notices.
 29. **Discard any frame whose sequence is not strictly greater than the last one
     accepted.** Not "not equal", not "close enough". The sequence is inside the
     GCM AAD so it cannot be edited in flight, but a relay can still replay an old
@@ -534,6 +514,46 @@ The wall runs 24/7. Every effect is paid continuously.
     the encryption and not beside it.
 
 ---
+34. **Every size in `stats.css` is a multiple of `--u`.** A bare `px` font size
+    or margin there is a bug, not a style: the grid is fluid and fixed contents
+    inside it are exactly how text got clipped on a smaller screen. `--u` is one
+    pixel at the 1920x1080 reference and takes the smaller of the width-derived
+    and height-derived unit, so it tracks whichever axis actually ran out.
+    `clamp()` against `vw` alone is worse than nothing here and is what was
+    removed: two screens of equal width and different height are the common case
+    on this kind of surface. See `docs/responsive-layout.md`.
+35. **When there is no room left, drop a caption. Never clip a number.** Both
+    floors, `--u` at 0.7 and the 8px minimum on the label tier, exist so that
+    shrinking stops before text becomes unreadable. Past that point the
+    short-screen media queries remove explanatory text and keep every value.
+    Verify with `npm run test:render`, which measures real overflow in a real
+    window at eight sizes rather than reading a font size and reasoning about it.
+36. **The notes bar stays on this machine.** It is not in `toWire()` and must not
+    be: it holds whatever Gustav happens to be thinking about, and a paired
+    screen is another building. Adding it to projection would make
+    `docs/privacy-wire.md` false. It also stays `readonly` until a double click,
+    because the wall collects stray clicks all day and a field that quietly
+    accepts them corrupts the note long before anyone notices.
+37. **A milestone is announced once, ever, and never from an incomplete
+    index.** The ledger lives in `milestones.json`, outside the usage cache,
+    because the cache is thrown away on every index version bump. The first
+    evaluation seeds silently. Evaluation runs only after `refreshIndex` has
+    resolved, never while indexing or when the source is unreadable. An
+    announcement cannot be taken back, so the gate is the whole feature.
+38. **Nothing that talks about "today" or "a day" reads `daily`.** `daily` is keyed
+    by the UTC date and Gustav chose to keep it so. Local days come from
+    `src/shared/day.ts`: `projectHourly` hours converted through real Date
+    objects, or `activeDays`. Never build a day from a session's start and end:
+    a resumed session keeps its id, and its span on this machine reaches 1107
+    hours.
+39. **The constellation and the replay repaint on change, never on a timer, and
+    anything that moves is one DOM element or is capped by performance tier.**
+    GPU compositing is unavailable on Gustav's laptop, so a loop is paid for in
+    software every frame. The replay is driven by elapsed time and hard-stops,
+    so a slow frame shortens it rather than stretching it (rule 17).
+40. **A screen never relabels labels.** Projected project names are already
+    labels; running `labelProjects` on them again split `Desktop / code` on its
+    own slash. `projectLabels(paths, alreadyLabelled)` in `stats.ts` does this for the project list; the constellation does the same with an identity map on a screen.
 
 ## How to add a client
 

@@ -1,6 +1,6 @@
 # Design: Project Constellation, End-of-day Time-lapse, Milestones
 
-**Status:** design, not built. Written 2026-09-22 for Gustav by a Fable design
+**Status:** design, being built. Decisions below supersede the original. Written 2026-09-22 for Gustav by a Fable design
 pass. The main thread verifies and builds from this.
 **Binding inputs:** `ARCHITECTURE.md` "Do not break" (rules 12, 15, 17, 24, 26,
 29, 30 matter most here), `docs/privacy-wire.md`, `docs/responsive-layout.md`.
@@ -12,6 +12,50 @@ sessions; 78 hourly buckets in the 14 day window; 70 daily keys; 8 models;
 `sessions` 48 KB, `hourly` 15 KB. The five longest session spans (end minus
 start) are 1107, 928, 792, 526 and 518 hours: a resumed session keeps its id,
 so span is not duration. That single fact shapes the milestones design.
+
+## Decisions (Gustav, 2026-09-22). These OVERRIDE the sections below.
+
+The design below was written before Gustav answered the open questions. His
+answers changed the shape of two features, so read this first.
+
+1. **Constellation replaces the Live throughput panel, which is kept.** Not a
+   third view. The panel header gets a two-way toggle, Constellation and Live,
+   defaulting to Constellation, remembered in `settings.topPanel`. The mode
+   switch and `mode` are unchanged. The throughput canvas stops its loop while
+   hidden, so the toggle costs nothing at idle.
+   *Consequence:* the design's reason for a third view was that a grid cell is
+   too small for 40 labelled stars. The panel is span 5 of the top row, about
+   550 x 220 px at 1366x768, so the star cap and the labelled count scale with
+   the panel's area instead of being fixed at 40 and 12. Labels that would
+   collide are skipped, never overlapped, and the render-fit suite checks it.
+2. **The time-lapse becomes an on-demand WORK time-lapse:** "what has been done
+   so far today", played only from a button on the wall. No schedule, no
+   occlusion deferral, no tray entry, no `timelapse.at`. Sections on
+   scheduling and the visibility gate no longer apply.
+3. **Milestones live behind a button**, with a small badge counting ones not
+   yet seen. No toast over other applications and no status strip line, so the
+   notice generalisation (foundation 4) is not needed. Opening the list clears
+   the badge.
+4. No ambient view rotation (there is no third view to rotate to).
+5. **`daily` is NOT rekeyed to local days.** The daily chart keeps its current
+   bars. What needs local days gets them another way:
+   - the time-lapse builds "today" from UTC hour keys, which convert to local
+     hours exactly;
+   - the streak milestone reads a new, small, measured `activeDays` field
+     (local day to request count, filled at ingest). Sessions cannot serve,
+     because a resumed session keeps its id and its start and end can be weeks
+     apart, which would silently drop every day in between from a streak.
+6. `projectLinks` crosses the projection wire: labels only, empty when project
+   names are not shared.
+7. Milestone ladders as listed in section 3.
+
+**Where the two buttons live:** top right, level with the mode switch and
+under the notes bar, so they exist in both editions (the stats edition has no
+mode switch). They are the wall's only new controls and take clicks only;
+nothing asks for keyboard focus.
+
+**Index:** one bump, 3 to 4, adding `projectHourly` and `activeDays`. One cold
+reindex.
 
 ---
 

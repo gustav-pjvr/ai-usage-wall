@@ -1156,3 +1156,129 @@
   letter-spacing: 0.04em;
   color: oklch(0.72 0.13 75);
 }
+
+
+/* ── Constellation, and the toggle it shares the top panel with ─────────── */
+
+/*
+ * The top row's big panel holds the constellation or the live trace, chosen by
+ * a two-way toggle in its header (settings.topPanel). Visibility is driven by
+ * `data-top` on the panel rather than the `hidden` attribute: an author
+ * `display` on either wrapper would beat the user agent's `[hidden]` rule, and
+ * this project has shipped that bug four times.
+ */
+.panel-live[data-top='constellation'] .live-wrap { display: none; }
+.panel-live[data-top='throughput'] .const-wrap { display: none; }
+
+.panel-toggle {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  padding: calc(var(--u) * 2);
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.04);
+  border: 1px solid oklch(1 0 0 / 0.06);
+}
+
+.panel-toggle-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: oklch(0.62 0.015 235);
+  font-family: var(--mono);
+  font-size: max(8px, calc(var(--u) * 9.5));
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: calc(var(--u) * 3) calc(var(--u) * 9);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.25s cubic-bezier(0.22, 1, 0.36, 1), background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.panel-toggle-btn:hover:not(.is-on) { color: oklch(0.85 0.02 225); }
+
+.panel-toggle-btn.is-on {
+  color: oklch(0.96 0.01 220);
+  background: oklch(0.34 0.05 205);
+}
+
+.const-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 6);
+}
+
+/* The canvas fills this box; the pulse and the empty note sit over it. */
+.const-sky {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.const-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  cursor: default;
+}
+
+/*
+ * The only moving part of the constellation: one element, opacity and scale
+ * only, so it composites cheaply even in software. Positioned from JS over the
+ * active project's star.
+ */
+.const-pulse {
+  position: absolute;
+  border-radius: 28%;
+  border: 1.5px solid oklch(0.82 0.14 var(--hue, 195) / 0.8);
+  pointer-events: none;
+  animation: const-pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.const-pulse[hidden],
+.const-empty[hidden] { display: none; }
+
+@keyframes const-pulse {
+  0% { opacity: 0.9; transform: scale(0.72); }
+  70% { opacity: 0; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.15); }
+}
+
+/* A static ring on the software tier and for reduced motion: still says which
+   project is live, costs nothing per frame. */
+[data-perf='low'] .const-pulse { animation: none; opacity: 0.7; }
+
+.const-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: max(8px, calc(var(--u) * 11));
+  color: oklch(0.6 0.015 235);
+  text-align: center;
+  pointer-events: none;
+}
+
+.const-caption {
+  flex: 0 0 auto;
+  font-size: max(8px, calc(var(--u) * 10.5));
+  color: oklch(0.56 0.015 240);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .const-pulse { animation: none; opacity: 0.7; }
+}
+
+/* Short screens: the caption goes before the sky gets any smaller. */
+@media (max-height: 820px) {
+  .const-caption { display: none; }
+}

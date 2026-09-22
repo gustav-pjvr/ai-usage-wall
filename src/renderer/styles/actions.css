@@ -1,0 +1,326 @@
+/*
+ * The wall's on-demand controls, top right, and what they open: the milestone
+ * list and the work time-lapse. Sizes come from --u (shell.css) so they shrink
+ * with everything else.
+ *
+ * Visibility is driven by data attributes on #wall-actions, never by the
+ * `hidden` attribute on something that also sets `display`: an author display
+ * rule beats the user agent's [hidden], and this project has shipped that bug
+ * four times.
+ */
+
+#wall-actions {
+  position: fixed;
+  /* Level with the mode switch, under the notes bar. */
+  top: calc(var(--u) * 38);
+  right: calc(var(--u) * 26);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+}
+
+/* The client wall has nothing to replay and no milestones of its own. */
+body[data-mode='clients'] #wall-actions { display: none; }
+
+#wall-actions[data-replay='off'] .wall-action:first-child { display: none; }
+#wall-actions[data-milestones='off'] .wall-action:nth-child(2) { display: none; }
+
+.wall-action {
+  position: relative;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 7);
+  padding: calc(var(--u) * 6) calc(var(--u) * 14);
+  border-radius: 999px;
+  border: 1px solid oklch(1 0 0 / 0.09);
+  background: oklch(0.19 0.014 245 / 0.72);
+  color: oklch(0.78 0.02 225);
+  font-family: inherit;
+  font-size: max(9px, calc(var(--u) * 11));
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+  opacity: 0.55;
+  transition: opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1), color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wall-action:hover:not(:disabled) { opacity: 1; color: oklch(0.96 0.01 220); }
+.wall-action:disabled { cursor: default; opacity: 0.3; }
+
+/* A new milestone keeps its button at full strength until it has been seen. */
+#wall-actions[data-badge='on'] .wall-action:nth-child(2) { opacity: 1; }
+
+.wall-badge {
+  display: none;
+  min-width: calc(var(--u) * 17);
+  height: calc(var(--u) * 17);
+  padding: 0 calc(var(--u) * 5);
+  border-radius: 999px;
+  background: oklch(0.8 0.14 75);
+  color: oklch(0.2 0.03 75);
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 10));
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: calc(var(--u) * 17);
+  text-align: center;
+}
+
+#wall-actions[data-badge='on'] .wall-badge { display: inline-block; }
+
+/* ── The milestone list ─────────────────────────────────────────────────── */
+
+.ms-pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + var(--u) * 8);
+  right: 0;
+  width: min(calc(var(--u) * 380), calc(100vw - var(--u) * 52));
+  /* Never taller than the room under the button; the list scrolls instead. */
+  max-height: calc(100vh - var(--u) * 100);
+  flex-direction: column;
+  border-radius: calc(var(--u) * 12);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  /* Opaque. At 0.98 the dashboard's brightest numbers still read through it. */
+  background: oklch(0.17 0.015 246);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.5);
+  overflow: hidden;
+}
+
+#wall-actions[data-open='true'] .ms-pop { display: flex; }
+
+.ms-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(var(--u) * 12) calc(var(--u) * 14) calc(var(--u) * 8);
+  border-bottom: 1px solid oklch(1 0 0 / 0.07);
+}
+
+.ms-title {
+  font-size: max(9px, calc(var(--u) * 11.5));
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: oklch(0.8 0.02 220);
+}
+
+.ms-close {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: oklch(0.6 0.015 235);
+  font: inherit;
+  font-size: max(8px, calc(var(--u) * 10));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ms-close:hover { color: oklch(0.92 0.01 220); }
+
+.ms-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: calc(var(--u) * 4) calc(var(--u) * 14) calc(var(--u) * 12);
+}
+
+.ms-section {
+  margin: calc(var(--u) * 10) 0 calc(var(--u) * 6);
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 9.5));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.015 240);
+}
+
+.ms-next { margin-bottom: calc(var(--u) * 9); }
+
+.ms-next-top {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--u) * 10);
+  font-size: max(9px, calc(var(--u) * 11.5));
+  color: oklch(0.88 0.015 222);
+}
+
+.ms-next-left {
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 10));
+  color: oklch(0.62 0.015 235);
+}
+
+.ms-track {
+  margin-top: calc(var(--u) * 4);
+  height: 3px;
+  border-radius: 2px;
+  background: oklch(1 0 0 / 0.07);
+  overflow: hidden;
+}
+
+.ms-fill {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(90deg, oklch(0.55 0.1 200), oklch(0.8 0.14 75));
+  transform-origin: left;
+}
+
+.ms-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--u) * 10);
+  padding: calc(var(--u) * 7) 0;
+  border-top: 1px solid oklch(1 0 0 / 0.05);
+}
+
+.ms-row-title {
+  font-size: max(9px, calc(var(--u) * 12));
+  color: oklch(0.9 0.015 220);
+}
+
+.ms-row-sub {
+  margin-top: 1px;
+  font-size: max(8px, calc(var(--u) * 10));
+  color: oklch(0.55 0.015 240);
+}
+
+.ms-row-when {
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 10));
+  color: oklch(0.55 0.015 240);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ms-row.is-new .ms-row-title { color: oklch(0.86 0.14 75); }
+.ms-row.is-new .ms-row-when { color: oklch(0.8 0.14 75); }
+
+.ms-empty {
+  padding: calc(var(--u) * 10) 0;
+  font-size: max(9px, calc(var(--u) * 11));
+  color: oklch(0.6 0.015 235);
+}
+
+/* ── The work time-lapse ────────────────────────────────────────────────── */
+
+/*
+ * Covers the whole window for about twenty seconds, then goes. Any click ends
+ * it, and it is driven by elapsed time so it always ends by itself too.
+ */
+.replay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 14);
+  padding: calc(var(--u) * 48) calc(var(--u) * 60) calc(var(--u) * 36);
+  /* Opaque for the same reason as the list: a replay you can read the
+     dashboard through looks like a rendering fault. */
+  background: radial-gradient(120% 100% at 50% 0%, oklch(0.18 0.03 230), oklch(0.12 0.015 250));
+  color: oklch(0.93 0.01 220);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.replay.is-on { opacity: 1; }
+
+.replay-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 24);
+}
+
+.replay-title {
+  font-size: max(10px, calc(var(--u) * 13));
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: oklch(0.72 0.02 220);
+}
+
+.replay-clock {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: calc(var(--u) * 54);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: oklch(0.97 0.02 200);
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-total {
+  margin-left: auto;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(10px, calc(var(--u) * 20));
+  color: oklch(0.8 0.13 75);
+  font-variant-numeric: tabular-nums;
+}
+
+.replay-sky {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.replay-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.replay-trace {
+  flex: 0 0 calc(var(--u) * 90);
+  display: flex;
+  align-items: stretch;
+  gap: calc(var(--u) * 3);
+}
+
+.replay-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 4);
+}
+
+.replay-bar {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(180deg, oklch(0.8 0.14 75), oklch(0.5 0.1 200));
+  transform-origin: bottom;
+  transform: scaleY(0);
+}
+
+.replay-tick {
+  flex: 0 0 auto;
+  height: calc(var(--u) * 12);
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 10));
+  color: oklch(0.55 0.015 240);
+}
+
+.replay-caption {
+  flex: 0 0 auto;
+  font-size: max(8px, calc(var(--u) * 11));
+  color: oklch(0.58 0.015 240);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .replay,
+  .wall-action { transition: none; }
+}

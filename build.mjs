@@ -112,7 +112,7 @@ async function copyStatic() {
   await fs.copyFile(path.join(root, 'src/renderer/pair.html'), path.join(dist, 'renderer/pair.html'));
   await fs.copyFile(path.join(root, 'src/renderer/toast.html'), path.join(dist, 'renderer/toast.html'));
   await fs.copyFile(path.join(root, 'src/renderer/chat.html'), path.join(dist, 'renderer/chat.html'));
-  for (const css of ['wall.css', 'stats.css', 'shell.css', 'notes.css', 'pair.css', 'toast.css', 'chat.css']) {
+  for (const css of ['wall.css', 'stats.css', 'shell.css', 'notes.css', 'actions.css', 'pair.css', 'toast.css', 'chat.css']) {
     await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
   }
 }

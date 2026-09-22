@@ -9,6 +9,7 @@
  */
 
 import { currentPeak, loadPeak, offerPeak } from './data/peak';
+import { evaluateMilestones, loadMilestones, markMilestonesSeen, milestonesForRenderer } from './data/milestones';
 import { velocityOf } from '../shared/velocity';
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, Tray, screen, shell, nativeImage, nativeTheme } from 'electron';
 import * as path from 'node:path';
@@ -238,6 +239,12 @@ async function refreshUsage(reason: string): Promise<void> {
     if (await offerPeak(velocityOf(usage.recent))) {
       console.log(`[peak] new record: ${Math.round(currentPeak()?.velocity ?? 0).toLocaleString()} tokens/min`);
     }
+    /*
+     * Milestones, on the COMPLETED index only. refreshIndex has resolved, so
+     * this pass is whole; `unavailable` means there is nothing real to judge.
+     * A screen never gets here: it does not index while paired.
+     */
+    await evaluateMilestones(usage, !usage.unavailable && !usageIndexing);
     if (Date.now() - usageLastSave > USAGE_SAVE_INTERVAL_MS) {
       usageLastSave = Date.now();
       await saveIndex(usageCacheFile(), usage).catch((err) =>
@@ -1317,6 +1324,9 @@ function usageForRenderer(): Record<string, unknown> {
   return {
     ...rest,
     peak: currentPeak(),
+    // This machine's own ledger. A screen has none: it is not indexing, and the
+    // paired machine's milestones are not projected.
+    milestones: milestonesForRenderer(usage, usageIndexing),
     fileCount: Object.keys(files).length,
     indexing: usageIndexing,
     projection: projection.projectionStatus(),
@@ -1624,6 +1634,14 @@ function registerIpc(): void {
     // or a stray renderer message can never strand it on an empty client wall.
     updateSettings({ mode: !isStatsOnly && mode === 'clients' ? 'clients' : 'stats' }),
   );
+  /*
+   * Opening the milestone list clears the badge. The ledger is the authority,
+   * so the renderer only learns it is cleared from the next push.
+   */
+  ipcMain.handle('wall:milestonesSeen', async () => {
+    if (await markMilestonesSeen()) pushUsage();
+  });
+
   ipcMain.handle('wall:installUpdate', () => {
     // Guarded on state, not on the caller: the pill is only rendered when an
     // update is staged, but a stale renderer must not be able to quit the app.
@@ -1821,6 +1839,7 @@ if (!app.requestSingleInstanceLock()) {
 
     usage = await loadIndex(usageCacheFile());
     await loadPeak(app.getPath('userData'));
+    await loadMilestones(app.getPath('userData'));
     if (projection.isScreen()) {
       console.log('[usage] not indexing: this machine is a projection screen');
     } else {

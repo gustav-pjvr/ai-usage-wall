@@ -77,6 +77,7 @@ every state push (`src/main/index.ts:1081`).
 | `useVault` | boolean | `true` | strict `!== false`, so it defaults on | `src/main/index.ts:1169` |
 | `debug` | boolean | `false` | strict `=== true` | diagnostics overlay, `src/renderer/main.ts:769` |
 | `notes` | string | `''` | string, truncated to 400 characters | the notes bar across the top of the wall, [notes-bar.md](notes-bar.md) |
+| `topPanel` | `'constellation'` or `'throughput'` | `'constellation'` | anything else becomes `'constellation'` | what the top row's big panel shows, [constellation.md](constellation.md) |
 
 Note the two different boolean idioms. Everything defaults off with
 `r.x === true`, except `useVault`, which defaults on with `r.useVault !== false`.

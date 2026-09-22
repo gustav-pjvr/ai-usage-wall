@@ -128,6 +128,66 @@ console.log('\na record that is half written when the size is taken');
      `got ${two.index.totals.requests}`);
 }
 
+console.log('\nindex version 4: per-project hours and local active days');
+{
+  const { loadIndex } = require(out);
+  /*
+   * Two projects in the same recent hour, plus one record three weeks old. The
+   * old one must count towards the active days (kept forever) and not towards
+   * the per-project hours (kept for 14 days, like `hourly`).
+   */
+  const DIR = path.join(HOME, 'projects', 'hours');
+  await fs.mkdir(DIR, { recursive: true });
+  const hourStart = new Date(Date.now() - 2 * 3_600_000);
+  hourStart.setMinutes(0, 0, 0);
+  const at = (ms) => new Date(ms).toISOString();
+  const cwdA = path.join(tmp, 'Alpha');
+  const cwdB = path.join(tmp, 'bravo');
+  const old = Date.now() - 21 * 86_400_000;
+  const line = (ts, cwd, input, output) => JSON.stringify({
+    type: 'assistant', timestamp: ts, sessionId: '11111111-2222-4333-8444-555555555555', cwd,
+    message: { model: 'claude-opus-5', usage: { input_tokens: input, output_tokens: output } },
+  }) + '\n';
+  await fs.writeFile(path.join(DIR, 'h.jsonl'),
+    line(at(hourStart.getTime() + 5 * 60_000), cwdA, 100, 10) +
+    line(at(hourStart.getTime() + 9 * 60_000), cwdA, 200, 20) +
+    line(at(hourStart.getTime() + 30 * 60_000), cwdB, 50, 5) +
+    line(at(old), cwdB, 1, 1), 'utf8');
+
+  const { index } = await refreshIndex(emptyIndex());
+  const hourKey = hourStart.toISOString().slice(0, 13);
+  const bucket = index.projectHourly[hourKey] ?? {};
+  ok('the hour holds each project under the same lowercased key as `projects`',
+     !!bucket[cwdA.toLowerCase()] && !!bucket[cwdB.toLowerCase()] && !!index.projects[cwdA.toLowerCase()],
+     JSON.stringify(Object.keys(bucket)));
+  ok('and folds requests, total and output per project',
+     JSON.stringify(bucket[cwdA.toLowerCase()]) === JSON.stringify([2, 330, 30]) &&
+     JSON.stringify(bucket[cwdB.toLowerCase()]) === JSON.stringify([1, 55, 5]), JSON.stringify(bucket));
+  ok('a record older than 14 days is not read into the per-project hours',
+     !Object.keys(index.projectHourly).some((k) => k === new Date(old).toISOString().slice(0, 13)));
+
+  // The check above is the INGEST cutoff. This is the other half: an hour that
+  // was recent when it was folded in and has since aged out must be pruned, or
+  // the field grows forever. The first version of this suite only tested the
+  // cutoff, and deleting the prune line did not fail it.
+  const aged = { ...index, projectHourly: { ...index.projectHourly, '2020-01-01T00': { stale: [1, 1, 1] } } };
+  const { index: pruned } = await refreshIndex(aged);
+  ok('an hour that has aged past 14 days is pruned on the next pass', !pruned.projectHourly['2020-01-01T00']);
+
+  const localDay = (ms) => {
+    const d = new Date(ms);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  ok('active days are LOCAL days, and the old one is kept', index.activeDays[localDay(old)] === 1 &&
+     (index.activeDays[localDay(hourStart.getTime() + 5 * 60_000)] ?? 0) >= 3, JSON.stringify(index.activeDays));
+
+  const cache = path.join(tmp, 'v3-cache.json');
+  await fs.writeFile(cache, JSON.stringify({ ...index, version: 3 }), 'utf8');
+  const loaded = await loadIndex(cache);
+  ok('a version 3 cache is discarded, so the new fields are built from scratch',
+     loaded.version === 4 && Object.keys(loaded.projectHourly).length === 0 && loaded.totals.requests === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 await fs.rm(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

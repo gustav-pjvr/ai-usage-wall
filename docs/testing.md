@@ -1,16 +1,17 @@
 # Testing
 
 **Last updated:** 2026-09-22
-**Code snapshot:** commit `2090e79` plus the responsive and notes bar work.
+**Code snapshot:** the constellation, milestones and work time-lapse build.
 Counts below were produced by running the suites on that date.
 **Primary sources:** `test/run.mjs`, `test/projection.test.mjs`,
 `test/projection-crypto.test.mjs`, `test/stats-projection.test.mjs`,
 `test/usage-append.test.mjs`, `test/chat.test.mjs`, `test/pricing.test.mjs`,
-`test/projection-e2e.cjs`, `test/render-fit.cjs`, `package.json`
+`test/settings.test.mjs`, `test/constellation.test.mjs`, `test/milestones.test.mjs`,
+`test/timelapse.test.mjs`, `test/projection-e2e.cjs`, `test/render-fit.cjs`, `package.json`
 
 ## Summary
 
-Ten suites, no test framework. Eight run in isolation and are wired into
+Thirteen suites, no test framework. Eleven run in isolation and are wired into
 `npm test`. Two need a real Electron process and are run separately: one drives
 the projection classes against the **deployed Cloudflare relay**, the other opens
 a real window and measures the rendered layout. Each isolated suite bundles the
@@ -31,7 +32,7 @@ useful thing here.
 ## How to run
 
 ```
-npm test              # the eight isolated suites
+npm test              # the eleven isolated suites
 npm run typecheck     # tsc --noEmit across src/**/*.ts and build.mjs
 npm run test:e2e      # electron test/projection-e2e.cjs, hits the DEPLOYED relay
 npm run test:render   # electron test/render-fit.cjs, opens a real window
@@ -42,20 +43,23 @@ npm run test:render   # electron test/render-fit.cjs, opens a real window
 | Suite | Checks | Result |
 |---|---|---|
 | `test/run.mjs` | 52 | 0 failed |
-| `test/projection.test.mjs` | 40 | 0 failed |
+| `test/projection.test.mjs` | 46 | 0 failed |
 | `test/projection-crypto.test.mjs` | 37 | 0 failed |
 | `test/stats-projection.test.mjs` | 28 | 0 failed |
-| `test/usage-append.test.mjs` | 4 | 0 failed |
+| `test/usage-append.test.mjs` | 10 | 0 failed |
 | `test/chat.test.mjs` | 43 | 0 failed |
 | `test/pricing.test.mjs` | 23 | 0 failed |
-| `test/settings.test.mjs` | 31 | 0 failed |
-| **total** | **258** | |
+| `test/settings.test.mjs` | 34 | 0 failed |
+| `test/constellation.test.mjs` | 38 | 0 failed |
+| `test/milestones.test.mjs` | 38 | 0 failed |
+| `test/timelapse.test.mjs` | 23 | 0 failed |
+| **total** | **372** | |
 
 And `npm run test:render`, separately, because it needs a window:
 
 | Suite | Checks | Result |
 |---|---|---|
-| `test/render-fit.cjs` | 63 | 0 failed |
+| `test/render-fit.cjs` | 143 | 0 failed |
 
 Two practical notes:
 

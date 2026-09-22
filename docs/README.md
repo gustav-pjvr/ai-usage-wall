@@ -13,6 +13,10 @@ reversed; these are the depth behind it.
 | [editions.md](editions.md) | The full and stats builds, what differs, and how the edition is injected at build time |
 | [responsive-layout.md](responsive-layout.md) | How the dashboard adapts to the screen, the one unit everything is a multiple of, and why the original `vw` clamps made it worse |
 | [notes-bar.md](notes-bar.md) | The one line note across the top, why it locks, and why it stays on this machine |
+| [constellation.md](constellation.md) | The project sky in the top panel: what size, brightness and a link mean, and how it stays cheap |
+| [milestones.md](milestones.md) | The badge and the list: what counts, why the first run is silent, and why there is no duration record |
+| [work-timelapse.md](work-timelapse.md) | The "Today" replay: what it measures, why it always ends, and why "today" is local |
+| [design/constellation-timelapse-milestones.md](design/constellation-timelapse-milestones.md) | The design those three were built from, with Gustav's decisions on top |
 
 ## The numbers
 

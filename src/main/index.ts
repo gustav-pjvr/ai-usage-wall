@@ -43,6 +43,7 @@ import {
 } from './data/usage';
 import { currentHistory, historyPort, loadHistory } from './data/history';
 import { mergeHistory } from '../shared/usage-merge';
+import { collectDay, offeredDays } from '../shared/intraday';
 import {
   applyLayerMode,
   detach,
@@ -1684,6 +1685,30 @@ function registerIpc(): void {
    */
   ipcMain.handle('wall:milestonesSeen', async () => {
     if (await markMilestonesSeen()) pushUsage();
+  });
+
+  /*
+   * The time-lapse, on demand only. Five-minute detail never rides on a usage
+   * push: a year of it is about half a megabyte, and pushes were already cut
+   * from 170 KB for being too big. One day is under 20 KB and asked for when a
+   * day is picked. Refused (null) while indexing, when a day is not complete
+   * yet (rule 15), and on a paired screen, which has none of this machine's
+   * detail (docs/privacy-wire.md).
+   */
+  const timelapseReady = (): boolean => !usageIndexing && !usage.unavailable && !projection.isScreen();
+  ipcMain.handle('wall:timelapseDays', () =>
+    timelapseReady() ? offeredDays(mergedUsage().activeDays, usage.files, currentHistory().entries) : null,
+  );
+  ipcMain.handle('wall:timelapseDay', (_e, day: unknown) => {
+    if (!timelapseReady() || typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    try {
+      return collectDay(day, usage.files, currentHistory().entries, mergedUsage().activeDays[day] ?? 0, Date.now());
+    } catch (err) {
+      // Only a broken live/archived invariant throws. Say so in the log; the
+      // renderer shows "Could not read that day" rather than a wrong curve.
+      console.error(`[timelapse] could not read ${day}:`, err);
+      throw err;
+    }
   });
 
   ipcMain.handle('wall:installUpdate', () => {

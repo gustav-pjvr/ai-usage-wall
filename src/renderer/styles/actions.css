@@ -1,6 +1,6 @@
 /*
  * The wall's on-demand controls, top right, and what they open: the milestone
- * list and the work time-lapse. Sizes come from --u (shell.css) so they shrink
+ * list, the day picker and the time-lapse. Sizes come from --u (shell.css) so they shrink
  * with everything else.
  *
  * Visibility is driven by data attributes on #wall-actions, never by the
@@ -23,8 +23,10 @@
 /* The client wall has nothing to replay and no milestones of its own. */
 body[data-mode='clients'] #wall-actions { display: none; }
 
-#wall-actions[data-replay='off'] .wall-action:first-child { display: none; }
-#wall-actions[data-milestones='off'] .wall-action:nth-child(2) { display: none; }
+#wall-actions[data-replay='off'] .wall-action-today,
+#wall-actions[data-replay='off'] .wall-action-days,
+#wall-actions[data-replay='off'] .dp-pop { display: none; }
+#wall-actions[data-milestones='off'] .wall-action-ms { display: none; }
 
 .wall-action {
   position: relative;
@@ -53,7 +55,7 @@ body[data-mode='clients'] #wall-actions { display: none; }
 .wall-action:disabled { cursor: default; opacity: 0.3; }
 
 /* A new milestone keeps its button at full strength until it has been seen. */
-#wall-actions[data-badge='on'] .wall-action:nth-child(2) { opacity: 1; }
+#wall-actions[data-badge='on'] .wall-action-ms { opacity: 1; }
 
 .wall-badge {
   display: none;
@@ -92,7 +94,7 @@ body[data-mode='clients'] #wall-actions { display: none; }
   overflow: hidden;
 }
 
-#wall-actions[data-open='true'] .ms-pop { display: flex; }
+#wall-actions[data-open='milestones'] .ms-pop { display: flex; }
 
 .ms-head {
   flex: 0 0 auto;
@@ -211,11 +213,134 @@ body[data-mode='clients'] #wall-actions { display: none; }
   color: oklch(0.6 0.015 235);
 }
 
-/* ── The work time-lapse ────────────────────────────────────────────────── */
+
+/* ── The day picker ─────────────────────────────────────────────────────── */
 
 /*
- * Covers the whole window for about twenty seconds, then goes. Any click ends
- * it, and it is driven by elapsed time so it always ends by itself too.
+ * A month grid under the buttons, the .ms-pop pattern: absolutely placed,
+ * closed by a click anywhere outside, never open at the same time as the list.
+ * Bright days play on click; dim ones are text, not buttons, so a click on one
+ * does nothing at all.
+ */
+.dp-pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + var(--u) * 8);
+  right: 0;
+  width: min(max(240px, calc(var(--u) * 320)), calc(100vw - var(--u) * 52));
+  padding: calc(var(--u) * 10) calc(var(--u) * 12) calc(var(--u) * 12);
+  border-radius: calc(var(--u) * 12);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  background: oklch(0.17 0.015 246);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.5);
+}
+
+#wall-actions[data-open='days'] .dp-pop { display: block; }
+
+.dp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--u) * 8);
+  margin-bottom: calc(var(--u) * 8);
+}
+
+.dp-month {
+  font-size: max(10px, calc(var(--u) * 12));
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.85 0.02 220);
+}
+
+.dp-nav {
+  appearance: none;
+  min-width: max(22px, calc(var(--u) * 28));
+  height: max(22px, calc(var(--u) * 28));
+  border: 1px solid oklch(1 0 0 / 0.09);
+  border-radius: 999px;
+  background: transparent;
+  color: oklch(0.8 0.02 225);
+  font: inherit;
+  font-size: max(12px, calc(var(--u) * 16));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dp-nav:hover:not(:disabled) { color: oklch(0.96 0.01 220); border-color: oklch(1 0 0 / 0.2); }
+.dp-nav:disabled { opacity: 0.25; cursor: default; }
+
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: calc(var(--u) * 3);
+}
+
+.dp-dow {
+  padding-bottom: calc(var(--u) * 3);
+  text-align: center;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 9.5));
+  letter-spacing: 0.06em;
+  color: oklch(0.5 0.015 240);
+}
+
+.dp-day {
+  appearance: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: calc(var(--u) * 7);
+  background: transparent;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(9px, calc(var(--u) * 12));
+  font-variant-numeric: tabular-nums;
+  color: oklch(0.36 0.01 240);
+  cursor: default;
+}
+
+.dp-day[data-shape='full'],
+.dp-day[data-shape='partial'] {
+  background: oklch(1 0 0 / 0.06);
+  color: oklch(0.93 0.015 220);
+  cursor: pointer;
+  transition: background 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dp-day[data-shape='full']:hover,
+.dp-day[data-shape='partial']:hover { background: oklch(0.8 0.13 75 / 0.28); }
+
+/* Some of the day's requests have no minute detail: a small dot says so. */
+.dp-day[data-shape='partial']::after {
+  content: '';
+  position: absolute;
+  bottom: 14%;
+  width: max(3px, calc(var(--u) * 4));
+  height: max(3px, calc(var(--u) * 4));
+  border-radius: 50%;
+  background: oklch(0.8 0.13 75);
+}
+
+.dp-day[data-shape='total'] { color: oklch(0.52 0.012 240); }
+.dp-day[data-shape='future'] { visibility: hidden; }
+.dp-day[data-today='true'] { box-shadow: inset 0 0 0 1px oklch(0.8 0.13 75 / 0.8); }
+
+.dp-foot,
+.dp-empty {
+  margin-top: calc(var(--u) * 9);
+  font-size: max(9px, calc(var(--u) * 10.5));
+  color: oklch(0.58 0.015 240);
+}
+
+/* ── The time-lapse ─────────────────────────────────────────────────────── */
+
+/*
+ * Covers the whole window for about twenty-three seconds, then goes. Any click
+ * ends it, and it is driven by elapsed time so it always ends by itself too.
+ * Opaque: a replay you can read the dashboard through looks like a fault.
  */
 .replay {
   position: fixed;
@@ -223,10 +348,8 @@ body[data-mode='clients'] #wall-actions { display: none; }
   z-index: 90;
   display: flex;
   flex-direction: column;
-  gap: calc(var(--u) * 14);
-  padding: calc(var(--u) * 48) calc(var(--u) * 60) calc(var(--u) * 36);
-  /* Opaque for the same reason as the list: a replay you can read the
-     dashboard through looks like a rendering fault. */
+  gap: calc(var(--u) * 12);
+  padding: calc(var(--u) * 40) calc(var(--u) * 56) calc(var(--u) * 28);
   background: radial-gradient(120% 100% at 50% 0%, oklch(0.18 0.03 230), oklch(0.12 0.015 250));
   color: oklch(0.93 0.01 220);
   cursor: pointer;
@@ -236,79 +359,172 @@ body[data-mode='clients'] #wall-actions { display: none; }
 
 .replay.is-on { opacity: 1; }
 
+/* Static positions and tabular figures: nothing in the header moves as it counts. */
 .replay-head {
   flex: 0 0 auto;
-  display: flex;
-  align-items: baseline;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
   gap: calc(var(--u) * 24);
 }
 
+.replay-titles { min-width: 0; }
+
 .replay-title {
-  font-size: max(10px, calc(var(--u) * 13));
+  font-size: max(11px, calc(var(--u) * 15));
   font-weight: 600;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: oklch(0.72 0.02 220);
+  color: oklch(0.82 0.02 220);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.replay-sub {
+  margin-top: calc(var(--u) * 4);
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(9px, calc(var(--u) * 12));
+  color: oklch(0.58 0.015 240);
+}
+
+.replay-centre { text-align: center; }
 
 .replay-clock {
   font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
   font-size: calc(var(--u) * 54);
   font-weight: 700;
+  line-height: 1;
   letter-spacing: -0.03em;
   color: oklch(0.97 0.02 200);
   font-variant-numeric: tabular-nums;
 }
 
-.replay-total {
-  margin-left: auto;
+.replay-on {
+  min-height: 1.3em;
+  margin-top: calc(var(--u) * 6);
+  font-size: max(9px, calc(var(--u) * 13));
+  color: oklch(0.7 0.02 220);
+  white-space: nowrap;
+}
+
+.replay-stats {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--u) * 2);
+  min-width: 0;
+}
+
+.replay-stat {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 8);
+  white-space: nowrap;
+}
+
+.replay-stat-value {
   font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  font-size: max(10px, calc(var(--u) * 20));
-  color: oklch(0.8 0.13 75);
+  font-size: max(11px, calc(var(--u) * 20));
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.replay-sky {
+.replay-stat-label {
+  min-width: 6.5em;
+  font-size: max(8px, calc(var(--u) * 11));
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: oklch(0.58 0.015 240);
+}
+
+.replay-stat[data-lane='tokens'] .replay-stat-value { color: oklch(0.8 0.13 75); }
+.replay-stat[data-lane='output'] .replay-stat-value { color: oklch(0.8 0.14 200); }
+.replay-stat[data-lane='requests'] .replay-stat-value { color: oklch(0.85 0.02 220); }
+
+/*
+ * Three lanes on one time axis, processed twice the height of the other two.
+ * The canvas lies over all three; the lane names and peaks are DOM so the
+ * render suite can measure them, and the canvas reads each lane's box from
+ * them, so the split lives here and nowhere else.
+ */
+.replay-graph {
   position: relative;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
+  display: grid;
+  grid-template-rows: 2fr 1fr 1fr;
+  gap: calc(var(--u) * 10);
 }
 
 .replay-canvas {
   position: absolute;
   inset: 0;
   display: block;
+  pointer-events: none;
 }
 
-.replay-trace {
-  flex: 0 0 calc(var(--u) * 90);
+.replay-lane {
+  position: relative;
+  min-height: 0;
   display: flex;
-  align-items: stretch;
-  gap: calc(var(--u) * 3);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: calc(var(--u) * 12);
 }
 
-.replay-col {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--u) * 4);
+.replay-lane-name,
+.replay-lane-peak {
+  font-size: max(9px, calc(var(--u) * 11.5));
+  white-space: nowrap;
 }
 
-.replay-bar {
-  flex: 1;
-  border-radius: 2px 2px 0 0;
-  background: linear-gradient(180deg, oklch(0.8 0.14 75), oklch(0.5 0.1 200));
-  transform-origin: bottom;
-  transform: scaleY(0);
+.replay-lane-name {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.replay-lane-peak {
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  color: oklch(0.6 0.015 235);
+}
+
+.replay-lane[data-lane='tokens'] .replay-lane-name { color: oklch(0.8 0.13 75); }
+.replay-lane[data-lane='output'] .replay-lane-name { color: oklch(0.8 0.14 200); }
+.replay-lane[data-lane='requests'] .replay-lane-name { color: oklch(0.85 0.02 220); }
+
+.replay-peak-label {
+  display: none;
+  position: absolute;
+  padding: calc(var(--u) * 3) calc(var(--u) * 8);
+  border-radius: calc(var(--u) * 6);
+  background: oklch(0.14 0.015 250 / 0.92);
+  border: 1px solid oklch(0.8 0.13 75 / 0.35);
+  font-size: max(9px, calc(var(--u) * 12));
+  color: oklch(0.9 0.1 75);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.replay-axis {
+  position: relative;
+  flex: 0 0 max(12px, calc(var(--u) * 16));
 }
 
 .replay-tick {
-  flex: 0 0 auto;
-  height: calc(var(--u) * 12);
+  position: absolute;
+  top: 0;
   font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  font-size: max(8px, calc(var(--u) * 10));
+  font-size: max(8px, calc(var(--u) * 10.5));
   color: oklch(0.55 0.015 240);
+  white-space: nowrap;
+}
+
+.replay-note {
+  flex: 0 0 auto;
+  font-size: max(9px, calc(var(--u) * 11.5));
+  color: oklch(0.78 0.1 75);
 }
 
 .replay-caption {
@@ -320,7 +536,17 @@ body[data-mode='clients'] #wall-actions { display: none; }
   text-overflow: ellipsis;
 }
 
+/* A day with nothing to draw: said once, centred, then gone. */
+.replay.is-notice { justify-content: center; align-items: center; text-align: center; }
+.replay.is-notice .replay-head { display: block; }
+
+.replay-message {
+  font-size: max(12px, calc(var(--u) * 22));
+  color: oklch(0.88 0.015 222);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .replay,
-  .wall-action { transition: none; }
+  .wall-action,
+  .dp-day { transition: none; }
 }

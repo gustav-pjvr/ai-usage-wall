@@ -19,6 +19,7 @@ import { StatsView } from './stats';
 import { NotesBar } from './notes';
 import { WallActions } from './actions';
 import { isStatsOnly } from '../shared/edition';
+import type { DayRaw, TimelapseDays } from '../shared/intraday';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ declare global {
       installUpdate(): Promise<void>;
       notesEdit(active: boolean): Promise<boolean>;
       milestonesSeen(): Promise<void>;
+      timelapseDays(): Promise<TimelapseDays | null>;
+      timelapseDay(day: string): Promise<DayRaw | null>;
     };
   }
 }

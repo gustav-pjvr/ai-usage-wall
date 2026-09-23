@@ -45,6 +45,7 @@ import type { PeakVelocity } from '../../shared/velocity';
 import { promises as fs, createReadStream } from 'node:fs';
 import { costOf } from '../../shared/pricing';
 import { localDayKey } from '../../shared/day';
+import { bucketOf, foldIntraday, type Intraday } from '../../shared/intraday';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as readline from 'node:readline';
@@ -67,6 +68,11 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * 5 (2026-09-22): every file carries its own `contrib`, so a transcript that is
  * deleted can have its numbers moved to the history store instead of vanishing.
  *
+ * 6 (2026-09-23): five-minute `intraday` detail in every file's `contrib`, for
+ * the any-day time-lapse; `projectHourly` removed. CONTRIB_VERSION is NOT
+ * bumped: `intraday` is optional, and a bump would make loadIndex drop every
+ * contribution it hands over, the exact loss version 5 exists to prevent.
+ *
  * A BUMP NO LONGER LOSES ANYTHING, and that is the point of version 5. Version
  * 4's bump discarded a cache that remembered about 350 transcripts Claude Code
  * had already deleted, and the wall dropped from 39.35B tokens to 19.79B.
@@ -75,7 +81,7 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * (Version 4 caches have no contributions to hand back; that history came back
  * through a one-off seed, see docs/design/history-archive.md.)
  */
-export const INDEX_VERSION = 5;
+export const INDEX_VERSION = 6;
 
 /** Schema of one file's contribution. Independent of INDEX_VERSION: history outlives the cache. */
 export const CONTRIB_VERSION = 1;
@@ -129,8 +135,8 @@ export interface SessionInfo {
  * archiving its contribution and rebuilding from the files that remain; the
  * contribution is what makes the archive exact instead of a guess.
  *
- * Not kept: hourly, projectHourly, recent, latest. Those are short windows,
- * and a file old enough to be deleted is outside them.
+ * Not kept: hourly, recent, latest. Those are short windows, and a file old
+ * enough to be deleted is outside them.
  */
 export interface FileContribution {
   cv: number;
@@ -140,6 +146,14 @@ export interface FileContribution {
   projects: Record<string, TokenTotals & { lastSeen: string; display: string }>;
   sessions: Record<string, SessionInfo>;
   activeDays: Record<string, number>;
+  /**
+   * This file's records in five-minute slots of the local day, per project.
+   * The time-lapse sums a day across every live and archived contribution
+   * (src/shared/intraday.ts), so a deleted transcript keeps its curve. Absent
+   * on a contribution archived before index version 6: that file's requests
+   * still count in `activeDays`, and its days show as partly detailed.
+   */
+  intraday?: Intraday;
 }
 
 export interface FileEntry {
@@ -161,16 +175,6 @@ export interface UsageIndex {
   sessions: Record<string, SessionInfo>;
   /** [epochMs, totalTokens, outputTokens] for the most recent records. */
   recent: [number, number, number][];
-  /**
-   * Per project, per UTC hour: [requests, totalTokens, outputTokens].
-   *
-   * The work time-lapse replays today project by project, and nothing else in
-   * the index knows WHICH project was busy in which hour. Spreading a session's
-   * tokens evenly across its span would be inventing a shape, so this is
-   * measured at ingest instead. Keyed like `hourly` (UTC hour, then the same
-   * lowercased cwd key as `projects`) and pruned with it, so it stays small.
-   */
-  projectHourly: Record<string, Record<string, [number, number, number]>>;
   /**
    * LOCAL calendar days with at least one request, and how many.
    *
@@ -237,7 +241,7 @@ function addInto(target: TokenTotals, u: TokenTotals): void {
 }
 
 export function emptyContrib(): FileContribution {
-  return { cv: CONTRIB_VERSION, totals: emptyTotals(), daily: {}, models: {}, projects: {}, sessions: {}, activeDays: {} };
+  return { cv: CONTRIB_VERSION, totals: emptyTotals(), daily: {}, models: {}, projects: {}, sessions: {}, activeDays: {}, intraday: {} };
 }
 
 /** The aggregates a record lands in, shared by the index and each file's contribution. */
@@ -339,7 +343,6 @@ export function emptyIndex(): UsageIndex {
     projects: {},
     sessions: {},
     recent: [],
-    projectHourly: {},
     activeDays: {},
     prompts: { total: 0, daily: {}, lastAt: null, offset: 0, size: 0 },
     latest: { ts: null, model: null, sessionId: null, version: null, cwd: null },
@@ -499,20 +502,27 @@ async function ingestFile(
       // numbers it replaces.
       fold(index, rec, meta);
       fold(contrib, rec, meta);
+      /*
+       * The same condition and the same local day as `activeDays` in fold, so
+       * for every file the slots' request counts add up to its activeDays; the
+       * suite pins that equality. Records with no cwd go under "": their tokens
+       * are in the curve even though there is no project to name.
+       */
+      if (ts && Number.isFinite(tsMs)) {
+        foldIntraday(
+          (contrib.intraday ??= {}),
+          localDayKey(tsMs),
+          meta.cwd === null ? '' : meta.cwd.toLowerCase(),
+          bucketOf(tsMs),
+          [1, rec.input + rec.output + rec.cacheCreate + rec.cacheRead, rec.output],
+        );
+      }
 
       if (ts) {
         if (Number.isFinite(tsMs) && tsMs >= hourlyCutoff) {
           const hour = ts.slice(0, 13);
           index.hourly[hour] ??= emptyTotals();
           addInto(index.hourly[hour], rec);
-
-          if (typeof o.cwd === 'string') {
-            const bucket = (index.projectHourly[hour] ??= {});
-            const cell = (bucket[o.cwd.toLowerCase()] ??= [0, 0, 0]);
-            cell[0] += 1;
-            cell[1] += rec.input + rec.output + rec.cacheCreate + rec.cacheRead;
-            cell[2] += rec.output;
-          }
         }
 
         if (Number.isFinite(tsMs)) {
@@ -696,7 +706,6 @@ function prune(index: UsageIndex): void {
   }
   const cutoff = new Date(Date.now() - HOURLY_DAYS * 86_400_000).toISOString().slice(0, 13);
   for (const k of Object.keys(index.hourly)) if (k < cutoff) delete index.hourly[k];
-  for (const k of Object.keys(index.projectHourly)) if (k < cutoff) delete index.projectHourly[k];
 }
 
 /**
@@ -875,6 +884,15 @@ async function rebuildKeeping(
   onProgress: ((p: IndexProgress) => void) | undefined,
   port: HistoryPort | undefined,
 ): Promise<{ index: UsageIndex; rebuilt: boolean }> {
+  /*
+   * Say "indexing" BEFORE anything else. A file just archived is still in the
+   * old index until this resolves, so for a moment it is in both the index and
+   * history; readers that sum both (the time-lapse) must see a rebuild in
+   * progress and wait, not a broken invariant. The first real progress report
+   * comes only after every transcript has been listed and stat'd. Zero bytes,
+   * so the loading bar ignores it.
+   */
+  onProgress?.({ done: 0, total: 0, bytesDone: 0, bytesTotal: 0, cold: true });
   const fresh = emptyIndex();
   fresh.prompts = old.prompts;
   const { index } = await refreshIndex(fresh, onProgress, { history: port });

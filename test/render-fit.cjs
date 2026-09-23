@@ -79,6 +79,8 @@ if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
 const saved = [];
 let seenCalls = 0;
+/** Every day the renderer asked the main process for, in order. */
+const dayCalls = [];
 let pass = 0;
 let fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -107,6 +109,53 @@ const SIZES = [
   { w: 1366, h: 768, label: '1366x768   (worst case)' },
   { w: 1280, h: 800, label: '1280x800' },
 ];
+
+/** `YYYY-MM-DD` of the local day `ms` is in, as src/shared/day.ts makes it. */
+const dayKey = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const DAY_MS = 86_400_000;
+const WS = 'C:\\Users\\Demo User\\Desktop\\Claude WorkSpace\\';
+const TL_PROJECTS = ['muchbetter-client-wall', 'Ridgeway Marathon', 'nvrc-website-v2'];
+
+/**
+ * One day's five-minute detail, shaped exactly as `wall:timelapseDay` returns
+ * it: forty slots across three projects with one clear peak. For today, only
+ * slots that have already started, ending at the current one, so the replay
+ * stops at now whatever time the suite runs.
+ */
+function fixtureDay(day, now) {
+  const today = day === dayKey(now);
+  const d = new Date(now);
+  const nowSlot = Math.floor((d.getHours() * 60 + d.getMinutes()) / 5);
+  const last = today ? nowSlot : 108 + 79;
+  const first = Math.max(0, last - 79);
+  const projects = {};
+  let i = 0;
+  for (let b = first; b <= last; b += 2, i++) {
+    const p = TL_PROJECTS[i % 3];
+    const key = (WS + p).toLowerCase();
+    const peak = i === 23 ? 12 : 1; // one slot far above the rest
+    (projects[key] ??= { display: WS + p, cells: {} }).cells[String(b)] = [7 * peak, 3_100_000 * peak + i * 41_000, 21_000 * peak + i * 300];
+  }
+  const shaped = Object.values(projects).reduce((n, p) => n + Object.values(p.cells).reduce((a, c) => a + c[0], 0), 0);
+  return { day, asOf: now, bucketMinutes: 5, projects, requests: shaped, shapedRequests: shaped };
+}
+
+/** The picker's days: today and yesterday full, two days ago partial, three days ago a total only. */
+function fixtureDays(now) {
+  const n = (k) => dayKey(now - k * DAY_MS);
+  return {
+    today: n(0),
+    days: {
+      [n(0)]: { requests: 280, shaped: 280 },
+      [n(1)]: { requests: 280, shaped: 280 },
+      [n(2)]: { requests: 335, shaped: 320 },
+      [n(3)]: { requests: 1_200, shaped: 0 },
+    },
+  };
+}
 
 /**
  * A deliberately awkward index. Real magnitudes from this machine, plus the
@@ -224,20 +273,9 @@ function fixture(emptyIndex) {
   };
   idx.fileCount = 463;
 
-  // Today's work, per project per hour, keyed by UTC hour exactly as usage.ts
-  // writes it. Up to seven local hours ending now, so the replay has a real
-  // span whatever time of day the suite runs.
-  const cur = new Date(now);
-  const nowHour = cur.getHours();
-  for (let h = Math.max(0, nowHour - 6); h <= nowHour; h++) {
-    const key = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate(), h).toISOString().slice(0, 13);
-    idx.projectHourly[key] = {};
-    projects.slice(0, 3).forEach((name, i) => {
-      if ((h + i) % 3 === 0 && h !== nowHour) return; // not every project every hour
-      const cwd = `C:\\Users\\Demo User\\Desktop\\Claude WorkSpace\\${name}`.toLowerCase();
-      idx.projectHourly[key][cwd] = [40, 30_000_000 * (i + 1), 200_000];
-    });
-  }
+  // Today has requests, so "Today" is enabled. The five-minute detail itself
+  // never rides on the usage push; it comes from the two stubs below.
+  idx.activeDays[dayKey(now)] = 2_685;
 
   // A ledger as the main process would hand it over: one unseen, one dated,
   // one seeded, with the longest titles the ladders can produce.
@@ -438,6 +476,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('wall:milestonesSeen', () => {
     seenCalls++;
   });
+  ipcMain.handle('wall:timelapseDays', () => fixtureDays(Date.now()));
+  ipcMain.handle('wall:timelapseDay', (_e, day) => {
+    dayCalls.push(day);
+    return fixtureDay(day, Date.now());
+  });
   ipcMain.handle('wall:reload', () => undefined);
   ipcMain.handle('wall:toggleFocus', () => undefined);
   ipcMain.handle('wall:exitFocus', () => undefined);
@@ -579,8 +622,8 @@ app.whenReady().then(async () => {
         fontPx: Math.min(...[...a.querySelectorAll('.wall-action')].map((b) => parseFloat(getComputedStyle(b).fontSize))),
       };
     })()`);
-    ok(`${size.label}   Today and Milestones buttons shown, badge reads ${act.badge}`,
-       !act.missing && act.buttons === 2 && act.badge === '1');
+    ok(`${size.label}   Today, Any day and Milestones buttons shown, badge reads ${act.badge}`,
+       !act.missing && act.buttons === 3 && act.badge === '1');
     ok(`${size.label}   the buttons sit under the notes bar, above the panels, clear of the switch`,
        act.inside && act.belowBar && act.abovePanels && act.clearOfSwitch, JSON.stringify(act));
     ok(`${size.label}   button text is legible (${act.fontPx}px)`, act.fontPx >= 8);
@@ -825,7 +868,7 @@ app.whenReady().then(async () => {
   };
 
   const seenBefore = seenCalls;
-  await clickEl('#wall-actions .wall-action:nth-child(2)');
+  await clickEl('#wall-actions .wall-action-ms');
   const list = await win.webContents.executeJavaScript(`(() => {
     const pop = document.querySelector('.ms-pop');
     const r = pop.getBoundingClientRect();
@@ -856,41 +899,133 @@ app.whenReady().then(async () => {
   );
   ok('a click anywhere else closes it', closed);
 
-  // Expected end state, computed here from the fixture rather than read back
-  // from the replay: every project's measured total for today, summed.
-  const todayStart = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
-  let todayTotal = 0;
-  for (const [k, byProject] of Object.entries(idx.projectHourly)) {
-    const ms = Date.parse(`${k}:00:00Z`);
-    if (ms < todayStart || ms > Date.now()) continue;
-    for (const cell of Object.values(byProject)) todayTotal += cell[1];
-  }
+  // ── The time-lapse ─────────────────────────────────────────────────────
+  //
+  // Expected numbers are computed here from the fixture the stub hands over,
+  // never read back from the replay, and formatted the way the header does.
   const compactTokens = (n) =>
-    n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.round(n));
+    n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(Math.floor(n));
+  const sums = (raw) => {
+    const s = { tokens: 0, output: 0, requests: 0 };
+    for (const p of Object.values(raw.projects)) for (const c of Object.values(p.cells)) {
+      s.requests += c[0];
+      s.tokens += c[1];
+      s.output += c[2];
+    }
+    return [compactTokens(s.tokens), compactTokens(s.output), Math.floor(s.requests).toLocaleString('en-GB')];
+  };
+  const longDay = (day) => {
+    const [y, m, d] = day.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+  };
+  const LEAD_MS = 700;
+  const HARD_STOP = 23_200;
 
-  for (const size of [{ w: 1366, h: 768 }, { w: 2560, h: 1440 }]) {
+  for (const size of SIZES) {
     await measure(win, size);
-    await clickEl('#wall-actions .wall-action:nth-child(1)');
+    const tag = `${size.w}x${size.h}`;
+    const calls = dayCalls.length;
+    await clickEl('#wall-actions .wall-action-today');
     // Let the 450ms fade-in finish first. Measured mid-fade, the first
     // screenshot showed the dashboard through the replay and looked like a bug.
     await wait(600);
-    const mid = await win.webContents.executeJavaScript('window.__cswTimelapse(10000)');
+    const mid = await win.webContents.executeJavaScript(`window.__cswTimelapse(${LEAD_MS + 10_000})`);
     await wait(80);
-    await shot(`replay-${size.w}x${size.h}.png`);
-    const inWin = (r) => r && r.left >= 0 && r.top >= 0 && r.right <= size.w + 0.5 && r.bottom <= size.h + 0.5;
-    ok(`${size.w}x${size.h}   Today opens the replay`, !!mid);
+    await shot(`replay-${tag}.png`);
+    const inWin = (r) => !!r && r.left >= 0 && r.top >= 0 && r.right <= size.w + 0.5 && r.bottom <= size.h + 0.5;
+    ok(`${tag}   Today asks for today and opens the replay`, !!mid && dayCalls.length === calls + 1 && dayCalls[calls] === dayKey(Date.now()),
+       JSON.stringify(dayCalls.slice(calls)));
     if (!mid) continue;
-    ok(`${size.w}x${size.h}   its header, hour trace and caption are inside the window`,
-       inWin(mid.head) && inWin(mid.trace) && inWin(mid.caption), JSON.stringify({ head: mid.head, trace: mid.trace, caption: mid.caption }));
-    ok(`${size.w}x${size.h}   the caption is legible (${mid.captionPx}px) and ${mid.stars} projects are in the sky`, mid.captionPx >= 8 && mid.stars === 3);
-    const end = await win.webContents.executeJavaScript('window.__cswTimelapse(20000)');
-    ok(`${size.w}x${size.h}   at the end it shows today's measured total exactly (${end.total})`,
-       end.total === `${compactTokens(todayTotal)} tokens`, `expected ${compactTokens(todayTotal)} tokens`);
+    ok(`${tag}   it says which day it is ("${mid.title}")`, mid.title === 'Today so far');
+    ok(`${tag}   header, graph, axis and caption are inside the window`,
+       inWin(mid.head) && inWin(mid.graph) && inWin(mid.axis) && inWin(mid.caption),
+       JSON.stringify({ head: mid.head, graph: mid.graph, axis: mid.axis, caption: mid.caption }));
+    ok(`${tag}   three lane names and three peaks, all inside the window`,
+       mid.laneNames.length === 3 && mid.lanePeaks.length === 3 && [...mid.laneNames, ...mid.lanePeaks].every(inWin));
+    ok(`${tag}   no lane name runs into its peak`, mid.laneNames.every((n, i) => n.right <= mid.lanePeaks[i].left + 0.5));
+    const lane3 = mid.lanes[2];
+    ok(`${tag}   the smallest lane is tall enough to read (${Math.round(lane3.height)}px)`, lane3.height >= 48);
+    ok(`${tag}   the smallest text is legible (${mid.smallestPx}px)`, mid.smallestPx >= 8);
+    ok(`${tag}   hour labels are inside the window and do not overlap (${mid.ticks.length})`,
+       mid.ticks.length >= 2 && mid.ticks.every(inWin) && mid.ticks.every((t, i) => i === 0 || t.left >= mid.ticks[i - 1].right - 0.5));
+
+    const raw = fixtureDay(dayKey(Date.now()), Date.now());
+    const end = await win.webContents.executeJavaScript(`window.__cswTimelapse(${HARD_STOP})`);
+    await shot(`replay-end-${tag}.png`);
+    const want = sums(raw);
+    ok(`${tag}   at the end the three totals are the day's, exactly (${end.totals.join(' / ')})`,
+       JSON.stringify(end.totals) === JSON.stringify(want), `expected ${want.join(' / ')}`);
+    const hasPeak = Object.values(raw.projects).some((p) => Object.values(p.cells).some((c) => c[0] === 84));
+    if (hasPeak) ok(`${tag}   the peak is named, inside the window`, inWin(end.peakLabel), JSON.stringify(end.peakLabel));
     await win.webContents.executeJavaScript('window.__cswTimelapse(null)');
     await clickEl('.replay');
     await wait(600);
-    const gone = await win.webContents.executeJavaScript(`!document.querySelector('.replay')`);
-    ok(`${size.w}x${size.h}   a click anywhere ends it`, gone);
+    ok(`${tag}   a click anywhere ends it`, await win.webContents.executeJavaScript(`!document.querySelector('.replay')`));
+  }
+
+  // ── Any day ────────────────────────────────────────────────────────────
+  const days = fixtureDays(Date.now());
+  const [, yesterday, , totalOnly] = [0, 1, 2, 3].map((k) => dayKey(Date.now() - k * DAY_MS));
+  /** Show the month holding `day`: the grid opens on this month, and a day can be in the last one. */
+  const showDay = async (day) => {
+    const sel = `.dp-day[data-day="${day}"]`;
+    for (let i = 0; i < 3; i++) {
+      if (await win.webContents.executeJavaScript(`!!document.querySelector('${sel}')`)) return sel;
+      await clickEl(day < days.today ? '.dp-head .dp-nav:first-child' : '.dp-head .dp-nav:last-child');
+    }
+    return sel;
+  };
+  for (const size of [{ w: 1366, h: 768 }, { w: 2560, h: 1440 }]) {
+    await measure(win, size);
+    const tag = `${size.w}x${size.h}`;
+    await clickEl('#wall-actions .wall-action-days');
+    await wait(200);
+    const grid = await win.webContents.executeJavaScript(`(() => {
+      const pop = document.querySelector('.dp-pop');
+      const r = pop.getBoundingClientRect();
+      const cells = [...pop.querySelectorAll('.dp-day')];
+      return {
+        open: getComputedStyle(pop).display !== 'none',
+        inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5,
+        cells: cells.length,
+        playable: cells.filter((c) => c.tagName === 'BUTTON').map((c) => c.dataset.day),
+        smallest: Math.min(...[...pop.querySelectorAll('*')].filter((e) => e.children.length === 0 && e.textContent.trim() && getComputedStyle(e).visibility !== 'hidden').map((e) => parseFloat(getComputedStyle(e).fontSize))),
+        today: pop.querySelector('.dp-day[data-today="true"]')?.dataset.shape ?? null,
+      };
+    })()`);
+    await shot(`picker-${tag}.png`);
+    ok(`${tag}   Any day opens a month grid inside the window (${grid.cells} days)`, grid.open && grid.inside && grid.cells >= 28, JSON.stringify(grid));
+    ok(`${tag}   today is marked and playable`, grid.today === 'full' && grid.playable.includes(days.today));
+    ok(`${tag}   the grid's smallest text is legible (${grid.smallest}px)`, grid.smallest >= 8);
+
+    const before = dayCalls.length;
+    await clickEl(await showDay(totalOnly));
+    await wait(400);
+    const afterTotal = await win.webContents.executeJavaScript(`({
+      replay: !!document.querySelector('.replay'),
+      open: getComputedStyle(document.querySelector('.dp-pop')).display !== 'none',
+      shape: document.querySelector('.dp-day[data-day="${totalOnly}"]')?.dataset.shape ?? null,
+    })`);
+    ok(`${tag}   a total-only day is dim and a click on it opens nothing`,
+       afterTotal.shape === 'total' && !afterTotal.replay && afterTotal.open && dayCalls.length === before, JSON.stringify(afterTotal));
+
+    await clickEl(await showDay(yesterday));
+    await wait(700);
+    const picked = await win.webContents.executeJavaScript(`({
+      title: document.querySelector('.replay .replay-title')?.textContent ?? null,
+      closed: getComputedStyle(document.querySelector('.dp-pop')).display === 'none',
+    })`);
+    ok(`${tag}   a bright day plays at once, titled with its date ("${picked.title}")`,
+       picked.title === longDay(yesterday) && picked.closed && dayCalls[dayCalls.length - 1] === yesterday,
+       `expected "${longDay(yesterday)}", asked for ${dayCalls[dayCalls.length - 1]}`);
+    await clickEl('.replay');
+    await wait(600);
+
+    await clickEl('#wall-actions .wall-action-days');
+    await wait(200);
+    await clickEl('#view-stats .panel-daily');
+    ok(`${tag}   a click anywhere else closes the grid`,
+       await win.webContents.executeJavaScript(`getComputedStyle(document.querySelector('.dp-pop')).display === 'none'`));
   }
 
   win.destroy();

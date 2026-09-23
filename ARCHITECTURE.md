@@ -542,8 +542,8 @@ The wall runs 24/7. Every effect is paid continuously.
     announcement cannot be taken back, so the gate is the whole feature.
 38. **Nothing that talks about "today" or "a day" reads `daily`.** `daily` is keyed
     by the UTC date and Gustav chose to keep it so. Local days come from
-    `src/shared/day.ts`: `projectHourly` hours converted through real Date
-    objects, or `activeDays`. Never build a day from a session's start and end:
+    `src/shared/day.ts` (`localDayKey`), as `activeDays` and the time-lapse's
+    five-minute `intraday` slots do. Never build a day from a session's start and end:
     a resumed session keeps its id, and its span on this machine reaches 1107
     hours.
 39. **The constellation and the replay repaint on change, never on a timer, and

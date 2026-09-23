@@ -1,26 +1,41 @@
 /**
- * The work time-lapse overlay: today so far, in about twenty seconds, played
- * only when the "Replay today" button is pressed.
+ * The time-lapse overlay: one day as three lines that draw themselves left to
+ * right behind a moving playhead, while a clock and three running totals count
+ * up. Played only when "Today" or a day in the picker is clicked.
+ *
+ * WHAT IT SHOWS (Gustav: "I dont really get what its displaying")
+ *
+ * Three stacked lanes on one time axis: tokens processed (the headline, twice
+ * the height), tokens generated, and requests, each per five minutes. Each lane
+ * has its own fixed scale from the first frame, set by that day's highest slot
+ * and stated in its corner, so a spike is visibly a spike before it arrives.
+ * Time is uniform: an hour is the same width everywhere.
  *
  * WHY IT CANNOT TRAP ANYONE (rule 17)
  *
  * - It is driven by elapsed wall-clock time (src/shared/timelapse.ts), so a
  *   slow or throttled frame skips ahead rather than stretching the replay.
- * - A hard stop at the end of the replay plus a short hold, whatever happens.
+ * - A hard stop at `replayLength`, whatever happens.
  * - Any click anywhere on it ends it at once.
  * - It never takes keyboard focus, so it never needs a key to escape.
  *
- * The stars sit where the constellation would put today's projects, laid out
- * ONCE from the day's final totals, so nothing jumps around mid-replay: each
- * star grows as its tokens accumulate and lights when its first hour arrives.
+ * COST (rule 39): one canvas, frame-capped by performance tier, and a frame is
+ * skipped when the playhead has not moved a whole device pixel. Nothing runs
+ * while it is closed.
  */
 
-import { layoutConstellation, type Layout } from '../shared/constellation';
-import { roundRect } from './constellation';
-import { buildWorkDay, hh, replayState, REPLAY_MS, type WorkDay } from '../shared/timelapse';
+import { FADE_MS, hhmm, replayFrame, replayLength, type DaySeries, type ReplayFrame } from '../shared/timelapse';
+import { BUCKET_MINUTES } from '../shared/intraday';
 
-const HOLD_MS = 2_500;
-const FADE_MS = 450;
+/** How long a "nothing to replay" notice stays up. Any click ends it sooner. */
+const NOTICE_MS = 4_000;
+
+const LANES = [
+  { key: 'tokens', name: 'Tokens processed', line: 'oklch(0.8 0.13 75)', fill: 'oklch(0.8 0.13 75 / 0.12)' },
+  { key: 'output', name: 'Tokens generated', line: 'oklch(0.8 0.14 200)', fill: 'oklch(0.8 0.14 200 / 0.12)' },
+  { key: 'requests', name: 'Requests', line: 'oklch(0.85 0.02 220)', fill: 'oklch(0.85 0.02 220 / 0.12)' },
+] as const;
+type LaneKey = (typeof LANES)[number]['key'];
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] => {
   const n = document.createElement(tag);
@@ -33,36 +48,44 @@ const compact = (n: number): string => {
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return String(Math.round(n));
+  return String(Math.floor(n));
 };
+const count = (n: number): string => Math.floor(n).toLocaleString('en-GB');
+const laneValue = (key: LaneKey, n: number): string => (key === 'requests' ? count(n) : compact(n));
 
-const clockText = (h: number): string => {
-  const hour = Math.floor(h);
-  const min = Math.min(59, Math.floor((h - hour) * 60));
-  return `${String(hour % 24).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+/** "Tuesday 22 September" for a local day key. */
+export function longDay(day: string): string {
+  const [y, m, d] = day.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+
+const set = (node: Element | null, text: string): void => {
+  if (node && node.textContent !== text) node.textContent = text;
 };
-
-export { buildWorkDay };
 
 export class WorkReplay {
   private root: HTMLElement | null = null;
   private canvas: HTMLCanvasElement | null = null;
-  private day: WorkDay | null = null;
-  private layout: Layout | null = null;
+  private series: DaySeries | null = null;
   private t0 = 0;
   private raf = 0;
+  /** The hard stop as a timer too: rAF pauses while the wall is covered, timers only slow. */
+  private stopTimer = 0;
   private lastFrame = 0;
+  private lastPx = -1;
   private frozenAt: number | null = null;
   private ending = false;
   /** Read once per replay, not on every frame. */
   private reduced = false;
+  /** How long this one may stay up. */
+  private lengthMs = 0;
   onEnd: (() => void) | null = null;
 
   constructor() {
     // Lets the render suite hold the replay at a chosen moment and measure it.
     (window as unknown as { __cswTimelapse?: (ms: number | null) => unknown }).__cswTimelapse = (ms) => {
       this.frozenAt = ms;
-      if (ms !== null) this.draw(ms);
+      if (ms !== null) this.draw(ms, true);
       return this.root ? this.measure() : null;
     };
   }
@@ -71,47 +94,99 @@ export class WorkReplay {
     return this.root !== null;
   }
 
-  play(day: WorkDay): void {
+  play(series: DaySeries): void {
     if (this.root) return;
-    this.day = day;
+    this.series = series;
+    this.reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const title = series.today ? 'Today so far' : longDay(series.day);
+    const root = this.open(title, replayLength(this.reduced));
+
+    const head = root.querySelector('.replay-head')!;
+    const titles = el('div', 'replay-titles');
+    titles.append(
+      el('div', 'replay-title', title),
+      el('div', 'replay-sub', `replayed ${hhmm(series.fromMinute)} to ${series.today ? 'now' : hhmm(series.endMinute)}`),
+    );
+    const centre = el('div', 'replay-centre');
+    centre.append(el('div', 'replay-clock', hhmm(series.fromMinute)), el('div', 'replay-on', ''));
+    const stats = el('div', 'replay-stats');
+    for (const lane of LANES) {
+      const stat = el('div', 'replay-stat');
+      stat.dataset.lane = lane.key;
+      stat.append(el('span', 'replay-stat-value', '0'), el('span', 'replay-stat-label', lane.key === 'tokens' ? 'processed' : lane.key === 'output' ? 'generated' : 'requests'));
+      stats.appendChild(stat);
+    }
+    head.append(titles, centre, stats);
+
+    const graph = el('div', 'replay-graph');
+    const canvas = el('canvas', 'replay-canvas');
+    graph.appendChild(canvas);
+    for (const lane of LANES) {
+      const row = el('div', 'replay-lane');
+      row.dataset.lane = lane.key;
+      const peak = series.peaks[lane.key];
+      row.append(el('span', 'replay-lane-name', lane.name), el('span', 'replay-lane-peak', `peak ${laneValue(lane.key, peak)} / 5 min`));
+      graph.appendChild(row);
+    }
+    graph.appendChild(el('div', 'replay-peak-label', ''));
+
+    const axis = el('div', 'replay-axis');
+    root.append(graph, axis);
+    if (series.missingRequests > 0) {
+      root.append(el('div', 'replay-note',
+        `${count(series.missingRequests)} request${series.missingRequests === 1 ? '' : 's'} from archived transcripts ${series.missingRequests === 1 ? 'is' : 'are'} in this day but not in the curve.`));
+    }
+    root.append(el('div', 'replay-caption',
+      this.reduced
+        ? 'The whole day at once. Height is the amount in each five minutes, as measured. Click anywhere to close.'
+        : 'Each line draws through the day. Height is the amount in each five minutes, as measured. Click anywhere to close.'));
+
+    this.canvas = canvas;
+    this.start(root);
+  }
+
+  /**
+   * A day with nothing to draw, said plainly and briefly: a reconstructed total
+   * has no shape, and a read that failed is not an empty day.
+   */
+  notice(title: string, message: string): void {
+    if (this.root) return;
+    this.series = null;
+    this.reduced = false;
+    const root = this.open(title, NOTICE_MS);
+    root.classList.add('is-notice');
+    root.querySelector('.replay-head')!.append(el('div', 'replay-title', title));
+    root.append(el('div', 'replay-message', message), el('div', 'replay-caption', 'Click anywhere to close.'));
+    this.canvas = null;
+    this.start(root);
+  }
+
+  private open(label: string, lengthMs: number): HTMLElement {
     this.ending = false;
     this.frozenAt = null;
-    this.reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
+    this.lastPx = -1;
+    this.lastFrame = 0;
+    this.lengthMs = lengthMs;
     const root = el('div', 'replay');
     root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-label', 'Today so far');
-    const head = el('div', 'replay-head');
-    head.append(
-      el('div', 'replay-title', 'Today so far'),
-      el('div', 'replay-clock', clockText(day.fromHour)),
-      el('div', 'replay-total', '0'),
-    );
-    const sky = el('div', 'replay-sky');
-    const canvas = el('canvas', 'replay-canvas');
-    sky.appendChild(canvas);
-    const trace = el('div', 'replay-trace');
-    for (let h = day.fromHour; h <= day.toHour; h++) {
-      const col = el('div', 'replay-col');
-      col.appendChild(el('div', 'replay-bar'));
-      col.appendChild(el('div', 'replay-tick', h % 3 === 0 || h === day.fromHour || h === day.toHour ? hh(h).slice(0, 2) : ''));
-      trace.appendChild(col);
-    }
-    const now = new Date(day.asOf);
-    const caption = el(
-      'div',
-      'replay-caption',
-      `${hh(day.fromHour)} to ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} local  ·  tokens per project per hour, as measured  ·  click anywhere to close`,
-    );
-    root.append(head, sky, trace, caption);
+    root.setAttribute('aria-label', label);
+    root.appendChild(el('div', 'replay-head'));
     root.addEventListener('pointerdown', () => this.stop());
-    document.body.appendChild(root);
+    return root;
+  }
 
+  private start(root: HTMLElement): void {
+    document.body.appendChild(root);
     this.root = root;
-    this.canvas = canvas;
-    this.layout = null;
     this.t0 = performance.now();
+    this.stopTimer = window.setTimeout(() => {
+      if (this.frozenAt === null) this.stop();
+    }, this.lengthMs);
     requestAnimationFrame(() => root.classList.add('is-on'));
+    if (this.series) {
+      this.layoutAxis();
+      this.draw(0, true);
+    }
     this.loop();
   }
 
@@ -120,6 +195,7 @@ export class WorkReplay {
     if (!this.root || this.ending) return;
     this.ending = true;
     cancelAnimationFrame(this.raf);
+    window.clearTimeout(this.stopTimer);
     const root = this.root;
     root.classList.remove('is-on');
     window.setTimeout(() => {
@@ -127,7 +203,7 @@ export class WorkReplay {
       if (this.root === root) {
         this.root = null;
         this.canvas = null;
-        this.day = null;
+        this.series = null;
         this.onEnd?.();
       }
     }, FADE_MS);
@@ -138,14 +214,14 @@ export class WorkReplay {
     const elapsed = performance.now() - this.t0;
     if (this.frozenAt === null) {
       // Frame cap by performance tier. On the software-rendered tier twelve
-      // frames a second is plenty for a replay and keeps the paint affordable.
+      // frames a second is plenty for a line crossing the screen.
       const tier = document.body.dataset.perf;
       const fps = tier === 'low' ? 12 : tier === 'balanced' ? 24 : 30;
-      if (elapsed - this.lastFrame >= 1000 / fps - 1) {
+      if (this.series && elapsed - this.lastFrame >= 1000 / fps - 1) {
         this.lastFrame = elapsed;
-        this.draw(elapsed);
+        this.draw(elapsed, false);
       }
-      if (elapsed >= REPLAY_MS + HOLD_MS) {
+      if (elapsed >= this.lengthMs) {
         this.stop();
         return;
       }
@@ -153,85 +229,193 @@ export class WorkReplay {
     this.raf = requestAnimationFrame(this.loop);
   };
 
-  private draw(elapsed: number): void {
-    const day = this.day, root = this.root, canvas = this.canvas;
-    if (!day || !root || !canvas) return;
-    const f = replayState(day, elapsed, REPLAY_MS, this.reduced ? 4 : 0);
+  /** x of a minute of the day, inside a graph `w` wide. */
+  private xOf(minute: number, w: number): number {
+    const s = this.series!;
+    return ((minute - s.fromMinute) / Math.max(1e-9, s.toMinute - s.fromMinute)) * w;
+  }
 
-    root.querySelector('.replay-clock')!.textContent = clockText(Math.min(f.clock, day.endAt));
-    root.querySelector('.replay-total')!.textContent = `${compact(f.total)} tokens`;
+  /** Hour ticks under the graph, as DOM so the render suite can measure them. */
+  private layoutAxis(): void {
+    const s = this.series, root = this.root;
+    if (!s || !root) return;
+    const axis = root.querySelector<HTMLElement>('.replay-axis')!;
+    axis.replaceChildren();
+    const w = axis.getBoundingClientRect().width || 1;
+    const hours = (s.toMinute - s.fromMinute) / 60;
+    // A label needs about 44px; label every hour if there is room, else every 2nd or 3rd.
+    const perHour = w / hours;
+    const step = [1, 2, 3, 4, 6].find((k) => perHour * k >= 44) ?? 6;
+    for (let m = s.fromMinute; m <= s.toMinute; m += 60) {
+      const i = (m - s.fromMinute) / 60;
+      // Every `step` hours, plus the axis end when it is not crowding the one before.
+      const due = i % step === 0 || (m === s.toMinute && perHour * (i % step) >= 44);
+      if (!due) continue;
+      const tick = el('span', 'replay-tick', hhmm(m));
+      const x = this.xOf(m, w);
+      tick.style.left = `${x.toFixed(1)}px`;
+      // The first and last labels hang inward, so neither runs off the edge.
+      tick.style.transform = m === s.fromMinute ? 'none' : m === s.toMinute ? 'translateX(-100%)' : 'translateX(-50%)';
+      axis.appendChild(tick);
+    }
+  }
 
-    const cols = root.querySelectorAll<HTMLElement>('.replay-bar');
-    const peak = Math.max(1, ...day.tokens.map((m) => Object.values(m).reduce((a, b) => a + b, 0)));
-    cols.forEach((bar, i) => {
-      const h = day.fromHour + i;
-      bar.style.transform = `scaleY(${(f.byHour[h] / peak).toFixed(4)})`;
-    });
-
-    const box = canvas.parentElement!.getBoundingClientRect();
+  private draw(elapsed: number, force: boolean): void {
+    const s = this.series, root = this.root, canvas = this.canvas;
+    if (!s || !root || !canvas) return;
+    const graph = canvas.parentElement!;
+    const box = graph.getBoundingClientRect();
     const w = Math.max(1, Math.floor(box.width));
-    const hgt = Math.max(1, Math.floor(box.height));
+    const h = Math.max(1, Math.floor(box.height));
     const dpr = window.devicePixelRatio || 1;
-    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(hgt * dpr)) {
+    let resized = false;
+    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
       canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(hgt * dpr);
+      canvas.height = Math.round(h * dpr);
       canvas.style.width = `${w}px`;
-      canvas.style.height = `${hgt}px`;
-      this.layout = null;
+      canvas.style.height = `${h}px`;
+      resized = true;
+      this.layoutAxis();
     }
-    // Laid out once, from the day's final totals, so stars never move.
-    if (!this.layout) {
-      this.layout = layoutConstellation({
-        stars: day.projects.map((p) => ({ key: p.key, label: p.label, total: p.total, output: 0, requests: 0, lastSeen: new Date(day.asOf).toISOString() })),
-        links: [],
-        activeLabel: null,
-        now: day.asOf,
-        width: w,
-        height: hgt,
-      });
-    }
+
+    const f = replayFrame(s, elapsed, this.reduced);
+    const px = Math.round(this.xOf(f.minute, w) * dpr);
+    if (!force && !resized && px === this.lastPx) return;
+    this.lastPx = px;
+
+    this.paintHeader(f);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, hgt);
-    const fontPx = Math.max(10, Math.min(14, Math.round(Math.min(w, hgt) * 0.03)));
-    ctx.font = `500 ${fontPx}px ui-monospace, 'Cascadia Code', Consolas, monospace`;
-    ctx.textBaseline = 'top';
-    for (const s of this.layout.stars) {
-      const have = f.perProject[s.key] || 0;
-      if (have <= 0) continue;
-      // Grows with the day's accumulated share, never past its final size.
-      const grow = 0.35 + 0.65 * Math.min(1, have / Math.max(1, s.total));
-      const size = s.size * grow;
-      const r = Math.max(2, size * 0.24);
-      ctx.fillStyle = `oklch(0.75 0.14 ${s.hue.toFixed(0)} / 0.18)`;
-      roundRect(ctx, s.x - size * 0.85, s.y - size * 0.85, size * 1.7, size * 1.7, r * 1.7);
-      ctx.fill();
-      ctx.fillStyle = `oklch(0.8 0.14 ${s.hue.toFixed(0)})`;
-      roundRect(ctx, s.x - size / 2, s.y - size / 2, size, size, r);
-      ctx.fill();
-      const label = s.label;
-      const lw = ctx.measureText(label).width;
-      const lx = Math.max(0, Math.min(s.x - lw / 2, w - lw));
-      if (s.y + s.size / 2 + 3 + fontPx * 1.25 <= hgt) {
-        ctx.fillStyle = 'oklch(0.92 0.02 220 / 0.9)';
-        ctx.fillText(label, lx, s.y + s.size / 2 + 3);
+    ctx.clearRect(0, 0, w, h);
+    const playX = this.xOf(f.minute, w);
+
+    // Hour gridlines, faint, the full width from the first frame.
+    ctx.strokeStyle = 'oklch(1 0 0 / 0.06)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let m = s.fromMinute; m <= s.toMinute; m += 60) {
+      const x = Math.round(this.xOf(m, w)) + 0.5;
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, h);
+    }
+    ctx.stroke();
+
+    const first = Math.floor(s.fromMinute / BUCKET_MINUTES);
+    const last = Math.min(s.tokens.length, Math.ceil(s.toMinute / BUCKET_MINUTES)) - 1;
+    const rows = [...graph.querySelectorAll<HTMLElement>('.replay-lane')];
+    let peakDot: { x: number; y: number } | null = null;
+
+    LANES.forEach((lane, i) => {
+      const row = rows[i];
+      if (!row) return;
+      const name = row.querySelector<HTMLElement>('.replay-lane-name');
+      const top = row.offsetTop + (name ? name.offsetTop + name.offsetHeight + 4 : 0);
+      const bottom = row.offsetTop + row.offsetHeight - 1;
+      const span = Math.max(1, bottom - top);
+      const values = s[lane.key];
+      const max = s.peaks[lane.key] || 1;
+      const yOf = (v: number) => bottom - (v / max) * span;
+
+      // Baseline.
+      ctx.strokeStyle = 'oklch(1 0 0 / 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(0, Math.round(bottom) + 0.5);
+      ctx.lineTo(w, Math.round(bottom) + 0.5);
+      ctx.stroke();
+
+      // Everything left of the playhead: the path is the whole day, clipped.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, row.offsetTop, Math.max(0, playX), row.offsetHeight);
+      ctx.clip();
+      ctx.beginPath();
+      for (let b = first; b <= last; b++) {
+        const x = this.xOf(b * BUCKET_MINUTES + BUCKET_MINUTES / 2, w);
+        if (b === first) ctx.moveTo(x, yOf(values[b]));
+        else ctx.lineTo(x, yOf(values[b]));
       }
+      ctx.strokeStyle = lane.line;
+      ctx.lineWidth = 2;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+      ctx.lineTo(this.xOf(last * BUCKET_MINUTES + BUCKET_MINUTES / 2, w), bottom);
+      ctx.lineTo(this.xOf(first * BUCKET_MINUTES + BUCKET_MINUTES / 2, w), bottom);
+      ctx.closePath();
+      ctx.fillStyle = lane.fill;
+      ctx.fill();
+      ctx.restore();
+
+      if (lane.key === 'tokens' && s.peak && f.peakShown) {
+        peakDot = { x: this.xOf(s.peak.bucket * BUCKET_MINUTES + BUCKET_MINUTES / 2, w), y: yOf(s.peak.tokens) };
+      }
+    });
+
+    // The playhead, while it is moving. Reduced motion has none.
+    if (!this.reduced && f.t < 1) {
+      ctx.strokeStyle = 'oklch(0.97 0.02 200 / 0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(playX, 0);
+      ctx.lineTo(playX, h);
+      ctx.stroke();
+    }
+
+    const label = graph.querySelector<HTMLElement>('.replay-peak-label')!;
+    const dot = peakDot as { x: number; y: number } | null;
+    if (dot && s.peak) {
+      ctx.fillStyle = 'oklch(0.9 0.14 75)';
+      ctx.beginPath();
+      ctx.arc(dot.x, dot.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      const where = s.peak.label ? `, on ${s.peak.label}` : '';
+      set(label, `peak ${compact(s.peak.tokens)} in 5 min, ${hhmm(s.peak.bucket * BUCKET_MINUTES)}${where}`);
+      label.style.display = 'block';
+      // Beside the dot, on whichever side has room, and never outside the graph.
+      const lw = label.offsetWidth;
+      const right = dot.x + 10 + lw <= w;
+      const left = right ? dot.x + 10 : Math.max(0, dot.x - 10 - lw);
+      label.style.left = `${Math.min(left, Math.max(0, w - lw)).toFixed(1)}px`;
+      label.style.top = `${Math.max(0, dot.y - label.offsetHeight / 2).toFixed(1)}px`;
+    } else {
+      label.style.display = 'none';
+    }
+  }
+
+  private paintHeader(f: ReplayFrame): void {
+    const root = this.root!;
+    set(root.querySelector('.replay-clock'), hhmm(f.minute));
+    set(root.querySelector('.replay-on'), f.onProject ? `on ${f.onProject}` : '');
+    for (const lane of LANES) {
+      set(root.querySelector(`.replay-stat[data-lane="${lane.key}"] .replay-stat-value`), laneValue(lane.key, f.totals[lane.key]));
     }
   }
 
   private measure() {
-    const r = (sel: string) => this.root!.querySelector(sel)?.getBoundingClientRect().toJSON() ?? null;
+    const root = this.root!;
+    const r = (sel: string) => root.querySelector(sel)?.getBoundingClientRect().toJSON() ?? null;
+    const all = (sel: string) => [...root.querySelectorAll(sel)].map((e) => e.getBoundingClientRect().toJSON());
+    const texts = [...root.querySelectorAll<HTMLElement>('*')].filter(
+      (e) => e.children.length === 0 && (e.textContent ?? '').trim() && getComputedStyle(e).display !== 'none',
+    );
     return {
-      root: this.root!.getBoundingClientRect().toJSON(),
+      root: root.getBoundingClientRect().toJSON(),
       head: r('.replay-head'),
-      trace: r('.replay-trace'),
+      graph: r('.replay-graph'),
+      axis: r('.replay-axis'),
+      lanes: all('.replay-lane'),
+      ticks: all('.replay-tick'),
+      laneNames: all('.replay-lane-name'),
+      lanePeaks: all('.replay-lane-peak'),
+      peakLabel: getComputedStyle(root.querySelector('.replay-peak-label') ?? root).display === 'none' ? null : r('.replay-peak-label'),
+      note: r('.replay-note'),
       caption: r('.replay-caption'),
-      captionPx: parseFloat(getComputedStyle(this.root!.querySelector('.replay-caption')!).fontSize),
-      cols: this.root!.querySelectorAll('.replay-col').length,
-      total: this.root!.querySelector('.replay-total')!.textContent,
-      clock: this.root!.querySelector('.replay-clock')!.textContent,
-      stars: this.layout?.stars.length ?? 0,
+      message: root.querySelector('.replay-message')?.textContent ?? null,
+      smallestPx: Math.min(...texts.map((e) => parseFloat(getComputedStyle(e).fontSize))),
+      title: root.querySelector('.replay-title')?.textContent ?? null,
+      clock: root.querySelector('.replay-clock')?.textContent ?? null,
+      totals: [...root.querySelectorAll('.replay-stat-value')].map((e) => e.textContent),
+      on: root.querySelector('.replay-on')?.textContent ?? null,
     };
   }
 }

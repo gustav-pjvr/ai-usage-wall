@@ -73,6 +73,13 @@ const rec = (i) => JSON.stringify({
 }) + '\n';
 
 process.env.MBW_CLAUDE_HOME = HOME;
+// Two hours ahead of UTC, like this machine, so a local day and a UTC date
+// disagree every night and the slots must follow the local one.
+process.env.TZ = 'Africa/Johannesburg';
+const localDay = (ms) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const out = path.join(tmp, 'usage.cjs');
 await esbuild.build({
   entryPoints: [path.join(root, 'src/main/data/usage.ts')],
@@ -128,64 +135,71 @@ console.log('\na record that is half written when the size is taken');
      `got ${two.index.totals.requests}`);
 }
 
-console.log('\nindex version 4: per-project hours and local active days');
+console.log('\nindex version 6: five-minute slots per file, and local active days');
 {
-  const { loadIndex } = require(out);
+  const { loadIndex, saveIndex, INDEX_VERSION } = require(out);
   /*
-   * Two projects in the same recent hour, plus one record three weeks old. The
-   * old one must count towards the active days (kept forever) and not towards
-   * the per-project hours (kept for 14 days, like `hourly`).
+   * Two projects in one five-minute slot, a record with no cwd, one at 00:30
+   * local (the previous UTC date, since this file runs at UTC+2), and one three
+   * weeks old. The slots live in each file's own contribution, never in an
+   * index-wide field, and are kept forever like `activeDays`.
    */
-  const DIR = path.join(HOME, 'projects', 'hours');
+  const DIR = path.join(HOME, 'projects', 'slots');
   await fs.mkdir(DIR, { recursive: true });
-  const hourStart = new Date(Date.now() - 2 * 3_600_000);
-  hourStart.setMinutes(0, 0, 0);
-  const at = (ms) => new Date(ms).toISOString();
+  const base = new Date();
+  base.setHours(10, 0, 0, 0);
+  if (base.getTime() > Date.now()) base.setDate(base.getDate() - 1);
+  const t = base.getTime();
+  const midnight = new Date(t);
+  midnight.setHours(0, 30, 0, 0);
+  const old = t - 21 * 86_400_000;
   const cwdA = path.join(tmp, 'Alpha');
   const cwdB = path.join(tmp, 'bravo');
-  const old = Date.now() - 21 * 86_400_000;
-  const line = (ts, cwd, input, output) => JSON.stringify({
-    type: 'assistant', timestamp: ts, sessionId: '11111111-2222-4333-8444-555555555555', cwd,
+  const line = (ms, cwd, input, output) => JSON.stringify({
+    type: 'assistant', timestamp: new Date(ms).toISOString(), sessionId: '11111111-2222-4333-8444-555555555555',
+    ...(cwd === null ? {} : { cwd }),
     message: { model: 'claude-opus-5', usage: { input_tokens: input, output_tokens: output } },
   }) + '\n';
-  await fs.writeFile(path.join(DIR, 'h.jsonl'),
-    line(at(hourStart.getTime() + 5 * 60_000), cwdA, 100, 10) +
-    line(at(hourStart.getTime() + 9 * 60_000), cwdA, 200, 20) +
-    line(at(hourStart.getTime() + 30 * 60_000), cwdB, 50, 5) +
-    line(at(old), cwdB, 1, 1), 'utf8');
+  const file = path.join(DIR, 's.jsonl');
+  await fs.writeFile(file,
+    line(t + 1 * 60_000, cwdA, 100, 10) +
+    line(t + 4 * 60_000, cwdA, 200, 20) +
+    line(t + 3 * 60_000, cwdB, 50, 5) +
+    line(t + 7 * 60_000, null, 9, 1) +
+    line(midnight.getTime(), cwdB, 3, 3) +
+    line(old, cwdB, 1, 1), 'utf8');
 
   const { index } = await refreshIndex(emptyIndex());
-  const hourKey = hourStart.toISOString().slice(0, 13);
-  const bucket = index.projectHourly[hourKey] ?? {};
-  ok('the hour holds each project under the same lowercased key as `projects`',
-     !!bucket[cwdA.toLowerCase()] && !!bucket[cwdB.toLowerCase()] && !!index.projects[cwdA.toLowerCase()],
-     JSON.stringify(Object.keys(bucket)));
-  ok('and folds requests, total and output per project',
-     JSON.stringify(bucket[cwdA.toLowerCase()]) === JSON.stringify([2, 330, 30]) &&
-     JSON.stringify(bucket[cwdB.toLowerCase()]) === JSON.stringify([1, 55, 5]), JSON.stringify(bucket));
-  ok('a record older than 14 days is not read into the per-project hours',
-     !Object.keys(index.projectHourly).some((k) => k === new Date(old).toISOString().slice(0, 13)));
+  const c = index.files[file].contrib;
+  const day = localDay(t);
+  const slots = c.intraday?.[day] ?? {};
+  ok('the index itself has no per-project hours any more', !('projectHourly' in index));
+  ok('the slot holds each project under the same lowercased key as `projects`',
+     !!slots[cwdA.toLowerCase()]?.['120'] && !!slots[cwdB.toLowerCase()]?.['120'] && !!index.projects[cwdA.toLowerCase()],
+     JSON.stringify(Object.keys(slots)));
+  ok('and folds requests, total and output per project per slot',
+     JSON.stringify(slots[cwdA.toLowerCase()]['120']) === '[2,330,30]' && JSON.stringify(slots[cwdB.toLowerCase()]['120']) === '[1,55,5]',
+     JSON.stringify(slots));
+  ok('a record with no cwd is in the curve, under ""', JSON.stringify(slots['']?.['121']) === '[1,10,1]', JSON.stringify(slots['']));
+  ok('00:30 local lands in slot 6 of the LOCAL day, not the UTC date',
+     JSON.stringify(c.intraday[localDay(midnight.getTime())]?.[cwdB.toLowerCase()]?.['6']) === '[1,6,3]' &&
+     new Date(midnight.getTime()).toISOString().slice(0, 10) !== localDay(midnight.getTime()),
+     JSON.stringify(c.intraday[localDay(midnight.getTime())]));
+  ok('a record three weeks old keeps its slot: detail is kept forever', !!c.intraday[localDay(old)]);
+  const perDay = Object.fromEntries(Object.entries(c.intraday).map(([d, byProject]) =>
+    [d, Object.values(byProject).reduce((n, s) => n + Object.values(s).reduce((a, cell) => a + cell[0], 0), 0)]));
+  ok('for the file, every day\'s slot counts add up to its activeDays exactly',
+     JSON.stringify(Object.entries(perDay).sort()) === JSON.stringify(Object.entries(c.activeDays).sort()),
+     `${JSON.stringify(perDay)} vs ${JSON.stringify(c.activeDays)}`);
+  ok('active days are LOCAL days, and the old one is kept', index.activeDays[localDay(old)] === 1 && (index.activeDays[day] ?? 0) >= 4,
+     JSON.stringify(index.activeDays));
 
-  // The check above is the INGEST cutoff. This is the other half: an hour that
-  // was recent when it was folded in and has since aged out must be pruned, or
-  // the field grows forever. The first version of this suite only tested the
-  // cutoff, and deleting the prune line did not fail it.
-  const aged = { ...index, projectHourly: { ...index.projectHourly, '2020-01-01T00': { stale: [1, 1, 1] } } };
-  const { index: pruned } = await refreshIndex(aged);
-  ok('an hour that has aged past 14 days is pruned on the next pass', !pruned.projectHourly['2020-01-01T00']);
-
-  const localDay = (ms) => {
-    const d = new Date(ms);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-  ok('active days are LOCAL days, and the old one is kept', index.activeDays[localDay(old)] === 1 &&
-     (index.activeDays[localDay(hourStart.getTime() + 5 * 60_000)] ?? 0) >= 3, JSON.stringify(index.activeDays));
-
-  const cache = path.join(tmp, 'v3-cache.json');
-  await fs.writeFile(cache, JSON.stringify({ ...index, version: 3 }), 'utf8');
-  const { index: loaded } = await loadIndex(cache);
-  ok('a version 3 cache is discarded, so the new fields are built from scratch',
-     loaded.version === require(out).INDEX_VERSION && Object.keys(loaded.projectHourly).length === 0 && loaded.totals.requests === 0);
+  const cache = path.join(tmp, 'v5-cache.json');
+  await saveIndex(cache, { ...index, version: 5 });
+  const { index: loaded, staleFiles } = await loadIndex(cache);
+  ok('a version 5 cache is discarded, so the slots are built from scratch',
+     INDEX_VERSION === 6 && loaded.version === 6 && loaded.totals.requests === 0);
+  ok('and its per-file contributions are handed back, not lost', !!staleFiles[file] && staleFiles[file].totals.requests === 6);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

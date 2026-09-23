@@ -1,6 +1,6 @@
 /**
- * Preload bridge. The renderer gets exactly these five calls and nothing else:
- * no Node, no filesystem, no require. Context isolation is on.
+ * Preload bridge. The renderer gets exactly the calls in `api` below and
+ * nothing else: no Node, no filesystem, no require. Context isolation is on.
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
@@ -36,6 +36,10 @@ const api = {
   installUpdate: () => ipcRenderer.invoke('wall:installUpdate'),
   /** Clear the milestone badge, after the list has been opened. */
   milestonesSeen: () => ipcRenderer.invoke('wall:milestonesSeen'),
+  /** Every local day and how much of it has five-minute detail, for the day picker. */
+  timelapseDays: () => ipcRenderer.invoke('wall:timelapseDays'),
+  /** One day's five-minute detail, for the time-lapse. */
+  timelapseDay: (day: string) => ipcRenderer.invoke('wall:timelapseDay', day),
   /** Borrow keyboard focus while the notes bar has an open edit. */
   notesEdit: (active: boolean) => ipcRenderer.invoke('wall:notesEdit', active),
   onState: (cb: (state: unknown) => void) => {

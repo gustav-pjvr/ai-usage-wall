@@ -1,19 +1,24 @@
 /**
- * The wall's two on-demand buttons, top right: "Today", which plays the work
- * time-lapse, and "Milestones", which opens the list, with a badge counting
- * ones not yet seen.
+ * The wall's on-demand buttons, top right: "Today", which plays today's
+ * time-lapse; "Any day", which opens a month grid to replay another day; and
+ * "Milestones", which opens the list, with a badge counting ones not yet seen.
  *
- * Gustav asked for both to be on demand. Nothing here plays or opens by
+ * Gustav asked for all of them to be on demand. Nothing here plays or opens by
  * itself, and nothing floats over other applications: the badge is the only
  * announcement a milestone gets, and it waits on the wall until he looks.
  *
- * Clicks only. The wall is `focusable: false`, and neither control needs a key,
- * so neither asks for focus. The list closes on a click anywhere outside it,
- * which is also why it can never become a trap (rule 17).
+ * Clicks only. The wall is `focusable: false`, and no control here needs a key,
+ * so none asks for focus. Each popover closes on a click anywhere outside it,
+ * which is also why it can never become a trap (rule 17), and only one is open
+ * at a time.
  */
 
+import { localDayKey } from '../shared/day';
+import type { DayRaw } from '../shared/intraday';
 import { labelProjects } from '../shared/project-label';
-import { buildWorkDay, WorkReplay } from './timelapse';
+import { buildDaySeries } from '../shared/timelapse';
+import { DayPicker } from './day-picker';
+import { longDay, WorkReplay } from './timelapse';
 
 interface AchievedView { key: string; title: string; sub: string; at: string; seeded: boolean }
 interface MilestonesView {
@@ -26,7 +31,7 @@ interface MilestonesView {
 
 interface UsageLike {
   projects?: Record<string, { display?: string }>;
-  projectHourly?: Record<string, Record<string, [number, number, number]>>;
+  activeDays?: Record<string, number>;
   indexing?: boolean;
   unavailable?: boolean;
   milestones?: MilestonesView | null;
@@ -45,51 +50,70 @@ const shortDate = (iso: string): string => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
+type Popover = 'milestones' | 'days' | null;
+
 export class WallActions {
   readonly root: HTMLElement;
-  private readonly replayBtn: HTMLButtonElement;
+  private readonly todayBtn: HTMLButtonElement;
+  private readonly daysBtn: HTMLButtonElement;
   private readonly msBtn: HTMLButtonElement;
   private readonly badge: HTMLElement;
   private readonly pop: HTMLElement;
+  private readonly picker = new DayPicker();
   private readonly replay = new WorkReplay();
   private usage: UsageLike | null = null;
   private ms: MilestonesView | null = null;
+  /** A day is being fetched: a second click must not start a second replay. */
+  private loading = false;
 
   constructor() {
     this.root = el('div');
     this.root.id = 'wall-actions';
 
-    this.replayBtn = el('button', 'wall-action', 'Today');
-    this.replayBtn.type = 'button';
-    this.replayBtn.title = 'Replay today so far';
-    this.replayBtn.addEventListener('click', () => this.playToday());
+    this.todayBtn = el('button', 'wall-action wall-action-today', 'Today');
+    this.todayBtn.type = 'button';
+    this.todayBtn.title = 'Replay today so far';
+    this.todayBtn.addEventListener('click', () => this.playDay(localDayKey(Date.now())));
 
-    this.msBtn = el('button', 'wall-action');
+    this.daysBtn = el('button', 'wall-action wall-action-days', 'Any day');
+    this.daysBtn.type = 'button';
+    this.daysBtn.title = 'Replay another day';
+    this.daysBtn.addEventListener('click', () => this.toggle('days'));
+
+    this.msBtn = el('button', 'wall-action wall-action-ms');
     this.msBtn.type = 'button';
     this.msBtn.append(el('span', 'wall-action-label', 'Milestones'));
     this.badge = el('span', 'wall-badge');
     this.badge.setAttribute('aria-label', 'new milestones');
     this.msBtn.append(this.badge);
-    this.msBtn.addEventListener('click', () => this.toggleList());
+    this.msBtn.addEventListener('click', () => this.toggle('milestones'));
 
     this.pop = el('div', 'ms-pop');
     this.pop.setAttribute('role', 'dialog');
     this.pop.setAttribute('aria-label', 'Milestones');
 
-    this.root.append(this.replayBtn, this.msBtn, this.pop);
+    this.picker.onPick = (day) => {
+      this.close();
+      this.playDay(day);
+    };
+
+    this.root.append(this.todayBtn, this.daysBtn, this.msBtn, this.pop, this.picker.root);
     this.setBadge(0);
 
-    // A click anywhere outside closes the list. pointerdown, so it closes
-    // before the click lands on whatever was underneath.
+    // A click anywhere outside closes whichever popover is open. pointerdown,
+    // so it closes before the click lands on whatever was underneath.
     document.addEventListener('pointerdown', (e) => {
-      if (!this.isOpen) return;
+      const open = this.open;
+      if (!open) return;
       const t = e.target as Node;
-      if (!this.pop.contains(t) && !this.msBtn.contains(t)) this.close();
+      const [panel, btn] = open === 'milestones' ? [this.pop, this.msBtn] : [this.picker.root, this.daysBtn];
+      if (!panel.contains(t) && !btn.contains(t)) this.close();
     });
   }
 
-  private get isOpen(): boolean {
-    return this.root.dataset.open === 'true';
+  private get open(): Popover {
+    const v = this.root.dataset.open;
+    return v === 'milestones' || v === 'days' ? v : null;
   }
 
   update(u: UsageLike): void {
@@ -97,41 +121,54 @@ export class WallActions {
     const onScreen = u.projection?.role === 'screen';
 
     /*
-     * The replay needs this machine's per-project hours, which do not cross the
-     * projection wire, so a screen has nothing to replay and does not offer it.
-     * While indexing, today is not complete yet; say so rather than replay a
-     * part of it as if it were the whole.
+     * The replay needs this machine's five-minute detail, which does not cross
+     * the projection wire, so a screen has nothing to replay and offers neither
+     * button. While indexing, no day is complete yet; say so rather than replay
+     * part of one as if it were the whole (rule 15).
      */
-    const day = this.today();
+    const hasToday = (u.activeDays?.[localDayKey(Date.now())] ?? 0) > 0;
+    const blocked = Boolean(u.indexing) || Boolean(u.unavailable);
     this.root.dataset.replay = onScreen ? 'off' : 'on';
-    this.replayBtn.disabled = !day || Boolean(u.indexing) || Boolean(u.unavailable);
-    this.replayBtn.title = u.indexing
-      ? 'Still reading transcripts'
-      : day
-        ? 'Replay today so far'
-        : 'Nothing recorded yet today';
+    this.todayBtn.disabled = blocked || !hasToday;
+    this.todayBtn.title = u.indexing ? 'Still reading transcripts' : hasToday ? 'Replay today so far' : 'Nothing recorded yet today';
+    this.daysBtn.disabled = blocked;
+    this.daysBtn.title = u.indexing ? 'Still reading transcripts' : 'Replay another day';
+    if (blocked && this.open === 'days') this.close();
 
     this.ms = u.milestones ?? null;
     this.root.dataset.milestones = this.ms ? 'on' : 'off';
     this.setBadge(this.ms?.unseen.length ?? 0);
-    if (this.isOpen) this.renderList();
+    if (this.open === 'milestones') this.renderList();
   }
 
-  private today() {
-    const u = this.usage;
-    if (!u?.projectHourly) return null;
-    const entries = Object.entries(u.projects ?? {});
-    const paths = entries.map(([key, v]) => v.display || key);
-    const labels = labelProjects(paths);
-    const byKey = new Map(entries.map(([key], i) => [key, labels.get(paths[i]) ?? paths[i]]));
-    return buildWorkDay(u.projectHourly, (key) => byKey.get(key) ?? key.split(/[\\/]/).pop() ?? key);
+  /** Labels exactly as the rest of the wall makes them, disambiguated against every known project. */
+  private labeller(raw: DayRaw): (key: string, display: string) => string | null {
+    const paths = new Set<string>();
+    for (const [key, v] of Object.entries(this.usage?.projects ?? {})) paths.add(v.display || key);
+    for (const [key, p] of Object.entries(raw.projects)) if (key) paths.add(p.display || key);
+    const labels = labelProjects([...paths]);
+    return (key, display) => (key ? labels.get(display || key) ?? (display || key).split(/[\\/]/).pop() ?? key : null);
   }
 
-  private playToday(): void {
-    if (this.replay.playing) return;
+  private playDay(day: string): void {
+    if (this.replay.playing || this.loading) return;
     this.close();
-    const day = this.today();
-    if (day) this.replay.play(day);
+    this.loading = true;
+    window.wall
+      .timelapseDay(day)
+      .then((raw) => {
+        if (!raw) return; // refused: indexing started, or this is a screen
+        const series = buildDaySeries(raw, this.labeller(raw), Date.now());
+        if (series) this.replay.play(series);
+        else this.replay.notice(longDay(day), `${longDay(day)} has a total only, nothing to replay.`);
+      })
+      .catch((err: unknown) => {
+        console.error(`[renderer] could not read ${day} for the time-lapse:`, err);
+        this.replay.notice(longDay(day), 'Could not read that day.');
+      })
+      .finally(() => {
+        this.loading = false;
+      });
   }
 
   private setBadge(n: number): void {
@@ -140,20 +177,36 @@ export class WallActions {
     this.msBtn.title = n > 0 ? `${n} new milestone${n === 1 ? '' : 's'}` : 'Milestones';
   }
 
-  private toggleList(): void {
-    if (this.isOpen) {
+  private toggle(which: 'milestones' | 'days'): void {
+    if (this.open === which) {
       this.close();
       return;
     }
-    this.renderList();
-    this.root.dataset.open = 'true';
-    // Seen the moment it is open. The badge clears on the push that follows,
-    // because the ledger in the main process is the only authority on it.
-    if ((this.ms?.unseen.length ?? 0) > 0) {
-      void window.wall.milestonesSeen().catch((err: unknown) =>
-        console.error('[renderer] could not mark milestones seen:', err),
-      );
+    if (which === 'milestones') {
+      this.renderList();
+      this.root.dataset.open = 'milestones';
+      // Seen the moment it is open. The badge clears on the push that follows,
+      // because the ledger in the main process is the only authority on it.
+      if ((this.ms?.unseen.length ?? 0) > 0) {
+        void window.wall.milestonesSeen().catch((err: unknown) =>
+          console.error('[renderer] could not mark milestones seen:', err),
+        );
+      }
+      return;
     }
+    this.picker.show(null);
+    this.root.dataset.open = 'days';
+    window.wall
+      .timelapseDays()
+      .then((days) => {
+        if (this.open !== 'days') return;
+        if (days) this.picker.show(days);
+        else this.close(); // refused: indexing started meanwhile
+      })
+      .catch((err: unknown) => {
+        console.error('[renderer] could not list days for the time-lapse:', err);
+        this.close();
+      });
   }
 
   private close(): void {

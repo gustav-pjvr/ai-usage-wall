@@ -366,6 +366,48 @@ console.log('\n15. a store that does not parse is left alone (review defect 5)')
   ok('an archive attempt is refused', (await port.archive([{ path: 'p', contrib: {}, reason: 'deleted' }])) === false);
 }
 
+console.log('\n16. a deleted transcript keeps its curve (the any-day time-lapse)');
+{
+  const ID = await bundle('src/shared/intraday.ts', 'intraday.cjs');
+  await fs.rm(PROJECTS, { recursive: true, force: true });
+  // Three transcripts on one day, two of them in the same five-minute slot.
+  const day0 = new Date(Date.now() - 5 * DAY);
+  day0.setHours(14, 2, 0, 0);
+  const t = day0.getTime();
+  const files = [
+    [path.join(PROJECTS, 'a', 'd1.jsonl'), rec(t, 's1', cwdA, 'claude-opus-5', 10, 5, 1000) + rec(t + 20 * 60_000, 's1', cwdA, 'claude-opus-5', 1, 1, 1)],
+    [path.join(PROJECTS, 'b', 'd2.jsonl'), rec(t + 60_000, 's2', cwdB, 'claude-opus-5', 30, 9, 3000)],
+    [path.join(PROJECTS, 'a', 'd3.jsonl'), rec(t + 3 * 3_600_000, 's3', cwdA, 'claude-opus-5', 40, 11, 4000)],
+  ];
+  for (const [p, body] of files) {
+    await fs.mkdir(path.dirname(p), { recursive: true });
+    await fs.writeFile(p, body, 'utf8');
+  }
+  const m = memPort();
+  let { index } = await U.refreshIndex(U.emptyIndex(), undefined, { history: m.port });
+  const key = Object.keys(index.activeDays).find((d) => index.activeDays[d] === 4);
+  const dayOf = () => {
+    const merged = mergeHistory(index, m.store);
+    const d = ID.collectDay(key, index.files, m.store.entries, merged.activeDays[key] ?? 0, 0);
+    // Keys sorted, so the order transcripts were summed in cannot matter.
+    const cells = Object.keys(d.projects).sort().map((k) => [k, Object.entries(d.projects[k].cells).sort()]);
+    return JSON.stringify({ requests: d.requests, shaped: d.shapedRequests, cells });
+  };
+  const before = ID.collectDay(key, index.files, m.store.entries, index.activeDays[key], 0);
+  ok('the day is fully detailed while every transcript is on disk', !!key && before.shapedRequests === 4 && before.requests === 4,
+     JSON.stringify(before));
+  const snapshot = dayOf();
+  await fs.rm(files[1][0]);
+  ({ index } = await U.refreshIndex(index, undefined, { history: m.port }));
+  ok('the deleted transcript was archived with its slots', !!m.store.entries[files[1][0]]?.contrib.intraday?.[key]);
+  ok('the day sums to exactly the same curve after the deletion', dayOf() === snapshot, `${dayOf()}\n  vs ${snapshot}`);
+  const offered = ID.offeredDays(mergeHistory(index, m.store).activeDays, index.files, m.store.entries);
+  ok('and the picker still offers it as fully detailed', ID.dayShape(offered.days[key]) === 'full', JSON.stringify(offered.days[key]));
+  await fs.writeFile(files[1][0], files[1][1], 'utf8');
+  ({ index } = await U.refreshIndex(index, undefined, { history: m.port }));
+  ok('restored from a backup: counted once, not twice', dayOf() === snapshot && Object.keys(m.store.entries).length === 0);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 await fs.rm(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

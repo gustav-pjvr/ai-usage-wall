@@ -250,13 +250,13 @@ so reporting it would only flicker the loading panel.
 
 | Field | What it holds | Why it exists |
 |---|---|---|
-| `version` | `INDEX_VERSION`, currently 5. 3 added the cost fields; 4 (2026-09-22) added `projectHourly` and `activeDays`; 5 added per-file `contrib` | `loadIndex` discards a cache with any other value but hands its per-file contributions back as `staleFiles`, so a bump costs one cold reindex and loses nothing (see [usage-history.md](usage-history.md)) |
+| `version` | `INDEX_VERSION`, currently 6. 3 added the cost fields; 4 (2026-09-22) added `projectHourly` and `activeDays`; 5 added per-file `contrib`; 6 (2026-09-23) added five-minute `intraday` to each `contrib` and removed `projectHourly` | `loadIndex` discards a cache with any other value but hands its per-file contributions back as `staleFiles`, so a bump costs one cold reindex and loses nothing (see [usage-history.md](usage-history.md)) |
 | `builtAt` | ISO stamp of the last completed pass | |
 | `files` | path to `{ size, offset, contrib }` | the whole incremental scheme, plus what each file added so a deleted one can be archived exactly; stripped before IPC |
 | `totals` | the eight token counters, plus `costUsd` and `unpricedTokens` (see [derived-metrics.md](derived-metrics.md)) | the hero and the counter tiles |
 | `daily` | `YYYY-MM-DD` to totals | kept forever; drives the daily chart and "days active" |
 | `hourly` | `YYYY-MM-DDTHH` to totals | kept 14 days (`HOURLY_DAYS`, `usage.ts:62`), pooled into a 24 hour profile |
-| `projectHourly` | UTC hour, then project key (the lowercased cwd, as in `projects`), to `[requests, total, output]` | measured at ingest, kept 14 days like `hourly`. Drives the work time-lapse, which needs to know WHICH project was busy in which hour. Never sent over projection |
+| `files[*].contrib.intraday` | LOCAL day, then project key (the lowercased cwd; `""` for records with no cwd), then five-minute slot `"0"` to `"287"`, to `[requests, total, output]` | measured at ingest, kept forever, and held per transcript only: there is no index-wide copy. The time-lapse sums a day across live files and archived history on demand (`src/shared/intraday.ts`), so a deleted transcript keeps its curve. For every file the slots' request counts equal its `activeDays`. Never pushed to the renderer or sent over projection; one day is fetched by `wall:timelapseDay`. About 0.14 MB for 470 transcripts, measured 2026-09-23 |
 | `activeDays` | LOCAL day `YYYY-MM-DD` to request count | kept forever. The streak milestone needs the day on the wall's own clock, and `daily` is keyed by the UTC date on purpose. Sessions could not stand in: a resumed session keeps its id, so its start and end can be weeks apart |
 | `models` | model name to totals | the model split |
 | `projects` | lowercased `cwd` to totals plus `lastSeen` and `display` | the project split |

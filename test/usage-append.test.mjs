@@ -198,7 +198,7 @@ console.log('\nindex version 6: five-minute slots per file, and local active day
   await saveIndex(cache, { ...index, version: 5 });
   const { index: loaded, staleFiles } = await loadIndex(cache);
   ok('a version 5 cache is discarded, so the slots are built from scratch',
-     INDEX_VERSION === 6 && loaded.version === 6 && loaded.totals.requests === 0);
+     INDEX_VERSION >= 6 && loaded.version === INDEX_VERSION && loaded.totals.requests === 0);
   ok('and its per-file contributions are handed back, not lost', !!staleFiles[file] && staleFiles[file].totals.requests === 6);
 }
 

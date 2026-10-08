@@ -114,6 +114,33 @@ console.log('model ids');
 }
 
 console.log('');
+console.log('the 5.5 models, from the live pricing page, 2026-10-08');
+{
+  const base = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 };
+  const M = 1_000_000;
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  ok('claude-haiku-5-5 has a price (it was unpriced, 149.3M tokens)', priceFor('claude-haiku-5-5') !== null);
+  // Each request below has a prompt of 50,000 tokens, under the long-prompt line.
+  const h = (u) => costOf('claude-haiku-5-5', { ...base, ...u });
+  ok('Haiku 5.5: $0.10 input, $0.50 output per million, short prompts',
+     near(h({ input: 50_000 }), 0.005) && near(h({ input: 1, output: M }), 0.5 + 1e-7));
+  ok('Haiku 5.5: cache reads $0.01, writes $0.125 and $0.20 per million',
+     near(h({ cacheRead: 50_000 }), 0.0005) && near(h({ cacheWrite5m: 50_000 }), 0.00625) && near(h({ cacheWrite1h: 50_000 }), 0.01));
+  ok('Haiku 5.5: a prompt over 100,000 tokens pays five times every price',
+     near(h({ cacheRead: 100_001, output: 1000 }), (100_001 * 0.01 + 1000 * 0.5) * 5 / M));
+  ok('and exactly 100,000 is still the short price', near(h({ input: 60_000, cacheRead: 40_000 }), (60_000 * 0.1 + 40_000 * 0.01) / M));
+  ok('the web search fee is not multiplied', near(h({ cacheRead: 200_000, webSearch: 1 }) - h({ cacheRead: 200_000 }), 0.01));
+  ok('Opus 5.5 is $4 / $20 with cache reads at $0.20, not Opus 5\'s price',
+     near(costOf('claude-opus-5-5', { ...base, input: M }), 4) && near(costOf('claude-opus-5-5', { ...base, output: M }), 20) &&
+     near(costOf('claude-opus-5-5', { ...base, cacheRead: M }), 0.2) && near(costOf('claude-opus-5-5', { ...base, cacheWrite5m: M }), 5));
+  ok('Sonnet 5.5 reads cache at $0.10, half of Sonnet 5',
+     near(costOf('claude-sonnet-5-5', { ...base, cacheRead: M }), 0.1) && near(costOf('claude-sonnet-5', { ...base, cacheRead: M }), 0.2));
+  ok('Opus 5 itself is unchanged', near(costOf('claude-opus-5', { ...base, input: M }), 5));
+  ok('only Haiku 5.5 has a long-prompt tier',
+     near(costOf('claude-opus-5-5', { ...base, cacheRead: 900_000 }), 0.18));
+}
+
+console.log('');
 console.log('formatting');
 {
   ok('two decimals, comma separated', formatCost(22523.44) === '$22,523.44', formatCost(22523.44));

@@ -73,6 +73,11 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * bumped: `intraday` is optional, and a bump would make loadIndex drop every
  * contribution it hands over, the exact loss version 5 exists to prevent.
  *
+ * 7 (2026-10-08): no shape change. Cost is computed at ingest, so the price
+ * table's fix (Haiku 5.5 added; Opus 5.5 and Sonnet 5.5 had been priced as
+ * Opus 5 and Sonnet 5) only reaches transcripts already read through a
+ * re-read. Transcripts already archived keep the cost they were archived with.
+ *
  * A BUMP NO LONGER LOSES ANYTHING, and that is the point of version 5. Version
  * 4's bump discarded a cache that remembered about 350 transcripts Claude Code
  * had already deleted, and the wall dropped from 39.35B tokens to 19.79B.
@@ -81,7 +86,7 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * (Version 4 caches have no contributions to hand back; that history came back
  * through a one-off seed, see docs/design/history-archive.md.)
  */
-export const INDEX_VERSION = 6;
+export const INDEX_VERSION = 7;
 
 /** Schema of one file's contribution. Independent of INDEX_VERSION: history outlives the cache. */
 export const CONTRIB_VERSION = 1;

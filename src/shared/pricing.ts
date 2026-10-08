@@ -72,6 +72,25 @@ const HAIKU_55: ModelPrice = { input: 0.1, output: 0.5, cacheReadFactor: 0.1, lo
  * Haiku 5.5, which matched nothing, showed up as unpriced.
  */
 
+/**
+ * From this moment the 5.5 models are priced correctly. Before it, Opus 5.5
+ * and Sonnet 5.5 keep the price the wall had been counting them at.
+ *
+ * Gustav's decision, 2026-10-08: the cost already shown must not change; the
+ * corrected prices apply to new work only. So records before this moment are
+ * priced as they always were, and only Haiku 5.5, which had counted nothing at
+ * all, is priced back to its first record. Pricing by the record's own
+ * timestamp (not by when it was read) is what keeps a re-read, a rebuild or a
+ * second machine landing on the same total.
+ */
+export const REPRICED_AT = Date.parse('2026-10-08T21:22:00Z');
+
+/** What a model was counted at before REPRICED_AT, where that differs from today's price. */
+const BEFORE_REPRICE = new Map<ModelPrice, ModelPrice>([
+  [OPUS_55, OPUS],
+  [SONNET_55, SONNET_5],
+]);
+
 /** Exact ids first. Anything else falls through to the prefix rules below. */
 const EXACT: Record<string, ModelPrice> = {
   'claude-fable-5-1': FABLE_51,
@@ -123,7 +142,19 @@ const WRITE_1H = 2;
 /** A server-side web search, per request. */
 const WEB_SEARCH = 0.01;
 
-export function priceFor(model: string): ModelPrice | null {
+/**
+ * The price of a model for a record made at `atMs` (default: now). A record
+ * with no usable time is priced as before REPRICED_AT, so it can never move a
+ * total that was already shown.
+ */
+export function priceFor(model: string, atMs: number = Date.now()): ModelPrice | null {
+  const p = currentPrice(model);
+  if (!p) return null;
+  const before = !Number.isFinite(atMs) || atMs < REPRICED_AT;
+  return before ? BEFORE_REPRICE.get(p) ?? p : p;
+}
+
+function currentPrice(model: string): ModelPrice | null {
   if (!model) return null;
   const exact = EXACT[model];
   if (exact) return exact;
@@ -152,8 +183,8 @@ export interface CostInput {
  * Null rather than zero on purpose: a caller that treats an unknown model as
  * free produces a total that is quietly too low, and nothing on screen says so.
  */
-export function costOf(model: string, u: CostInput): number | null {
-  const p = priceFor(model);
+export function costOf(model: string, u: CostInput, atMs: number = Date.now()): number | null {
+  const p = priceFor(model, atMs);
   if (!p) return null;
   const prompt = u.input + u.cacheRead + u.cacheWrite5m + u.cacheWrite1h;
   const per = 1e-6 * (p.longPrompt && prompt > p.longPrompt.over ? p.longPrompt.factor : 1);

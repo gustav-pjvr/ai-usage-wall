@@ -78,6 +78,13 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * Opus 5 and Sonnet 5) only reaches transcripts already read through a
  * re-read. Transcripts already archived keep the cost they were archived with.
  *
+ * 8 (2026-10-08): version 7 repriced every past Opus 5.5 and Sonnet 5.5 record
+ * and the cost card fell by about $6,000. Gustav's rule: the cost already
+ * shown must not change. Records are now priced by their own timestamp: old
+ * prices before REPRICED_AT, correct prices after, and Haiku 5.5 (unpriced
+ * until now) at its real price throughout. Version 7 was only ever installed
+ * on Gustav's machine, and this re-read undoes it.
+ *
  * A BUMP NO LONGER LOSES ANYTHING, and that is the point of version 5. Version
  * 4's bump discarded a cache that remembered about 350 transcripts Claude Code
  * had already deleted, and the wall dropped from 39.35B tokens to 19.79B.
@@ -86,7 +93,7 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * (Version 4 caches have no contributions to hand back; that history came back
  * through a one-off seed, see docs/design/history-archive.md.)
  */
-export const INDEX_VERSION = 7;
+export const INDEX_VERSION = 8;
 
 /** Schema of one file's contribution. Independent of INDEX_VERSION: history outlives the cache. */
 export const CONTRIB_VERSION = 1;
@@ -461,6 +468,12 @@ async function ingestFile(
       const write5m =
         u.cache_creation?.ephemeral_5m_input_tokens ?? Math.max(0, (u.cache_creation_input_tokens || 0) - write1h);
 
+      /*
+       * Priced at the record's own time (REPRICED_AT in pricing.ts), so a
+       * re-read never moves a cost the wall has already shown. No usable time
+       * gives NaN, which prices the record as it always was.
+       */
+      const pricedAt = typeof o.timestamp === 'string' ? Date.parse(o.timestamp) : NaN;
       const cost = costOf(model, {
         input: u.input_tokens || 0,
         output: u.output_tokens || 0,
@@ -468,7 +481,7 @@ async function ingestFile(
         cacheWrite5m: write5m,
         cacheWrite1h: write1h,
         webSearch: u.server_tool_use?.web_search_requests || 0,
-      });
+      }, pricedAt);
 
       const rec: TokenTotals = {
         input: u.input_tokens || 0,

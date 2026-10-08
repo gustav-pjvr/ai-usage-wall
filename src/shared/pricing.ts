@@ -19,7 +19,8 @@
  *
  * Captured 2026-09-04 from the bundled `claude-api` skill (its table is dated
  * 2026-06-24) plus the cache multipliers from that skill's prompt-caching
- * reference. A model this table does not know contributes nothing and is
+ * reference. The 5.5 models were added 2026-10-08 from the live pricing page
+ * (platform.claude.com/docs/en/about-claude/pricing). A model this table does not know contributes nothing and is
  * counted separately, so an unpriced model shows up as a caveat rather than
  * quietly making the total too low.
  *
@@ -42,14 +43,34 @@ export interface ModelPrice {
    * which is 0.025 rather than 0.1.
    */
   cacheReadFactor: number;
+  /**
+   * Claude Haiku 5.5 is priced by prompt length: a request whose prompt (input,
+   * cache reads and cache writes together) is over this many tokens pays every
+   * token price times `factor`. No other model has this; they price the whole
+   * 1M context at one rate.
+   */
+  longPrompt?: { over: number; factor: number };
 }
 
 const OPUS: ModelPrice = { input: 5, output: 25, cacheReadFactor: 0.1 };
+/** Cheaper than Opus 5, and cache reads at 0.05x ($0.20), not 0.1x. */
+const OPUS_55: ModelPrice = { input: 4, output: 20, cacheReadFactor: 0.05 };
 const FABLE: ModelPrice = { input: 10, output: 50, cacheReadFactor: 0.1 };
 const FABLE_51: ModelPrice = { input: 10, output: 50, cacheReadFactor: 0.025 };
+/** Sonnet 5's price, but cache reads at 0.05x ($0.10). */
+const SONNET_55: ModelPrice = { input: 2, output: 10, cacheReadFactor: 0.05 };
 const SONNET_5: ModelPrice = { input: 2, output: 10, cacheReadFactor: 0.1 };
 const SONNET_46: ModelPrice = { input: 3, output: 15, cacheReadFactor: 0.1 };
 const HAIKU: ModelPrice = { input: 1, output: 5, cacheReadFactor: 0.1 };
+/** $0.10 / $0.50 up to 100,000 prompt tokens; $0.50 / $2.50 over that. */
+const HAIKU_55: ModelPrice = { input: 0.1, output: 0.5, cacheReadFactor: 0.1, longPrompt: { over: 100_000, factor: 5 } };
+
+/*
+ * The 5.5 ids MUST be listed. `claude-opus-5-5` starts with `claude-opus-5`,
+ * so without its own entry it silently took Opus 5's price (25% too high, and
+ * cache reads at double), and the same for Sonnet 5.5. Found 2026-10-08 when
+ * Haiku 5.5, which matched nothing, showed up as unpriced.
+ */
 
 /** Exact ids first. Anything else falls through to the prefix rules below. */
 const EXACT: Record<string, ModelPrice> = {
@@ -57,12 +78,17 @@ const EXACT: Record<string, ModelPrice> = {
   'claude-mythos-5-1': FABLE_51,
   'claude-fable-5': FABLE,
   'claude-mythos-5': FABLE,
+  'claude-opus-5-5': OPUS_55,
   'claude-opus-5': OPUS,
   'claude-opus-4-8': OPUS,
   'claude-opus-4-7': OPUS,
   'claude-opus-4-6': OPUS,
+  'claude-opus-4-5': OPUS,
+  'claude-sonnet-5-5': SONNET_55,
   'claude-sonnet-5': SONNET_5,
   'claude-sonnet-4-6': SONNET_46,
+  'claude-sonnet-4-5': SONNET_46,
+  'claude-haiku-5-5': HAIKU_55,
   'claude-haiku-4-5': HAIKU,
 };
 
@@ -76,12 +102,17 @@ const PREFIXES: [string, ModelPrice][] = [
   ['claude-mythos-5-1', FABLE_51],
   ['claude-fable-5', FABLE],
   ['claude-mythos-5', FABLE],
+  ['claude-opus-5-5', OPUS_55],
   ['claude-opus-5', OPUS],
   ['claude-opus-4-8', OPUS],
   ['claude-opus-4-7', OPUS],
   ['claude-opus-4-6', OPUS],
+  ['claude-opus-4-5', OPUS],
+  ['claude-sonnet-5-5', SONNET_55],
   ['claude-sonnet-5', SONNET_5],
   ['claude-sonnet-4-6', SONNET_46],
+  ['claude-sonnet-4-5', SONNET_46],
+  ['claude-haiku-5-5', HAIKU_55],
   ['claude-haiku-4-5', HAIKU],
 ];
 
@@ -124,7 +155,8 @@ export interface CostInput {
 export function costOf(model: string, u: CostInput): number | null {
   const p = priceFor(model);
   if (!p) return null;
-  const per = 1e-6;
+  const prompt = u.input + u.cacheRead + u.cacheWrite5m + u.cacheWrite1h;
+  const per = 1e-6 * (p.longPrompt && prompt > p.longPrompt.over ? p.longPrompt.factor : 1);
   return (
     u.input * p.input * per +
     u.output * p.output * per +

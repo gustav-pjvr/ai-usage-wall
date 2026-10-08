@@ -43,7 +43,7 @@ const ok = (name, cond, detail = '') => {
 const out = path.join(tmp, 'pricing.cjs');
 await esbuild.build({ entryPoints: [path.join(root, 'src/shared/pricing.ts')],
   bundle: true, platform: 'node', format: 'cjs', outfile: out, logLevel: 'error' });
-const { costOf, priceFor, formatCost } = require(out);
+const { costOf, priceFor, formatCost, REPRICED_AT } = require(out);
 
 console.log('');
 console.log('against a real /usage breakdown, 2026-09-04');
@@ -138,6 +138,31 @@ console.log('the 5.5 models, from the live pricing page, 2026-10-08');
   ok('Opus 5 itself is unchanged', near(costOf('claude-opus-5', { ...base, input: M }), 5));
   ok('only Haiku 5.5 has a long-prompt tier',
      near(costOf('claude-opus-5-5', { ...base, cacheRead: 900_000 }), 0.18));
+}
+
+console.log('');
+console.log('the cost already shown does not move (Gustav, 2026-10-08)');
+{
+  const base = { input: 0, output: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0, webSearch: 0 };
+  const M = 1_000_000;
+  const near = (a, b) => Math.abs(a - b) < 1e-9;
+  const before = REPRICED_AT - 1;
+  const after = REPRICED_AT;
+  ok('Opus 5.5 before the cut-over keeps the price it was counted at (Opus 5)',
+     near(costOf('claude-opus-5-5', { ...base, input: M, cacheRead: M }, before), 5 + 0.5));
+  ok('and from the cut-over on, its real price',
+     near(costOf('claude-opus-5-5', { ...base, input: M, cacheRead: M }, after), 4 + 0.2));
+  ok('Sonnet 5.5 the same way', near(costOf('claude-sonnet-5-5', { ...base, cacheRead: M }, before), 0.2) &&
+     near(costOf('claude-sonnet-5-5', { ...base, cacheRead: M }, after), 0.1));
+  ok('a record with no time is priced as it always was',
+     near(costOf('claude-opus-5-5', { ...base, input: M }, NaN), 5));
+  ok('Haiku 5.5, which counted nothing, is priced at its real price on both sides',
+     near(costOf('claude-haiku-5-5', { ...base, input: 50_000 }, before), 0.005) &&
+     near(costOf('claude-haiku-5-5', { ...base, input: 50_000 }, after), 0.005));
+  ok('every other model is unaffected by the cut-over',
+     ['claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5', 'claude-haiku-4-5'].every((m) =>
+       near(costOf(m, { ...base, input: M, cacheRead: M }, before), costOf(m, { ...base, input: M, cacheRead: M }, after))));
+  ok('the cut-over is the moment of the fix', new Date(REPRICED_AT).toISOString() === '2026-10-08T21:22:00.000Z');
 }
 
 console.log('');

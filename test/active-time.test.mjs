@@ -48,7 +48,7 @@ ok('a break splits the day into two stretches', (() => {
   const a = fold(0, 2, 4, 30, 31);
   return a.spans.length === 2 && secs(a) === 240 + 60;
 })(), JSON.stringify(fold(0, 2, 4, 30, 31).spans));
-ok('a stretch continues across two refreshes (the appended chunk)', (() => {
+ok('folding into the same stretches later carries on from the last response', (() => {
   const a = fold(0, 2);
   A.foldActive(a, min(4));
   return a.spans.length === 1 && secs(a) === 240;

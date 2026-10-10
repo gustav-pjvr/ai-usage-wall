@@ -434,8 +434,22 @@ console.log('\n17. hours never fall when a transcript is deleted, and they cross
   ok('the hours cross to a paired screen, two numbers only', JSON.stringify(back.activeTime) === JSON.stringify(after) &&
      Object.keys(w.activeTime).sort().join() === 'seconds,since');
   ok('an index without hours sends none, so an older screen is unaffected', !('activeTime' in W.toWire(U.emptyIndex(), { shareProjectNames: true })));
-  ok('junk from a source on another version is cleaned on arrival',
-     JSON.stringify(W.fromWire({ ...w, activeTime: { seconds: -4, since: 'x' } }).activeTime) === JSON.stringify({ seconds: 0, since: null }));
+  ok('junk from a source on another version is dropped, so the screen hides the block rather than show 0',
+     [{ seconds: -4, since: 'x' }, true, {}, { seconds: 5 }, { seconds: 0, since: null }].every((j) => !('activeTime' in W.fromWire({ ...w, activeTime: j }))));
+  ok('and a source with nothing measured sends nothing', !('activeTime' in W.toWire({ ...U.emptyIndex(), activeTime: { seconds: 0, since: null } }, { shareProjectNames: true })));
+}
+
+console.log('\n18. a version bump keeps what the old cache had not archived yet (review 2026-10-10)');
+{
+  const cache = path.join(tmp, 'pending-bump.json');
+  const c = (n) => ({ cv: 1, totals: { input: n, output: 0, cacheCreate: 0, cacheRead: 0, thinking: 0, requests: n, webSearch: 0, webFetch: 0, costUsd: n, unpricedTokens: 0 },
+    daily: {}, models: {}, projects: {}, sessions: {}, activeDays: {} });
+  await U.saveIndex(cache, { ...U.emptyIndex(), version: U.INDEX_VERSION - 1,
+    files: { 'live.jsonl': { size: 1, offset: 1, contrib: c(1) } }, pendingStale: { 'gone.jsonl': c(7) } });
+  const loaded = await U.loadIndex(cache);
+  ok('the pending contribution is handed back with the files, not dropped',
+     loaded.staleFiles['live.jsonl']?.totals.requests === 1 && loaded.staleFiles['gone.jsonl']?.totals.requests === 7,
+     JSON.stringify(Object.keys(loaded.staleFiles)));
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

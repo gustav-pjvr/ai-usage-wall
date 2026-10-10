@@ -1297,12 +1297,18 @@ export class StatsView {
     const row = this.root.querySelector('.cost-row') as HTMLElement | null;
     if (!row || !this.idx) return;
     const at = (this.idx as unknown as { activeTime?: { seconds?: number; since?: number | null } }).activeTime;
-    row.dataset.hours = at ? 'on' : 'off';
-    if (!at) return;
-    (row.querySelector('.ran-value') as HTMLElement).textContent = formatHours(at.seconds ?? 0);
-    const since = typeof at.since === 'number' ? new Date(at.since) : null;
-    (row.querySelector('.ran-note') as HTMLElement).textContent =
-      since && !Number.isNaN(since.getTime()) ? `since ${since.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '';
+    // No first stretch means nothing was measured (an empty or unreadable
+    // source, or an old one): hide the block rather than paint a 0.
+    const since = typeof at?.since === 'number' ? new Date(at.since) : null;
+    const measured = !!since && !Number.isNaN(since.getTime());
+    row.dataset.hours = measured ? 'on' : 'off';
+    if (!measured) return;
+    (row.querySelector('.ran-value') as HTMLElement).textContent = formatHours(at?.seconds ?? 0);
+    // The year only once it is not this year's, so "since 11 Jul" never means the wrong July.
+    const opts: Intl.DateTimeFormatOptions = since.getFullYear() === new Date().getFullYear()
+      ? { day: 'numeric', month: 'short' }
+      : { day: 'numeric', month: 'short', year: 'numeric' };
+    (row.querySelector('.ran-note') as HTMLElement).textContent = `since ${since.toLocaleDateString('en-GB', opts)}`;
   }
 
   private paintPeak(): void {

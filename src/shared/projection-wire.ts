@@ -116,11 +116,23 @@ export interface WireActiveTime {
   since: number | null;
 }
 
-/** Re-validated on both sides: a source on another version could send anything. */
-const wireActiveTime = (a: any): WireActiveTime => ({
-  seconds: count(a?.seconds),
-  since: typeof a?.since === 'number' && Number.isFinite(a.since) && a.since > 0 ? a.since : null,
-});
+/**
+ * Re-validated on both sides: a source on another version could send anything.
+ * Anything that is not a real measurement becomes undefined, so the screen hides
+ * the block rather than showing a 0 nothing measured.
+ */
+const wireActiveTime = (a: any): WireActiveTime | undefined => {
+  if (!a || typeof a !== 'object') return undefined;
+  if (typeof a.seconds !== 'number' || !Number.isFinite(a.seconds) || a.seconds < 0) return undefined;
+  if (typeof a.since !== 'number' || !Number.isFinite(a.since) || a.since <= 0) return undefined;
+  return { seconds: a.seconds, since: a.since };
+};
+
+/** The field when there is a real measurement, nothing otherwise. */
+const activeField = (a: unknown): { activeTime?: WireActiveTime } => {
+  const v = wireActiveTime(a);
+  return v ? { activeTime: v } : {};
+};
 
 export interface WireHistory {
   archivedFiles: number;
@@ -338,7 +350,7 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
       ? buildLinks(Object.values(idx.sessions ?? {}) as any[], (cwd) => labelOfKey.get(cwd.toLowerCase()) ?? null).slice(0, MAX_WIRE_LINKS)
       : [],
     ...(idx.history ? { history: wireHistory(idx.history) } : {}),
-    ...(idx.activeTime ? { activeTime: wireActiveTime(idx.activeTime) } : {}),
+    ...activeField(idx.activeTime),
   };
 }
 
@@ -414,6 +426,6 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
     ...(w.unavailableReason ? { unavailableReason: w.unavailableReason } : {}),
     // Re-validated on arrival, like the links.
     ...(w.history ? { history: wireHistory(w.history) } : {}),
-    ...(w.activeTime ? { activeTime: wireActiveTime(w.activeTime) } : {}),
+    ...activeField(w.activeTime),
   };
 }

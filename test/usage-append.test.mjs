@@ -202,6 +202,30 @@ console.log('\nindex version 6: five-minute slots per file, and local active day
   ok('and its per-file contributions are handed back, not lost', !!staleFiles[file] && staleFiles[file].totals.requests === 6);
 }
 
+console.log('\nindex version 9: the stretches Claude was working, per file');
+{
+  const DIR = path.join(HOME, 'projects', 'hours');
+  await fs.mkdir(DIR, { recursive: true });
+  const t = Date.now() - 3 * 3_600_000;
+  const line = (ms) => JSON.stringify({
+    type: 'assistant', timestamp: new Date(ms).toISOString(), sessionId: '99999999-2222-4333-8444-555555555555',
+    message: { model: 'claude-opus-5', usage: { input_tokens: 1, output_tokens: 1 } },
+  }) + '\n';
+  const file = path.join(DIR, 'w.jsonl');
+  // Two minutes of work, a 20 minute pause, then one more minute.
+  await fs.writeFile(file, line(t) + line(t + 60_000) + line(t + 120_000) + line(t + 20 * 60_000) + line(t + 21 * 60_000), 'utf8');
+  const { index } = await refreshIndex(emptyIndex());
+  const a = index.files[file].contrib.active;
+  ok('each file keeps its own stretches, split at the pause', a.spans.length === 2 &&
+     a.spans[0][1] - a.spans[0][0] === 120 && a.spans[1][1] - a.spans[1][0] === 60, JSON.stringify(a));
+  // Claude Code appends to the same transcript: the stretch carries on.
+  await fs.appendFile(file, line(t + 23 * 60_000), 'utf8');
+  const { index: next } = await refreshIndex(index);
+  const b = next.files[file].contrib.active;
+  ok('a stretch continues into the bytes the next refresh reads', b.spans.length === 2 && b.spans[1][1] - b.spans[1][0] === 180,
+     JSON.stringify(b));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 await fs.rm(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

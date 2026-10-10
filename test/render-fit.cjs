@@ -178,7 +178,7 @@ function fixture(emptyIndex) {
     unpricedTokens: 0,
   });
 
-  idx.totals = t(48_100_000, 62_400_000, 690_000_000, 25_300_000_000, 72_060, 1284.5678);
+  idx.totals = t(48_100_000, 62_400_000, 690_000_000, 25_300_000_000, 72_060, 48_479.2412);
   idx.unavailable = false;
   idx.lastScanMs = 118;
   idx.latest = {
@@ -261,6 +261,9 @@ function fixture(emptyIndex) {
 
   idx.prompts = { total: 4_812, daily: {}, lastAt: new Date(now - 90_000).toISOString(), offset: 0, size: 0 };
   idx.peak = { velocity: 26_400_000, at: new Date(now - 3 * 86_400_000).toISOString() };
+  // Hours as main sends them: 9,999 whole hours, about forty times this machine's
+  // figure in October 2026, so the number is as wide as it will be for years.
+  idx.activeTime = { seconds: 9_999 * 3600 + 1800, since: Date.parse('2026-07-11T14:58:58Z') };
 
   // History as the main process merges it in (src/shared/usage-merge.ts), with
   // the longest caption and footer it can produce, so both are measured.
@@ -627,6 +630,31 @@ app.whenReady().then(async () => {
     ok(`${size.label}   the buttons sit under the notes bar, above the panels, clear of the switch`,
        act.inside && act.belowBar && act.abovePanels && act.clearOfSwitch, JSON.stringify(act));
     ok(`${size.label}   button text is legible (${act.fontPx}px)`, act.fontPx >= 8);
+    const ran = await win.webContents.executeJavaScript(`(() => {
+      const row = document.querySelector('#view-stats .cost-row');
+      if (!row) return { missing: true };
+      const box = (sel) => row.querySelector(sel)?.getBoundingClientRect();
+      const cost = box('.panel-cost'), hours = box('.panel-ran');
+      const inside = (sel, panel) => { const r = box(sel); return !!r && r.width > 0 && r.left >= panel.left - 0.5 && r.right <= panel.right + 0.5 && r.top >= panel.top - 0.5 && r.bottom <= panel.bottom + 0.5; };
+      const oneLine = (sel) => { const e = row.querySelector(sel); const lh = parseFloat(getComputedStyle(e).fontSize); return e.getBoundingClientRect().height <= lh * 1.4; };
+      return {
+        on: row.dataset.hours === 'on' && getComputedStyle(row.querySelector('.panel-ran')).display !== 'none',
+        value: row.querySelector('.ran-value').textContent,
+        note: row.querySelector('.ran-note').textContent,
+        title: row.querySelector('.panel-ran .panel-title').textContent,
+        costWider: cost.width > hours.width * 1.4, // 1.4 with the 9,999 stress figure; about 2x with a real 3 digit one
+        sideBySide: Math.abs(cost.top - hours.top) < 1 && hours.left > cost.right,
+        allInside: ['.ran-value', '.ran-note', '.panel-ran .panel-title', '.panel-ran .tag'].every((s) => inside(s, hours)) && inside('.cost-value', cost),
+        oneLine: oneLine('.ran-value') && oneLine('.cost-value'),
+        px: Math.min(...['.ran-value', '.ran-note', '.panel-ran .panel-title'].map((s) => parseFloat(getComputedStyle(row.querySelector(s)).fontSize))),
+      };
+    })()`);
+    ok(`${size.label}   Hours sits beside Total cost, which keeps most of the row`,
+       !ran.missing && ran.on && ran.sideBySide && ran.costWider, JSON.stringify(ran));
+    ok(`${size.label}   Hours reads ${ran.value} (${ran.note}), whole hours, never days`,
+       ran.value === '9,999' && ran.note === 'since 11 Jul' && ran.title === 'Hours');
+    ok(`${size.label}   both numbers stay on one line, inside their panels, legible (${ran.px}px)`,
+       ran.allInside && ran.oneLine && ran.px >= 8, JSON.stringify(ran));
     ok(`${size.label}   exactly one star is marked active, and the pulse ring sits on it`, c.active === 1 && c.pulseOk,
        `${c.active} active, pulse ${c.pulseOk ? 'placed' : 'missing or misplaced'}`);
     ok(`${size.label}   notes bar clears the mode switch (${r.barOverSwitch}px into it)`, r.barOverSwitch <= 0);

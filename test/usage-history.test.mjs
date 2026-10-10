@@ -408,6 +408,36 @@ console.log('\n16. a deleted transcript keeps its curve (the any-day time-lapse)
   ok('restored from a backup: counted once, not twice', dayOf() === snapshot && Object.keys(m.store.entries).length === 0);
 }
 
+console.log('\n17. hours never fall when a transcript is deleted, and they cross the wire');
+{
+  const AT = await bundle('src/shared/active-time.ts', 'active.cjs');
+  await fs.rm(PROJECTS, { recursive: true, force: true });
+  const t = Date.now() - 2 * DAY;
+  const work = (from, n) => Array.from({ length: n }, (_, i) => rec(from + i * 60_000, 'sh', cwdA, 'claude-opus-5', 1, 1, 1)).join('');
+  // Two transcripts working side by side for 10 minutes, one of them going on alone for 10 more.
+  const a = path.join(PROJECTS, 'h', 'a.jsonl');
+  const b = path.join(PROJECTS, 'h', 'b.jsonl');
+  await fs.mkdir(path.dirname(a), { recursive: true });
+  await fs.writeFile(a, work(t, 21), 'utf8');
+  await fs.writeFile(b, work(t, 11), 'utf8');
+  const m = memPort();
+  let { index } = await U.refreshIndex(U.emptyIndex(), undefined, { history: m.port });
+  const before = AT.activeTime(index.files, m.store.entries);
+  ok('side by side counts once: 20 minutes, not 30', before.seconds === 20 * 60, String(before.seconds));
+  await fs.rm(a);
+  ({ index } = await U.refreshIndex(index, undefined, { history: m.port }));
+  const after = AT.activeTime(index.files, m.store.entries);
+  ok('after the longer transcript is deleted, the hours are unchanged', after.seconds === before.seconds && !!m.store.entries[a],
+     `${after.seconds} vs ${before.seconds}`);
+  const w = W.toWire({ ...U.emptyIndex(), activeTime: after }, { shareProjectNames: true });
+  const back = W.fromWire(JSON.parse(JSON.stringify(w)));
+  ok('the hours cross to a paired screen, two numbers only', JSON.stringify(back.activeTime) === JSON.stringify(after) &&
+     Object.keys(w.activeTime).sort().join() === 'seconds,since');
+  ok('an index without hours sends none, so an older screen is unaffected', !('activeTime' in W.toWire(U.emptyIndex(), { shareProjectNames: true })));
+  ok('junk from a source on another version is cleaned on arrival',
+     JSON.stringify(W.fromWire({ ...w, activeTime: { seconds: -4, since: 'x' } }).activeTime) === JSON.stringify({ seconds: 0, since: null }));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 await fs.rm(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

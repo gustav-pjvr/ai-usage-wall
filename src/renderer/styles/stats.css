@@ -180,7 +180,9 @@
  * because .panel clips, "nothing" means an empty box rather than a visibly
  * squashed one. It may now give height back to its sibling.
  */
-.panel-stack .panel-cost { flex: 0 1 auto; min-height: 0; --pi: 2; }
+.panel-stack .cost-row { flex: 0 1 auto; min-height: 0; }
+.panel-cost { --pi: 2; }
+.panel-ran  { --pi: 2; }
 .panel-stack .panel-vel  { flex: 1 1 auto; min-height: 0; --pi: 3; }
 .panel-counters { grid-column: span 4; grid-row: span 1; --pi: 4; }
 .panel-daily    { grid-column: span 5; grid-row: span 1; --pi: 4; }
@@ -1138,12 +1140,12 @@
 
 .cost-value {
   font-family: var(--mono);
-  font-size: calc(var(--u) * 26);
+  font-size: calc(var(--u) * 23); /* 26 before Hours shared its row */
   font-weight: 700;
   letter-spacing: -0.01em;
   line-height: 1;
   color: oklch(0.86 0.13 155);
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 .cost-note {
@@ -1159,6 +1161,57 @@
   font-size: max(8px, calc(var(--u) * 10));
   letter-spacing: 0.04em;
   color: oklch(0.72 0.13 75);
+}
+
+/*
+ * Total cost and Hours share one row: cost keeps most of it, Hours is a small
+ * block at its right (Gustav, 2026-10-10). Visibility by data attribute, never
+ * `hidden` on something that also sets `display` (this project has shipped that
+ * bug four times).
+ */
+.cost-row {
+  display: flex;
+  gap: calc(var(--u) * 12); /* the grid gap, so the seam matches */
+  min-height: 0;
+}
+/* Hours takes exactly the width its content needs; the cost takes the rest. */
+.cost-row .panel-cost { flex: 1 1 auto; min-width: 0; }
+/* min-content: as narrow as its widest line, with the tag wrapped under the title. */
+.cost-row .panel-ran { flex: 0 0 auto; width: min-content; }
+.cost-row[data-hours='off'] .panel-ran { display: none; }
+
+/*
+ * At 1366x768 the whole row is about 215px, so both headers may put the tag
+ * under the title rather than squeeze the title onto two lines or clip the tag.
+ */
+.cost-row .panel-head { flex-wrap: wrap; row-gap: calc(var(--u) * 4); }
+.cost-row .panel-title { white-space: nowrap; }
+
+.ran-body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+}
+
+.ran-value {
+  font-family: var(--mono);
+  font-size: calc(var(--u) * 23);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  color: oklch(0.86 0.1 230);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Where the count starts. Not in the short-screen hide list: it is the caveat. */
+.ran-note {
+  margin-top: calc(var(--u) * 6);
+  font-size: max(8px, calc(var(--u) * 11));
+  line-height: 1.35;
+  color: oklch(0.58 0.015 240);
+  white-space: nowrap;
 }
 
 

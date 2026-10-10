@@ -44,6 +44,7 @@ import {
 import { currentHistory, historyPort, loadHistory } from './data/history';
 import { mergeHistory } from '../shared/usage-merge';
 import { collectDay, offeredDays } from '../shared/intraday';
+import { activeTime, type ActiveTime } from '../shared/active-time';
 import {
   applyLayerMode,
   detach,
@@ -1350,7 +1351,16 @@ function mergedUsage(): ReturnType<typeof mergeHistory<UsageIndex>> {
  * payload: 170 KB was crossing the IPC boundary on every refresh, roughly once
  * a second during an active session. Send a projection instead.
  */
-function usageForRenderer(merged = mergedUsage()): Record<string, unknown> {
+/**
+ * Hours Claude has run, from every live and archived transcript's stretches of
+ * work (src/shared/active-time.ts). A merge of a few thousand stretches, done
+ * once per push rather than kept, so it can never be stale.
+ */
+function activeTimeNow(): ActiveTime {
+  return activeTime(usage.files, currentHistory().entries);
+}
+
+function usageForRenderer(merged = mergedUsage(), active = activeTimeNow()): Record<string, unknown> {
   /*
    * A SCREEN shows the source's numbers, not its own. It does not index its own
    * transcripts at all while paired, so `usage` here is an empty index and
@@ -1370,6 +1380,7 @@ function usageForRenderer(merged = mergedUsage()): Record<string, unknown> {
     // This machine's own ledger. A screen has none: it is not indexing, and the
     // paired machine's milestones are not projected.
     milestones: milestonesForRenderer(merged, usageIndexing),
+    activeTime: active,
     // Transcripts on disk. Archived ones are counted in `history`, never here.
     fileCount: Object.keys(files).length,
     indexing: usageIndexing,
@@ -1397,8 +1408,9 @@ function pushUsage(): void {
    * a relay outage can never slow the local dashboard down (rule 30).
    */
   const merged = mergedUsage();
-  projection.offerUsage(merged, usageIndexing);
-  const payload = usageForRenderer(merged);
+  const active = activeTimeNow();
+  projection.offerUsage({ ...merged, activeTime: active }, usageIndexing);
+  const payload = usageForRenderer(merged, active);
   for (const w of windows) {
     if (w.win.isDestroyed()) continue;
     w.win.webContents.send('wall:usage', payload);

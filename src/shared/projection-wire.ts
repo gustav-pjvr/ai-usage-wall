@@ -103,7 +103,24 @@ export interface ProjectedUsage {
    * like a path is dropped. Optional like `projectLinks`.
    */
   history?: WireHistory;
+  /**
+   * Hours Claude has run on the source (src/shared/active-time.ts): a count of
+   * seconds and the time of the first stretch. Two numbers, nothing about who
+   * or where. Optional like `projectLinks`.
+   */
+  activeTime?: WireActiveTime;
 }
+
+export interface WireActiveTime {
+  seconds: number;
+  since: number | null;
+}
+
+/** Re-validated on both sides: a source on another version could send anything. */
+const wireActiveTime = (a: any): WireActiveTime => ({
+  seconds: count(a?.seconds),
+  since: typeof a?.since === 'number' && Number.isFinite(a.since) && a.since > 0 ? a.since : null,
+});
 
 export interface WireHistory {
   archivedFiles: number;
@@ -321,6 +338,7 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
       ? buildLinks(Object.values(idx.sessions ?? {}) as any[], (cwd) => labelOfKey.get(cwd.toLowerCase()) ?? null).slice(0, MAX_WIRE_LINKS)
       : [],
     ...(idx.history ? { history: wireHistory(idx.history) } : {}),
+    ...(idx.activeTime ? { activeTime: wireActiveTime(idx.activeTime) } : {}),
   };
 }
 
@@ -396,5 +414,6 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
     ...(w.unavailableReason ? { unavailableReason: w.unavailableReason } : {}),
     // Re-validated on arrival, like the links.
     ...(w.history ? { history: wireHistory(w.history) } : {}),
+    ...(w.activeTime ? { activeTime: wireActiveTime(w.activeTime) } : {}),
   };
 }

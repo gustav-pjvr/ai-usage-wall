@@ -103,6 +103,41 @@ source, and a price change makes the number wrong with no signal. Re-check it
 against the `claude-api` skill when a model is added or a rate moves.
 
 
+## Hours
+
+The small block beside Total cost: how many hours Claude has run, in whole
+hours, never turned into days (Gustav, 2026-10-10). Code:
+`src/shared/active-time.ts`.
+
+**What counts.** Two responses in the same transcript at most five minutes
+apart are joined into one stretch of work. Every transcript's stretches (main
+sessions and subagents) are merged, so an hour with three sessions running side
+by side counts once. A pause longer than five minutes counts nothing. Each
+transcript keeps its own stretches in its contribution (`contrib.active`, index
+version 9), so a deleted transcript keeps its hours, exactly as it keeps its
+tokens.
+
+**Why not the obvious sources.** Measured on 2026-10-10 over 980 transcripts:
+
+| Source | Problem |
+|---|---|
+| Session start to end | A resumed session keeps its id; one spans 1107 hours here |
+| Claude Code's `turn_duration` records | Only since 31 Aug, in 65 of 972 transcripts; turns overlap (271.8 hours summed, 232.3 distinct) and include hours waiting on background tasks |
+| Five-minute slots with any response | 245.2 hours where the turns say 199.9: one response counts a whole five minutes |
+| **Responses at most 5 minutes apart, merged** | **197.1 hours over the same period, against 199.9.** Used |
+
+So `turn_duration`, de-duplicated across every session, is the yardstick, and
+the chosen method lands within 1.5% of it.
+
+**Since when.** The reconstructed history before 11 Jul (the seed) has totals
+but no times, so it cannot add hours. The block says "since 11 Jul" (the first
+stretch on record) rather than letting the figure pass for all time. That note
+is deliberately not in the short-screen hide list.
+
+**Cost.** Merging about 2,300 stretches takes 1.6 ms per push; they add 83 KB
+to the cache. A paired screen receives two numbers (`activeTime.seconds` and
+`since`); a source too old to send them hides the block rather than showing 0.
+
 ## MEASURED versus DERIVED, and why the label exists
 
 `panel(title, tag, extraClass)` (`stats.ts:235-242`) stamps every panel header

@@ -46,6 +46,7 @@ import { promises as fs, createReadStream } from 'node:fs';
 import { costOf } from '../../shared/pricing';
 import { localDayKey } from '../../shared/day';
 import { bucketOf, foldIntraday, type Intraday } from '../../shared/intraday';
+import { foldActive, type ActiveSpans } from '../../shared/active-time';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as readline from 'node:readline';
@@ -85,6 +86,10 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * until now) at its real price throughout. Version 7 was only ever installed
  * on Gustav's machine, and this re-read undoes it.
  *
+ * 9 (2026-10-10): each file's `contrib.active`, the stretches in which Claude
+ * was working, for the Hours block. Costs come out identical: they are priced
+ * by each record's own time since version 8.
+ *
  * A BUMP NO LONGER LOSES ANYTHING, and that is the point of version 5. Version
  * 4's bump discarded a cache that remembered about 350 transcripts Claude Code
  * had already deleted, and the wall dropped from 39.35B tokens to 19.79B.
@@ -93,7 +98,7 @@ const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
  * (Version 4 caches have no contributions to hand back; that history came back
  * through a one-off seed, see docs/design/history-archive.md.)
  */
-export const INDEX_VERSION = 8;
+export const INDEX_VERSION = 9;
 
 /** Schema of one file's contribution. Independent of INDEX_VERSION: history outlives the cache. */
 export const CONTRIB_VERSION = 1;
@@ -166,6 +171,13 @@ export interface FileContribution {
    * still count in `activeDays`, and its days show as partly detailed.
    */
   intraday?: Intraday;
+  /**
+   * When Claude was working in this file: responses at most five minutes apart,
+   * joined into stretches (src/shared/active-time.ts). The "Hours" block merges
+   * every live and archived file's stretches. Absent on a contribution archived
+   * before index version 9, whose hours are therefore not counted.
+   */
+  active?: ActiveSpans;
 }
 
 export interface FileEntry {
@@ -253,7 +265,7 @@ function addInto(target: TokenTotals, u: TokenTotals): void {
 }
 
 export function emptyContrib(): FileContribution {
-  return { cv: CONTRIB_VERSION, totals: emptyTotals(), daily: {}, models: {}, projects: {}, sessions: {}, activeDays: {}, intraday: {} };
+  return { cv: CONTRIB_VERSION, totals: emptyTotals(), daily: {}, models: {}, projects: {}, sessions: {}, activeDays: {}, intraday: {}, active: { last: 0, spans: [] } };
 }
 
 /** The aggregates a record lands in, shared by the index and each file's contribution. */
@@ -534,6 +546,8 @@ async function ingestFile(
           bucketOf(tsMs),
           [1, rec.input + rec.output + rec.cacheCreate + rec.cacheRead, rec.output],
         );
+        // The working time, in this file's own stretches (the Hours block).
+        foldActive((contrib.active ??= { last: 0, spans: [] }), tsMs);
       }
 
       if (ts) {

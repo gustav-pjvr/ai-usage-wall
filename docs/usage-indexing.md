@@ -250,7 +250,7 @@ so reporting it would only flicker the loading panel.
 
 | Field | What it holds | Why it exists |
 |---|---|---|
-| `version` | `INDEX_VERSION`, currently 6. 3 added the cost fields; 4 (2026-09-22) added `projectHourly` and `activeDays`; 5 added per-file `contrib`; 6 (2026-09-23) added five-minute `intraday` to each `contrib` and removed `projectHourly` | `loadIndex` discards a cache with any other value but hands its per-file contributions back as `staleFiles`, so a bump costs one cold reindex and loses nothing (see [usage-history.md](usage-history.md)) |
+| `version` | `INDEX_VERSION`, currently 9. 3 added the cost fields; 4 (2026-09-22) added `projectHourly` and `activeDays`; 5 added per-file `contrib`; 6 (2026-09-23) added five-minute `intraday` to each `contrib` and removed `projectHourly`; 7 and 8 (2026-10-08) re-read for the price table, records priced by their own time; 9 (2026-10-10) added `contrib.active`, the stretches Claude was working, for the Hours block | `loadIndex` discards a cache with any other value but hands its per-file contributions back as `staleFiles`, so a bump costs one cold reindex and loses nothing (see [usage-history.md](usage-history.md)) |
 | `builtAt` | ISO stamp of the last completed pass | |
 | `files` | path to `{ size, offset, contrib }` | the whole incremental scheme, plus what each file added so a deleted one can be archived exactly; stripped before IPC |
 | `totals` | the eight token counters, plus `costUsd` and `unpricedTokens` (see [derived-metrics.md](derived-metrics.md)) | the hero and the counter tiles |

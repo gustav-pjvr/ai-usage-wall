@@ -15,6 +15,7 @@
  */
 
 import { formatCost } from '../shared/pricing';
+import { formatHours } from '../shared/active-time';
 import { labelProjects } from '../shared/project-label';
 import { ConstellationPanel } from './constellation';
 import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
@@ -711,7 +712,24 @@ export class StatsView {
     costGap.hidden = true;
     costBody.appendChild(costGap);
     cost.appendChild(costBody);
-    stack.appendChild(cost);
+
+    /*
+     * Hours, a small block beside the cost, which keeps most of the row
+     * (Gustav, 2026-10-10). Always whole hours, never turned into days. What
+     * counts as an hour is defined in src/shared/active-time.ts. Hidden, never
+     * shown as 0, when a paired screen's source is too old to send it.
+     */
+    const costRow = el('div', 'cost-row');
+    costRow.dataset.hours = 'off';
+    costRow.appendChild(cost);
+    const ran = panel('Hours', 'derived', 'panel-ran');
+    const ranBody = el('div', 'ran-body');
+    ranBody.appendChild(el('div', 'ran-value', '0'));
+    ranBody.appendChild(el('div', 'ran-note', ''));
+    ran.appendChild(ranBody);
+    ran.title = 'Time Claude was working: responses at most five minutes apart, every session together, parallel sessions counted once.';
+    costRow.appendChild(ran);
+    stack.appendChild(costRow);
 
     // Velocity + today.
     /*
@@ -1024,6 +1042,7 @@ export class StatsView {
     this.odos.thinking.set(t.thinking, animate);
     this.odos.velocity.set(d.velocity, animate);
     this.paintCost();
+    this.paintRan();
     this.paintPeak();
     this.odos.cache.set(d.cacheHitRate * 100, animate);
 
@@ -1267,6 +1286,23 @@ export class StatsView {
     const unpriced = this.idx.totals?.unpricedTokens ?? 0;
     gap.hidden = unpriced <= 0;
     if (unpriced > 0) gap.textContent = `${compact(unpriced)} tokens from an unpriced model are not counted`;
+  }
+
+  /**
+   * Whole hours since the first transcript on disk. The reconstructed history
+   * before it has totals but no times, so it cannot add hours, and the note
+   * says where the count starts rather than letting it pass for all time.
+   */
+  private paintRan(): void {
+    const row = this.root.querySelector('.cost-row') as HTMLElement | null;
+    if (!row || !this.idx) return;
+    const at = (this.idx as unknown as { activeTime?: { seconds?: number; since?: number | null } }).activeTime;
+    row.dataset.hours = at ? 'on' : 'off';
+    if (!at) return;
+    (row.querySelector('.ran-value') as HTMLElement).textContent = formatHours(at.seconds ?? 0);
+    const since = typeof at.since === 'number' ? new Date(at.since) : null;
+    (row.querySelector('.ran-note') as HTMLElement).textContent =
+      since && !Number.isNaN(since.getTime()) ? `since ${since.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '';
   }
 
   private paintPeak(): void {

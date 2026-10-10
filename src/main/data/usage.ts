@@ -955,6 +955,15 @@ export async function loadIndex(
       for (const [p, e] of Object.entries(parsed?.files ?? {})) {
         if (e?.contrib?.cv === CONTRIB_VERSION) staleFiles[p] = e.contrib;
       }
+      /*
+       * And the contributions the old cache was still holding for a deleted
+       * transcript it could not archive yet. Dropping these on a bump took
+       * their tokens, cost and hours off the wall for good (found by the
+       * 2026-10-10 review; latent until a cache with pendingStale met a bump).
+       */
+      for (const [p, c] of Object.entries(parsed?.pendingStale ?? {})) {
+        if (c?.cv === CONTRIB_VERSION && !staleFiles[p]) staleFiles[p] = c;
+      }
       return { index: emptyIndex(), staleFiles };
     }
     // Shallow-heal anything a hand edit or partial write could have removed.

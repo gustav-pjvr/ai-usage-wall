@@ -131,8 +131,14 @@ the chosen method lands within 1.5% of it.
 
 **Since when.** The reconstructed history before 11 Jul (the seed) has totals
 but no times, so it cannot add hours. The block says "since 11 Jul" (the first
-stretch on record) rather than letting the figure pass for all time. That note
-is deliberately not in the short-screen hide list.
+stretch on record) rather than letting the figure pass for all time; the year is
+added once that date is in an earlier year. That note is deliberately not in the
+short-screen hide list. Transcripts archived before index version 9 carry no
+stretches either, so their time is missing too. On Gustav's machine that is 54
+transcripts (23 Sep to 4 Oct, 911 requests), and every one of their five-minute
+slots overlaps a live stretch, so the hours are unaffected; on another machine
+the gap could be real. With nothing measured at all, the block is hidden, never
+shown as 0.
 
 **Cost.** Merging about 2,300 stretches takes 1.6 ms per push; they add 83 KB
 to the cache. A paired screen receives two numbers (`activeTime.seconds` and

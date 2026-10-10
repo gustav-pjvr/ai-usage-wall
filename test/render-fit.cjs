@@ -116,6 +116,19 @@ const dayKey = (ms) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const DAY_MS = 86_400_000;
+
+/*
+ * When the fixture's hours start, and the note the Hours block should print for
+ * it, formatted here the way the renderer does, in this machine's time zone, so
+ * the check holds wherever the suite runs (the review found "11 Jul" alone fails
+ * east of UTC+9).
+ */
+const HOURS_SINCE_MS = Date.parse('2026-07-11T14:58:58Z');
+const HOURS_SINCE = (() => {
+  const d = new Date(HOURS_SINCE_MS);
+  const opts = d.getFullYear() === new Date().getFullYear() ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' };
+  return `since ${d.toLocaleDateString('en-GB', opts)}`;
+})();
 const WS = 'C:\\Users\\Demo User\\Desktop\\Claude WorkSpace\\';
 const TL_PROJECTS = ['muchbetter-client-wall', 'Ridgeway Marathon', 'nvrc-website-v2'];
 
@@ -263,7 +276,7 @@ function fixture(emptyIndex) {
   idx.peak = { velocity: 26_400_000, at: new Date(now - 3 * 86_400_000).toISOString() };
   // Hours as main sends them: 9,999 whole hours, about forty times this machine's
   // figure in October 2026, so the number is as wide as it will be for years.
-  idx.activeTime = { seconds: 9_999 * 3600 + 1800, since: Date.parse('2026-07-11T14:58:58Z') };
+  idx.activeTime = { seconds: 9_999 * 3600 + 1800, since: HOURS_SINCE_MS };
 
   // History as the main process merges it in (src/shared/usage-merge.ts), with
   // the longest caption and footer it can produce, so both are measured.
@@ -333,7 +346,8 @@ const PROBE = `(() => {
   const findings = [];
   const round = (n) => Math.round(n * 10) / 10;
 
-  const panels = [...document.querySelectorAll('#view-stats .panel')];
+  // A panel hidden by design (the Hours block with nothing measured) has a zero rect; it is not on screen.
+  const panels = [...document.querySelectorAll('#view-stats .panel')].filter((p) => p.getBoundingClientRect().width > 0);
   if (!panels.length) return { fatal: 'no panels rendered' };
 
   for (const p of panels) {
@@ -613,7 +627,7 @@ app.whenReady().then(async () => {
       const r = a.getBoundingClientRect();
       const bar = document.querySelector('#notes-bar').getBoundingClientRect();
       const sw = document.querySelector('#mode-switch').getBoundingClientRect();
-      const top = Math.min(...[...document.querySelectorAll('#view-stats .panel')].map((p) => p.getBoundingClientRect().top));
+      const top = Math.min(...[...document.querySelectorAll('#view-stats .panel')].map((p) => p.getBoundingClientRect()).filter((r) => r.width > 0).map((r) => r.top));
       const badge = a.querySelector('.wall-badge');
       return {
         inside: r.left >= 0 && r.right <= innerWidth + 0.5 && r.top >= 0,
@@ -652,7 +666,7 @@ app.whenReady().then(async () => {
     ok(`${size.label}   Hours sits beside Total cost, which keeps most of the row`,
        !ran.missing && ran.on && ran.sideBySide && ran.costWider, JSON.stringify(ran));
     ok(`${size.label}   Hours reads ${ran.value} (${ran.note}), whole hours, never days`,
-       ran.value === '9,999' && ran.note === 'since 11 Jul' && ran.title === 'Hours');
+       ran.value === '9,999' && ran.note === HOURS_SINCE && ran.title === 'Hours');
     ok(`${size.label}   both numbers stay on one line, inside their panels, legible (${ran.px}px)`,
        ran.allInside && ran.oneLine && ran.px >= 8, JSON.stringify(ran));
     ok(`${size.label}   exactly one star is marked active, and the pulse ring sits on it`, c.active === 1 && c.pulseOk,
@@ -675,7 +689,7 @@ app.whenReady().then(async () => {
     const b = bar.getBoundingClientRect();
     const sw = document.querySelector('#mode-switch');
     const s = sw ? sw.getBoundingClientRect() : null;
-    const panels = [...document.querySelectorAll('#view-stats .panel')].map((p) => p.getBoundingClientRect());
+    const panels = [...document.querySelectorAll('#view-stats .panel')].map((p) => p.getBoundingClientRect()).filter((r) => r.width > 0);
     const topPanel = Math.min(...panels.map((r) => r.top));
     return {
       left: Math.round(b.left),
@@ -1054,6 +1068,31 @@ app.whenReady().then(async () => {
     await clickEl('#view-stats .panel-daily');
     ok(`${tag}   a click anywhere else closes the grid`,
        await win.webContents.executeJavaScript(`getComputedStyle(document.querySelector('.dp-pop')).display === 'none'`));
+  }
+
+  // ── Hours with nothing measured ────────────────────────────────────────
+  //
+  // A paired screen whose source is too old to send hours, or a source with no
+  // transcripts: the block must go and the cost take the whole row, never a 0.
+  for (const size of [{ w: 1366, h: 768 }, { w: 1920, h: 1080 }]) {
+    await measure(win, size);
+    win.webContents.send('wall:usage', { ...idx, activeTime: undefined });
+    await wait(400);
+    const off = await win.webContents.executeJavaScript(`(() => {
+      const row = document.querySelector('#view-stats .cost-row');
+      const cost = row.querySelector('.panel-cost').getBoundingClientRect();
+      return {
+        state: row.dataset.hours,
+        hidden: getComputedStyle(row.querySelector('.panel-ran')).display === 'none',
+        fullWidth: Math.abs(cost.width - row.getBoundingClientRect().width) < 1,
+      };
+    })()`);
+    ok(`${size.w}x${size.h}   with no hours measured the block is hidden, not 0, and cost takes the row`,
+       off.state === 'off' && off.hidden && off.fullWidth, JSON.stringify(off));
+    win.webContents.send('wall:usage', idx);
+    await wait(400);
+    ok(`${size.w}x${size.h}   and it comes back when hours arrive`,
+       await win.webContents.executeJavaScript(`document.querySelector('#view-stats .cost-row').dataset.hours === 'on'`));
   }
 
   win.destroy();

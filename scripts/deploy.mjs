@@ -125,9 +125,23 @@ async function pruneOldInstallers() {
 
 async function relaunch() {
   step('relaunching');
-  const child = spawn(INSTALLED_EXE, [], { detached: true, stdio: 'ignore' });
+  /*
+   * ELECTRON_RUN_AS_NODE must not reach the app. A host that is itself an
+   * Electron app (an editor or agent UI running this script) can set it, and
+   * the wall then starts as plain Node and exits at once. On 2026-10-24 that
+   * happened while this step still printed "running".
+   */
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = spawn(INSTALLED_EXE, [], { detached: true, stdio: 'ignore', env });
+  let exited = null;
+  child.on('exit', (code) => {
+    exited = code;
+  });
   child.unref();
   await new Promise((r) => setTimeout(r, 3000));
+  // Checked, not assumed: an app that quit within 3 s is not running.
+  if (exited !== null) throw new Error(`the app exited straight after launch (code ${exited})`);
   ok('running');
 }
 

@@ -24,6 +24,7 @@
 
 import { labelProjects } from './project-label';
 import { buildLinks, type Link } from './constellation';
+import type { CodexLimits, CodexLimitWindow, CodexProject, CodexView } from './codex-view';
 
 export const WIRE_VERSION = 1;
 
@@ -109,6 +110,15 @@ export interface ProjectedUsage {
    * or where. Optional like `projectLinks`.
    */
   activeTime?: WireActiveTime;
+  /**
+   * The source's Codex usage (src/shared/codex-view.ts), when it has any.
+   * Projects are keyed by LABEL with `display` set to the label, built by the
+   * same rule as `projects` above, and empty whenever project names are not
+   * shared. No session ids, no paths, no cwd: counts, totals, plan readings
+   * and times only. Optional: an older screen ignores it, and a source with
+   * no Codex sends nothing, so the screen shows no Codex toggle.
+   */
+  codex?: CodexView;
 }
 
 export interface WireActiveTime {
@@ -230,6 +240,114 @@ function maskHome(label: string, homeDirName: string | undefined): string {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// ── Codex ──────────────────────────────────────────────────────────────────
+
+const SLOTS = 288;
+const isoOrNull = (v: unknown): string | null =>
+  typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v)) ? v : null;
+const DAY_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+function codexWindow(w: any): CodexLimitWindow | null {
+  if (!w || typeof w !== 'object') return null;
+  const ok = (v: unknown, min: number) => typeof v === 'number' && Number.isFinite(v) && v >= min;
+  if (!ok(w.usedPercent, 0) || !ok(w.resetsAt, 1)) return null;
+  return { usedPercent: w.usedPercent, windowMinutes: ok(w.windowMinutes, 0) ? w.windowMinutes : 0, resetsAt: w.resetsAt };
+}
+
+function codexLimits(l: any): CodexLimits | null {
+  if (!l || typeof l !== 'object') return null;
+  const at = isoOrNull(l.at);
+  const fiveHour = codexWindow(l.fiveHour);
+  const weekly = codexWindow(l.weekly);
+  if (!at || (!fiveHour && !weekly)) return null;
+  // A plan name, never anything that could carry a path or a sentence.
+  const plan = typeof l.plan === 'string' && /^[A-Za-z0-9 _.-]{1,24}$/.test(l.plan) ? l.plan : null;
+  return { at, plan, fiveHour, weekly };
+}
+
+const addTotals = (a: WireTotals, b: WireTotals): WireTotals => {
+  const out = { ...a };
+  for (const k of Object.keys(out) as (keyof WireTotals)[]) out[k] += b[k];
+  return out;
+};
+
+/**
+ * Codex projects, keyed by label. Leaving the source (`fromSource`), the keys
+ * are lowercased cwd paths: labelled by the same rule as Claude's projects,
+ * the home folder masked, and nothing at all unless names are shared. Arriving
+ * on a screen, the keys are labels already: anything that still looks like a
+ * path is dropped rather than drawn.
+ */
+function codexProjects(src: any, share: boolean, homeDirName: string | undefined, fromSource: boolean): Record<string, CodexProject> {
+  const out: Record<string, CodexProject> = {};
+  if (!share || !src || typeof src !== 'object') return out;
+  const raw = Object.entries(src) as [string, any][];
+  const paths = raw.map(([key, v]) => (typeof v?.display === 'string' && v.display) || key);
+  const labels = fromSource ? labelProjects(paths) : null;
+  raw.forEach(([key, v], i) => {
+    const label = fromSource ? maskHome(labels!.get(paths[i]) ?? `project ${i + 1}`, homeDirName) : key;
+    if (!fromSource && (/[\\:]/.test(label) || label.startsWith('/') || label.length > 120)) return;
+    const t = totals(v);
+    const lastSeen = isoOrNull(v?.lastSeen) ?? '';
+    const cur = out[label];
+    out[label] = cur
+      ? { ...addTotals(cur, t), lastSeen: cur.lastSeen > lastSeen ? cur.lastSeen : lastSeen, display: label }
+      : { ...t, lastSeen, display: label };
+  });
+  return out;
+}
+
+/**
+ * The CodexView as it crosses the wire, built and re-validated by NAMING every
+ * field, like the rest of this file. Undefined when there is nothing real to
+ * show (no responses), so the block is absent rather than a row of zeros.
+ */
+function wireCodex(c: any, share: boolean, homeDirName: string | undefined, fromSource: boolean): CodexView | undefined {
+  if (!c || typeof c !== 'object') return undefined;
+  const t = totals(c.totals);
+  if (t.requests <= 0) return undefined;
+  const counts = (o: any): Record<string, number> => {
+    const r: Record<string, number> = {};
+    for (const [k, v] of Object.entries(o ?? {})) if (DAY_KEY.test(k) && count(v) > 0) r[k] = count(v);
+    return r;
+  };
+  const s = c.sessions ?? {};
+  // A malformed lane is dropped (the lane hides), never turned into a row of zeros.
+  const slots: number[] | undefined =
+    Array.isArray(c.todaySlots) && c.todaySlots.length === SLOTS &&
+    c.todaySlots.every((v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+      ? (c.todaySlots as number[]).slice()
+      : undefined;
+  const since = c.activeTime?.since;
+  return {
+    totals: t,
+    daily: mapTotals(c.daily),
+    hourly: mapTotals(c.hourly),
+    models: mapTotals(c.models),
+    projects: codexProjects(c.projects, share, homeDirName, fromSource),
+    activeDays: counts(c.activeDays),
+    sessions: { total: count(s.total), byClaude: count(s.byClaude), byYou: count(s.byYou), byT3: count(s.byT3), other: count(s.other) },
+    activeTime: {
+      seconds: count(c.activeTime?.seconds),
+      since: typeof since === 'number' && Number.isFinite(since) && since > 0 ? since : null,
+    },
+    ...(slots ? { todaySlots: slots } : {}),
+    recent: Array.isArray(c.recent)
+      ? c.recent
+          .filter((r: unknown) => Array.isArray(r) && r.length >= 3)
+          .map((r: number[]) => [Number(r[0]) || 0, Number(r[1]) || 0, Number(r[2]) || 0] as [number, number, number])
+      : [],
+    limits: codexLimits(c.limits),
+    firstAt: isoOrNull(c.firstAt),
+    latestAt: isoOrNull(c.latestAt),
+    indexing: c.indexing === true,
+  };
+}
+
+/** The field when there is Codex to show, nothing otherwise. */
+const codexField = (v: CodexView | undefined): { codex?: CodexView } => (v ? { codex: v } : {});
+
 export function toWire(index: any, opts: WireOptions): ProjectedUsage {
   const idx = index ?? {};
 
@@ -261,6 +379,9 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
         requests: existing.requests + t.requests,
         webSearch: existing.webSearch + t.webSearch,
         webFetch: existing.webFetch + t.webFetch,
+        // Left out until 2026-10-26: a merged label's cost fell to $0 on a screen.
+        costUsd: existing.costUsd + t.costUsd,
+        unpricedTokens: existing.unpricedTokens + t.unpricedTokens,
       }) : t;
       const lastSeen = typeof v?.lastSeen === 'string' ? v.lastSeen : '';
       projects[label] = {
@@ -351,6 +472,7 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
       : [],
     ...(idx.history ? { history: wireHistory(idx.history) } : {}),
     ...activeField(idx.activeTime),
+    ...codexField(wireCodex(idx.codex, opts.shareProjectNames, opts.homeDirName, true)),
   };
 }
 
@@ -427,5 +549,7 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
     // Re-validated on arrival, like the links.
     ...(w.history ? { history: wireHistory(w.history) } : {}),
     ...activeField(w.activeTime),
+    // Re-validated on arrival. Projects only when the source shares names.
+    ...codexField(wireCodex(w.codex, w.projectsShared === true, undefined, false)),
   };
 }

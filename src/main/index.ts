@@ -44,7 +44,19 @@ import {
 } from './data/usage';
 import { currentHistory, historyPort, loadHistory } from './data/history';
 import { mergeHistory } from '../shared/usage-merge';
-import { collectDay, offeredDays } from '../shared/intraday';
+import { collectDay, offeredDays, todaySlotsOf } from '../shared/intraday';
+import {
+  CODEX_SESSIONS_DIR,
+  codexHistory,
+  createCodexViewKeeper,
+  emptyCodexIndex,
+  loadCodexIndex,
+  refreshCodexIndex,
+  saveCodexIndex,
+  type CodexContribution,
+  type CodexIndex,
+} from './data/codex-usage';
+import type { CodexView } from '../shared/codex-view';
 import { activeTime, type ActiveTime } from '../shared/active-time';
 import {
   applyLayerMode,
@@ -125,6 +137,25 @@ let usageLastSave = 0;
  * the final figures. Readiness is stated explicitly instead.
  */
 let usageIndexing = false;
+
+/*
+ * Codex: a second index with its own cache, history store, watch and
+ * busy/dirty flags (src/main/data/codex-usage.ts). Nothing here is shared
+ * with Claude's state, so a slow or broken Codex read can never hold up or
+ * change Claude's numbers.
+ */
+let codexUsage: CodexIndex = emptyCodexIndex();
+let codexStale: Record<string, CodexContribution> = {};
+let codexWatcher: FSWatcher | null = null;
+let codexSweep: NodeJS.Timeout | null = null;
+let codexTimer: NodeJS.Timeout | null = null;
+let codexBusy = false;
+let codexDirty = false;
+let codexLastRun = 0;
+let codexLastSave = 0;
+const codexViews = createCodexViewKeeper();
+/** Whether the last pass found the sessions folder, so its absence is logged once, not every sweep. */
+let codexPresent: boolean | null = null;
 
 /*
  * The cache only exists to make the NEXT cold start fast, so writing it on
@@ -361,7 +392,8 @@ function startUsageWatch(): void {
       console.warn('[usage] watcher error, will restart:', err.message);
       try {
         usageWatcher?.close();
-  if (usageSweep) clearInterval(usageSweep);
+        if (usageSweep) clearInterval(usageSweep);
+        usageSweep = null;
       } catch {
         /* already gone */
       }
@@ -385,6 +417,127 @@ function startUsageWatch(): void {
       void refreshUsage('sweep');
     }, USAGE_SWEEP_MS);
     usageSweep.unref?.();
+  }
+}
+
+// ── Codex usage ────────────────────────────────────────────────────────────
+
+const codexCacheFile = () => path.join(app.getPath('userData'), 'codex-usage-index.json');
+
+/**
+ * Refresh the Codex index and push. The same serialising and coalescing as
+ * refreshUsage, on flags of its own. A machine with no `~/.codex/sessions`
+ * costs one failed access per sweep and says so once.
+ */
+async function refreshCodex(reason: string): Promise<void> {
+  if (codexBusy) {
+    codexDirty = true;
+    return;
+  }
+  const since = Date.now() - codexLastRun;
+  if (codexLastRun && since < USAGE_MIN_INTERVAL_MS) {
+    if (!codexDirty) {
+      codexDirty = true;
+      setTimeout(() => {
+        if (!codexDirty) return;
+        codexDirty = false;
+        void refreshCodex('coalesced');
+      }, USAGE_MIN_INTERVAL_MS - since);
+    }
+    return;
+  }
+  codexBusy = true;
+  codexLastRun = Date.now();
+  try {
+    const port = codexHistory.port();
+    if (!port.ready) await codexHistory.load(app.getPath('userData'));
+    let announced = false;
+    const result = await refreshCodexIndex(
+      codexUsage,
+      (p) => {
+        // ANY cold report, the zero-byte one a rebuild opens with included, marks a rebuild.
+        codexViews.progress(p);
+        if (p.cold && p.bytesTotal > 0 && !announced) {
+          announced = true;
+          pushUsage();
+        }
+      },
+      { history: port, staleFiles: codexStale, archived: () => codexHistory.current().entries },
+    );
+    codexUsage = result.index;
+    if (port.ready && Object.keys(codexStale).length) {
+      codexStale = Object.fromEntries(Object.entries(codexStale).filter(([p]) => !port.has(p) && !codexUsage.files[p]));
+    }
+    codexViews.settle();
+    if (result.rebuilt) console.log('[codex] a rollout shrank or was deleted, index rebuilt');
+    const present = !codexUsage.unavailable;
+    if (present !== codexPresent) {
+      console.log(present ? `[codex] reading ${CODEX_SESSIONS_DIR}` : `[codex] no Codex sessions folder at ${CODEX_SESSIONS_DIR}`);
+      codexPresent = present;
+    }
+    if (present) {
+      console.log(`[codex] ${reason}: ${codexUsage.totals.requests.toLocaleString()} responses, scan ${codexUsage.lastScanMs}ms`);
+      if (!codexWatcher) startCodexWatch();
+    }
+    if (Date.now() - codexLastSave > USAGE_SAVE_INTERVAL_MS) {
+      codexLastSave = Date.now();
+      await saveCodexIndex(codexCacheFile(), withCodexPending(codexUsage)).catch((err) =>
+        console.warn('[codex] could not write cache:', (err as Error).message),
+      );
+    }
+    pushUsage();
+  } catch (err) {
+    codexViews.settle();
+    console.error('[codex] refresh failed:', (err as Error).message);
+  } finally {
+    codexBusy = false;
+    if (codexDirty) {
+      codexDirty = false;
+      void refreshCodex('coalesced');
+    }
+  }
+}
+
+/** The Codex index as saved: with any unsettled stale contributions, so a restart keeps them. */
+function withCodexPending(u: CodexIndex): CodexIndex {
+  return Object.keys(codexStale).length ? { ...u, pendingStale: codexStale } : u;
+}
+
+/**
+ * Watch `~/.codex/sessions` recursively, debounced like Claude's. When the
+ * folder does not exist there is nothing to watch: the sweep below keeps
+ * looking once a minute, and the first pass that finds it starts the watch.
+ */
+function startCodexWatch(): void {
+  if (!codexWatcher) {
+    try {
+      codexWatcher = watchFs(CODEX_SESSIONS_DIR, { recursive: true, persistent: true }, () => {
+        if (codexTimer) clearTimeout(codexTimer);
+        codexTimer = setTimeout(() => {
+          codexTimer = null;
+          void refreshCodex('rollout changed');
+        }, 900);
+      });
+      codexWatcher.on('error', (err) => {
+        // Dropped, not retried in a loop: the sweep restarts it on its next pass.
+        console.warn('[codex] watcher error, the sweep will restart it:', err.message);
+        try {
+          codexWatcher?.close();
+        } catch {
+          /* already gone */
+        }
+        codexWatcher = null;
+      });
+    } catch {
+      codexWatcher = null; // no folder yet; quiet, the sweep covers it
+    }
+  }
+  if (!codexSweep) {
+    codexSweep = setInterval(() => {
+      if (Date.now() - codexLastRun < USAGE_SWEEP_MS) return;
+      void refreshCodex('sweep');
+    }, USAGE_SWEEP_MS);
+    codexSweep.unref?.();
   }
 }
 
@@ -1363,7 +1516,28 @@ function activeTimeNow(): ActiveTime {
   return activeTime(mergedUsage().files, currentHistory().entries);
 }
 
-function usageForRenderer(merged = mergedUsage(), active = activeTimeNow()): Record<string, unknown> {
+/**
+ * Codex for the renderer and the projector (src/shared/codex-view.ts): the
+ * live index merged with its own history store. Null (and so absent from the
+ * payload) when this machine has no Codex response on record, which keeps a
+ * wall without Codex exactly as it was. Never on a screen: it does not index.
+ */
+function codexNow(): CodexView | null {
+  if (projection.isScreen()) return null;
+  return codexViews.view(codexUsage, codexHistory.current().entries);
+}
+
+/**
+ * Claude's tokens per five-minute slot of today, the simple view's lane. Not
+ * while a cold index or a rebuild is running (rule 15): the day is partial, or
+ * a file is for a moment in both the index and history.
+ */
+function claudeTodaySlots(merged: ReturnType<typeof mergedUsage>): number[] | null {
+  if (usageIndexing || usage.unavailable) return null;
+  return todaySlotsOf(merged.files, currentHistory().entries);
+}
+
+function usageForRenderer(merged = mergedUsage(), active = activeTimeNow(), codex = codexNow()): Record<string, unknown> {
   /*
    * A SCREEN shows the source's numbers, not its own. It does not index its own
    * transcripts at all while paired, so `usage` here is an empty index and
@@ -1377,8 +1551,11 @@ function usageForRenderer(merged = mergedUsage(), active = activeTimeNow()): Rec
   }
   const { files, pendingStale: _pending, ...rest } = merged;
   void _pending;
+  const todaySlots = claudeTodaySlots(merged);
   return {
     ...rest,
+    ...(codex ? { codex } : {}),
+    ...(todaySlots ? { todaySlots } : {}),
     peak: currentPeak(),
     // This machine's own ledger. A screen has none: it is not indexing, and the
     // paired machine's milestones are not projected.
@@ -1412,8 +1589,11 @@ function pushUsage(): void {
    */
   const merged = mergedUsage();
   const active = activeTimeNow();
-  projection.offerUsage({ ...merged, activeTime: active }, usageIndexing);
-  const payload = usageForRenderer(merged, active);
+  const codex = codexNow();
+  // The wire builds its optional `codex` block from this, masking projects
+  // like Claude's (src/shared/projection-wire.ts).
+  projection.offerUsage({ ...merged, activeTime: active, ...(codex ? { codex } : {}) }, usageIndexing);
+  const payload = usageForRenderer(merged, active, codex);
   for (const w of windows) {
     if (w.win.isDestroyed()) continue;
     w.win.webContents.send('wall:usage', payload);
@@ -1648,6 +1828,11 @@ function quit(): void {
   usageWatcher?.close();
   // Persist whatever the periodic save has not yet flushed.
   void saveIndex(usageCacheFile(), withPending(usage)).catch(() => undefined);
+  if (codexTimer) clearTimeout(codexTimer);
+  codexWatcher?.close();
+  if (codexSweep) clearInterval(codexSweep);
+  // Only once something was read: an empty index must not overwrite a good cache.
+  if (codexLastRun) void saveCodexIndex(codexCacheFile(), withCodexPending(codexUsage)).catch(() => undefined);
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
   stopWatching?.();
   globalShortcut.unregisterAll();
@@ -1912,6 +2097,7 @@ if (!app.requestSingleInstanceLock()) {
         if (projection.projectionStatus().role === 'off' && !usageWatcher && !isDev) {
           console.log('[usage] projection off, resuming local indexing');
           void refreshUsage('projection-off').then(startUsageWatch);
+          void refreshCodex('projection-off').then(startCodexWatch);
         }
       },
       onUsage: () => pushUsage(),
@@ -1924,12 +2110,16 @@ if (!app.requestSingleInstanceLock()) {
     // History before the index: the first refresh must be able to archive.
     await loadHistory(app.getPath('userData'));
     ({ index: usage, staleFiles } = await loadIndex(usageCacheFile()));
+    // Codex the same way, from its own files: its history store, then its cache.
+    await codexHistory.load(app.getPath('userData'));
+    ({ index: codexUsage, staleFiles: codexStale } = await loadCodexIndex(codexCacheFile()));
     await loadPeak(app.getPath('userData'));
     await loadMilestones(app.getPath('userData'));
     if (projection.isScreen()) {
       console.log('[usage] not indexing: this machine is a projection screen');
     } else {
       void refreshUsage('startup').then(startUsageWatch);
+      void refreshCodex('startup').then(startCodexWatch);
     }
     if (!isStatsOnly) startWatching();
 

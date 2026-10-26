@@ -19,6 +19,8 @@ import { formatHours } from '../shared/active-time';
 import { labelProjects } from '../shared/project-label';
 import { ConstellationPanel } from './constellation';
 import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
+import { windowCurrent, type CodexView } from '../shared/codex-view';
+import { SimpleView, hasLimits, paintLimitRows, planNote, shareText, who, type ClaudeUsage } from './side-by-side';
 
 /** Minutes in the velocity window, for turning the rate back into a total. */
 const VELOCITY_WINDOW_MIN = VELOCITY_WINDOW_MS / 60_000;
@@ -116,6 +118,13 @@ function el<K extends keyof HTMLElementTagNameMap>(
 }
 
 const totalOf = (t: TokenTotals) => t.input + t.output + t.cacheCreate + t.cacheRead;
+
+/** A day only Codex worked: Claude's column there is empty, not invented. */
+const emptyTotals = (): TokenTotals => ({
+  input: 0, output: 0, cacheCreate: 0, cacheRead: 0,
+  thinking: 0, requests: 0, webSearch: 0, webFetch: 0,
+  costUsd: 0, unpricedTokens: 0,
+});
 
 // ── Projection status wording ──────────────────────────────────────────────
 
@@ -355,8 +364,10 @@ function breakdown(
   rows: { label: string; value: number; sub?: string; tip?: [string, string][] }[],
   max = 6,
   tip?: Tooltip,
+  /** Codex rows: violet, on Codex's own scale (the share of Codex's total). */
+  codex = false,
 ): HTMLElement {
-  const wrap = el('div', 'breakdown');
+  const wrap = el('div', codex ? 'breakdown bd-cx' : 'breakdown');
   const total = rows.reduce((s, r) => s + r.value, 0) || 1;
   const shown = rows.slice(0, max);
   for (const [i, r] of shown.entries()) {
@@ -383,12 +394,22 @@ function breakdown(
 function columns(
   series: { key: string; value: number; label: string; tip?: [string, string][] }[],
   tip?: Tooltip,
+  /**
+   * The side-by-side mirror (Codex shown): `down` hangs the bars from the top
+   * in Codex violet, and a zero draws no bar at all, because on a mirrored
+   * chart a 1.5% sliver on an empty day reads as a little work.
+   */
+  opts: { down?: boolean; skipZero?: boolean } = {},
 ): HTMLElement {
-  const wrap = el('div', 'cols');
+  const wrap = el('div', opts.down ? 'cols cols-down' : 'cols');
   const max = Math.max(1, ...series.map((s) => s.value));
   for (const [i, s] of series.entries()) {
     const col = el('div', 'col');
-    if (tip && s.tip) tip.attach(col, s.label, s.tip);
+    if (tip && s.tip && !(opts.skipZero && !(s.value > 0))) tip.attach(col, s.label, s.tip);
+    if (opts.skipZero && !(s.value > 0)) {
+      wrap.appendChild(col);
+      continue;
+    }
     const bar = el('div', 'col-bar');
     bar.style.setProperty('--h', `${Math.max(1.5, (s.value / max) * 100).toFixed(2)}%`);
     bar.style.setProperty('--i', String(i));
@@ -396,6 +417,15 @@ function columns(
     wrap.appendChild(col);
   }
   return wrap;
+}
+
+/** The legend tail of a mirrored chart, shown only with Codex: which way is whose, and that the scales differ. */
+function mirrorKey(): HTMLElement[] {
+  return [
+    el('span', 'mirror-key mirror-cl cx', 'Claude up'),
+    el('span', 'mirror-key mirror-cx cx', 'Codex down'),
+    el('span', 'mirror-key cx', 'each on its own scale'),
+  ];
 }
 
 /**
@@ -616,14 +646,88 @@ export class StatsView {
   private idx: UsageIndex | null = null;
   private lastRenderKey = '';
   private clockTimer = 0;
+  /** One-shot: the earliest future plan reset, so a reset shows when it happens. */
+  private resetTimer = 0;
   private projection: ProjectionStatus = { role: 'off' };
   /** Wall-clock the relay retry is due, fixed when its payload arrived. */
   private retryAt: number | null = null;
+  /*
+   * Claude and Codex side by side (docs/design/codex-side-by-side.md). The two
+   * choices are Gustav's, saved in settings (statsView, showCodex) and applied
+   * through setPrefs. Codex shows only when it is wanted AND present AND its
+   * first index has finished: partial numbers are never shown as final, and a
+   * wall without Codex data looks exactly as it did before (data-codex="off").
+   */
+  private view: 'detailed' | 'simple' = 'detailed';
+  private wantCodex = true;
+  private codex: CodexView | null = null;
+  private readonly simple = new SimpleView();
 
   constructor() {
     this.root = el('div', 'stats');
+    this.root.dataset.view = this.view;
+    this.root.dataset.codex = 'off';
     this.build();
     this.setTopPanel(this.topPanel);
+  }
+
+  /** Codex is on screen: wanted, present and fully indexed. */
+  private cxOn(): boolean {
+    return this.wantCodex && this.codex !== null;
+  }
+
+  /**
+   * Apply the saved view choices. Idempotent, so every state push may call it;
+   * only a real change repaints, and only what depends on the choice.
+   */
+  setPrefs(view: 'detailed' | 'simple', showCodex: boolean): void {
+    if (view === this.view && showCodex === this.wantCodex) return;
+    this.view = view;
+    this.wantCodex = showCodex;
+    this.applyCodexState();
+    this.syncLoops();
+  }
+
+  /** Data attributes that drive every Codex and view rule in the CSS, then a repaint of what they change. */
+  private applyCodexState(): void {
+    const on = this.cxOn();
+    const was = this.root.dataset.codex === 'on';
+    this.root.dataset.view = this.view;
+    this.root.dataset.codex = on ? 'on' : 'off';
+    if (!this.idx) return;
+    if (was !== on) this.lastRenderKey = '';
+    this.paintCodex();
+    this.paintSimple();
+    this.constellation.setCodex(on && this.codex ? this.codexProjectNames(this.codex) : null);
+    const key = this.chartKey(this.idx);
+    if (key !== this.lastRenderKey) {
+      this.lastRenderKey = key;
+      this.paintCharts(this.idx);
+    }
+  }
+
+  /** Every name a Codex project goes by: its key (the lowercased cwd) and its label. */
+  private codexProjectNames(cx: CodexView): Set<string> {
+    const entries = Object.entries(cx.projects ?? {});
+    const labels = projectLabels(entries.map(([k, v]) => v.display || k), this.projection.role === 'screen');
+    const out = new Set<string>();
+    for (const [k, v] of entries) {
+      out.add(k.toLowerCase());
+      const label = labels.get(v.display || k);
+      if (label) out.add(label);
+    }
+    return out;
+  }
+
+  /**
+   * Only the visible view does any work: the trace and the sky run in the
+   * detailed view, never behind the simple one.
+   */
+  private syncLoops(): void {
+    const live = this.visible && this.view === 'detailed';
+    this.constellation.setShown(live && this.topPanel === 'constellation');
+    if (live && this.topPanel === 'throughput') this.canvas.start();
+    else this.canvas.stop();
   }
 
   private build(): void {
@@ -632,6 +736,8 @@ export class StatsView {
     // Hero: total tokens processed.
     const hero = panel('Total tokens processed', 'measured', 'panel-hero');
     const heroBody = el('div', 'hero-body');
+    // Codex shown: the headline says whose it is, as the mock does.
+    heroBody.appendChild(who('claude', 'Claude Code', 'hero-who cx'));
     this.odos.total = new Odometer('hero-value', compactPrecise);
     heroBody.appendChild(this.odos.total.node);
     const heroMeta = el('div', 'hero-meta');
@@ -657,6 +763,20 @@ export class StatsView {
     comp.appendChild(compBar);
     comp.appendChild(el('div', 'comp-legend'));
     heroBody.appendChild(comp);
+
+    /*
+     * Codex under the headline: its own figure, its share of the two together
+     * in words (it is a fraction of a percent, so any shared bar would hide
+     * it), and its own composition strip at its own scale.
+     */
+    const heroCx = el('div', 'hero-cx cx');
+    const heroCxRow = el('div', 'hero-cx-row');
+    heroCxRow.append(who('codex', 'Codex'), el('span', 'hero-cx-value', ''), el('span', 'hero-cx-share', ''));
+    heroCx.appendChild(heroCxRow);
+    const cxBar = el('div', 'comp-bar comp-bar-cx');
+    for (const part of ['cacheRead', 'cacheCreate', 'output', 'input']) cxBar.appendChild(el('div', `comp-seg compx-${part}`));
+    heroCx.appendChild(cxBar);
+    heroBody.appendChild(heroCx);
     hero.appendChild(heroBody);
     grid.appendChild(hero);
 
@@ -705,12 +825,25 @@ export class StatsView {
 
     const cost = panel('Total cost', 'derived', 'panel-cost');
     const costBody = el('div', 'cost-body');
-    const costValue = el('div', 'cost-value', '$0.00');
-    costBody.appendChild(costValue);
+    /*
+     * Each figure sits in a split row: provider label left, number right. The
+     * label is Codex-only furniture, so with Codex off the row holds the bare
+     * number exactly where it always was.
+     */
+    const costLine = el('div', 'split-row');
+    costLine.append(who('claude', 'Claude', 'cx'), el('div', 'cost-value', '$0.00'));
+    costBody.appendChild(costLine);
+    const costLineCx = el('div', 'split-row cx');
+    costLineCx.append(who('codex', 'Codex'), el('div', 'cost-value-cx', ''));
+    costBody.appendChild(costLineCx);
     costBody.appendChild(el('div', 'cost-note', 'at API list prices, all projects'));
     const costGap = el('div', 'cost-gap');
     costGap.hidden = true;
     costBody.appendChild(costGap);
+    // Codex's own caveat: the same rule as Claude's, never dropped while it has something to say.
+    const costGapCx = el('div', 'cost-gap cost-gap-cx cx');
+    costGapCx.dataset.on = 'off';
+    costBody.appendChild(costGapCx);
     cost.appendChild(costBody);
 
     /*
@@ -724,7 +857,13 @@ export class StatsView {
     costRow.appendChild(cost);
     const ran = panel('Hours', 'derived', 'panel-ran');
     const ranBody = el('div', 'ran-body');
-    ranBody.appendChild(el('div', 'ran-value', '0'));
+    const ranLine = el('div', 'split-row');
+    ranLine.append(who('claude', 'Claude', 'cx'), el('div', 'ran-value', '0'));
+    ranBody.appendChild(ranLine);
+    const ranLineCx = el('div', 'split-row ran-line-cx cx');
+    ranLineCx.dataset.on = 'off';
+    ranLineCx.append(who('codex', 'Codex'), el('div', 'ran-value-cx', ''));
+    ranBody.appendChild(ranLineCx);
     ranBody.appendChild(el('div', 'ran-note', ''));
     ran.appendChild(ranBody);
     ran.title = 'Time Claude was working: responses at most five minutes apart, every session together, parallel sessions counted once.';
@@ -773,12 +912,33 @@ export class StatsView {
     peak.appendChild(el('span', 'vel-peak-when', ''));
     velBody.appendChild(peak);
     vel.appendChild(velBody);
-    stack.appendChild(vel);
+    /*
+     * Velocity shares the lower part of the stack with the Codex plan panel
+     * when Codex is shown. The wrapper is a one-child flex row otherwise, so
+     * velocity keeps exactly the box it had.
+     */
+    const low = el('div', 'stack-low');
+    low.appendChild(vel);
+
+    /*
+     * Codex's plan limits, from its own rate_limits reading. Measured, but a
+     * reading taken when Codex last ran, so the note always carries its age,
+     * and a window whose reset time has passed shows as reset, never the stale
+     * percentage. No reading at all: the panel is not shown.
+     */
+    const plan = panel('Codex plan', 'measured', 'panel-plan cx');
+    plan.dataset.on = 'off';
+    const planBody = el('div', 'plan-body');
+    planBody.appendChild(el('div', 'lim-rows'));
+    planBody.appendChild(el('div', 'plan-note', ''));
+    plan.appendChild(planBody);
+    low.appendChild(plan);
+    stack.appendChild(low);
     grid.appendChild(stack);
 
     // Counters.
     const counters = panel('Totals', 'measured', 'panel-counters');
-    const cg = el('div', 'counter-grid');
+    const cg = el('div', 'counter-grid cl-only');
     for (const [key, label, hint] of [
       ['requests', 'Requests', 'assistant replies'],
       ['sessions', 'Sessions', 'distinct transcripts'],
@@ -792,24 +952,59 @@ export class StatsView {
       cg.appendChild(tile.root);
     }
     counters.appendChild(cg);
+    /*
+     * Codex shown: the same counters as a table with a Claude and a Codex
+     * column. Codex keeps no count of prompts, so that cell stays empty rather
+     * than claiming a 0.
+     */
+    const table = el('table', 'counter-table cx');
+    const thead = el('tr');
+    thead.append(el('th'), el('th', 'ct-cl', 'Claude'), el('th', 'ct-cx', 'Codex'));
+    table.appendChild(thead);
+    for (const [key, label] of [
+      ['requests', 'Requests'],
+      ['sessions', 'Sessions'],
+      ['prompts', 'Prompts sent'],
+      ['days', 'Days active'],
+      ['output', 'Generated'],
+      ['thinking', 'Thinking'],
+    ] as const) {
+      const tr = el('tr');
+      tr.dataset.key = key;
+      tr.append(el('td', 'ct-label', label), el('td', 'ct-cl', ''), el('td', 'ct-cx', ''));
+      table.appendChild(tr);
+    }
+    counters.appendChild(table);
     grid.appendChild(counters);
 
-    // Daily history.
+    // Daily history. Codex shown: Claude up, Codex hanging down, each on its own scale.
     const daily = panel('Daily activity', 'measured', 'panel-daily');
     daily.appendChild(el('div', 'chart-slot chart-daily'));
-    daily.appendChild(el('div', 'chart-legend chart-daily-legend'));
+    daily.appendChild(el('div', 'chart-slot chart-daily-cx cx'));
+    const dailyLegend = el('div', 'chart-legend chart-daily-legend');
+    dailyLegend.append(el('span', 'legend-text'), ...mirrorKey());
+    daily.appendChild(dailyLegend);
     grid.appendChild(daily);
 
     // Efficiency.
     const eff = panel('Context efficiency', 'derived', 'panel-eff');
     const effBody = el('div', 'eff-body');
     this.odos.cache = new Odometer('eff-value', (n) => `${n.toFixed(1)}%`);
-    effBody.appendChild(this.odos.cache.node);
+    const effLine = el('div', 'split-row eff-line');
+    effLine.append(who('claude', 'Claude', 'cx'), this.odos.cache.node);
+    effBody.appendChild(effLine);
     effBody.appendChild(el('div', 'eff-label', 'of context served from cache'));
     const effBar = el('div', 'eff-track');
     const effFill = el('div', 'eff-fill');
     effBar.appendChild(effFill);
     effBody.appendChild(effBar);
+    const effCx = el('div', 'eff-cx cx');
+    const effCxLine = el('div', 'split-row eff-line');
+    effCxLine.append(who('codex', 'Codex'), el('span', 'eff-value eff-value-cx', ''));
+    const effCxBar = el('div', 'eff-track');
+    effCxBar.appendChild(el('div', 'eff-fill eff-fill-cx'));
+    effCx.append(effCxLine, effCxBar);
+    effBody.appendChild(effCx);
     effBody.appendChild(el('div', 'eff-note', 'cache reads / (cache reads + cache writes + fresh input)'));
     eff.appendChild(effBody);
     grid.appendChild(eff);
@@ -822,10 +1017,11 @@ export class StatsView {
     // Hour of day.
     const hours = panel('When you work', 'measured', 'panel-hours');
     hours.appendChild(el('div', 'chart-slot chart-hours'));
+    hours.appendChild(el('div', 'chart-slot chart-hours-cx cx'));
     hours.appendChild(el('div', 'hour-axis'));
-    hours.appendChild(
-      el('div', 'chart-legend', 'token throughput by hour of day, pooled across the last 14 days'),
-    );
+    const hoursLegend = el('div', 'chart-legend');
+    hoursLegend.append(el('span', 'legend-text', 'token throughput by hour of day, pooled across the last 14 days'), ...mirrorKey());
+    hours.appendChild(hoursLegend);
     grid.appendChild(hours);
 
     // Projects.
@@ -835,6 +1031,9 @@ export class StatsView {
     grid.appendChild(projects);
 
     this.root.appendChild(grid);
+
+    // The simple view, the detailed grid's sibling; data-view on the root shows one of them.
+    this.root.appendChild(this.simple.root);
 
     // Status strip.
     const strip = el('footer', 'status-strip');
@@ -941,29 +1140,67 @@ export class StatsView {
     if (v === this.visible) return;
     this.visible = v;
     if (v) {
-      if (this.topPanel === 'throughput') this.canvas.start();
-      this.constellation.setShown(this.topPanel === 'constellation');
+      this.syncLoops();
+      // Time passed while hidden: a plan window may have reset since the last paint.
+      this.paintPlan();
+      if (this.view === 'simple') this.simple.tick();
       if (!this.clockTimer) {
         // Only the relative-time labels need a clock, and once every 20s is
-        // plenty for "3m ago". Nothing else polls.
+        // plenty for "3m ago". Nothing else polls. The Codex plan windows ride
+        // on it too: a window that resets between pushes must stop showing
+        // its old percentage on time.
         this.clockTimer = window.setInterval(() => {
           this.paintStatus();
           this.paintTimeWindowed();
+          this.paintPlan();
+          if (this.view === 'simple') this.simple.tick();
         }, 20_000);
       }
     } else {
-      this.canvas.stop();
-      this.constellation.setShown(false);
+      this.syncLoops();
       if (this.clockTimer) {
         window.clearInterval(this.clockTimer);
         this.clockTimer = 0;
       }
+      this.clearResetTimer();
     }
+  }
+
+  private clearResetTimer(): void {
+    if (this.resetTimer) window.clearTimeout(this.resetTimer);
+    this.resetTimer = 0;
+  }
+
+  /**
+   * One timer for the earliest FUTURE plan reset, cleared and re-armed on each
+   * paint, so a window that resets is shown as reset at that moment and not up
+   * to 20 s later. Only while the stats are on screen.
+   */
+  private armResetTimer(): void {
+    this.clearResetTimer();
+    if (!this.visible) return;
+    const lim = this.cxOn() ? this.codex?.limits : null;
+    if (!lim) return;
+    const now = Date.now();
+    let next = Infinity;
+    for (const w of [lim.fiveHour, lim.weekly]) if (windowCurrent(w, now)) next = Math.min(next, w!.resetsAt);
+    if (!Number.isFinite(next)) return;
+    // A timer's longest delay is about 24.8 days; a clamped one fires early and re-arms.
+    const delay = Math.min(next - now + 50, 2_000_000_000);
+    this.resetTimer = window.setTimeout(() => {
+      this.resetTimer = 0;
+      this.paintPlan();
+      if (this.view === 'simple') this.simple.tick();
+    }, delay);
   }
 
   update(idx: UsageIndex): void {
     this.idx = idx;
     const d = derive(idx);
+
+    // Codex rides on the same push. Absent, or still on its first index: treated as not there.
+    const cx = (idx as unknown as { codex?: CodexView | null }).codex;
+    this.codex = cx && typeof cx === 'object' && cx.totals && !cx.indexing ? cx : null;
 
     /*
      * Only leave the loading state when the main process says the index is
@@ -1097,14 +1334,13 @@ export class StatsView {
     this.canvas.update(idx, d.intensity);
     this.constellation.update(idx as never, projection.role === 'screen');
 
+    // Codex's figures, the simple view and the data attributes. This also
+    // repaints the charts when Codex coming or going changes them.
+    this.applyCodexState();
+
     // Charts are rebuilt only when their inputs actually changed, so a refresh
     // during an active session does not restart every bar animation.
-    const key = [
-      Object.keys(idx.daily).length,
-      t.requests,
-      Object.keys(idx.models).length,
-      Object.keys(idx.projects).length,
-    ].join(':');
+    const key = this.chartKey(idx);
     if (key !== this.lastRenderKey) {
       this.lastRenderKey = key;
       this.paintCharts(idx);
@@ -1114,9 +1350,146 @@ export class StatsView {
     this.mounted = true;
   }
 
+  /** What the charts are drawn from, reduced to the numbers that change them. */
+  private chartKey(idx: UsageIndex): string {
+    const cx = this.cxOn() ? this.codex : null;
+    return [
+      Object.keys(idx.daily).length,
+      idx.totals.requests,
+      Object.keys(idx.models).length,
+      Object.keys(idx.projects).length,
+      cx ? `cx:${cx.totals.requests}:${Object.keys(cx.daily).length}:${Object.keys(cx.models).length}:${Object.keys(cx.projects).length}` : 'cx:off',
+    ].join(':');
+  }
+
+  /** Claude's list, then Codex's below it under "Codex, its own scale" (the mock's grouping). */
+  private withCodex(claude: HTMLElement, codex: HTMLElement | null): HTMLElement {
+    const stack = el('div', 'bd-stack');
+    stack.appendChild(claude);
+    if (codex) {
+      stack.appendChild(el('div', 'bd-group', 'Codex, its own scale'));
+      stack.appendChild(codex);
+    }
+    return stack;
+  }
+
+  /** The simple view, fed from the same push. */
+  private paintSimple(): void {
+    if (!this.idx) return;
+    this.simple.update(this.idx as unknown as ClaudeUsage, this.cxOn() ? this.codex : null);
+  }
+
+  /**
+   * Codex's figures in the detailed view. Plain text, not odometers: they are
+   * small, secondary, and a rolling number beside a rolling number is noise.
+   */
+  private paintCodex(): void {
+    const cx = this.cxOn() ? this.codex : null;
+    const idx = this.idx;
+    if (!cx || !idx) {
+      this.paintPlan();
+      return;
+    }
+    const q = <T extends HTMLElement>(sel: string) => this.root.querySelector<T>(sel);
+    const t = cx.totals;
+    const mine = totalOf(t);
+    const theirs = totalOf(idx.totals);
+
+    // Hero.
+    const v = q('.hero-cx-value');
+    if (v) v.textContent = compactPrecise(mine);
+    const share = q('.hero-cx-share');
+    if (share) share.textContent = `${shareText(mine, mine + theirs)} of the two together`;
+    const grand = mine || 1;
+    for (const [key, value] of [['cacheRead', t.cacheRead], ['cacheCreate', t.cacheCreate], ['output', t.output], ['input', t.input]] as const) {
+      const seg = q(`.compx-${key}`);
+      if (seg) {
+        seg.style.setProperty('--w', `${((value / grand) * 100).toFixed(3)}%`);
+        seg.title = `${full(value)} tokens`;
+      }
+    }
+
+    // Cost and its caveat.
+    // Every token unpriced: say so, never paint a $0.00 nothing measured.
+    const cost = q('.cost-value-cx');
+    const allUnpriced = (t.costUsd ?? 0) <= 0 && (t.unpricedTokens ?? 0) > 0;
+    if (cost) cost.textContent = allUnpriced ? 'unpriced' : formatCost(t.costUsd ?? 0);
+    const gap = q('.cost-gap-cx');
+    if (gap) {
+      const unpriced = t.unpricedTokens ?? 0;
+      gap.dataset.on = unpriced > 0 ? 'on' : 'off';
+      gap.textContent = unpriced > 0 ? `Codex: ${compact(unpriced)} tokens from an unpriced model are not counted` : '';
+    }
+
+    // Hours: hidden, never 0, when Codex's index has no stretch to count from.
+    const ranLine = q('.ran-line-cx');
+    const at = cx.activeTime;
+    const measured = typeof at?.since === 'number' && Number.isFinite(at.since);
+    if (ranLine) ranLine.dataset.on = measured ? 'on' : 'off';
+    const ran = q('.ran-value-cx');
+    if (ran && measured) ran.textContent = formatHours(at.seconds ?? 0);
+
+    // Totals table. Claude's column reads the same numbers as the tiles.
+    const sessions = Object.keys(idx.sessions).length + (historyOf(idx)?.reconstructedSessions ?? 0);
+    const rows: Record<string, [string, string]> = {
+      requests: [compact(idx.totals.requests), compact(t.requests)],
+      sessions: [compact(sessions), cx.sessions ? compact(cx.sessions.total) : ''],
+      prompts: [compact(idx.prompts.total), ''],
+      days: [compact(Object.keys(idx.daily).length), compact(Object.keys(cx.daily ?? {}).length)],
+      output: [compact(idx.totals.output), compact(t.output)],
+      thinking: [compact(idx.totals.thinking), compact(t.thinking)],
+    };
+    for (const [key, [a, b]] of Object.entries(rows)) {
+      const tr = q(`.counter-table tr[data-key="${key}"]`);
+      if (!tr) continue;
+      (tr.querySelector('.ct-cl') as HTMLElement).textContent = a;
+      (tr.querySelector('.ct-cx') as HTMLElement).textContent = b;
+    }
+
+    // Context efficiency, Codex's own.
+    const ctx = t.cacheRead + t.cacheCreate + t.input;
+    const rate = ctx > 0 ? t.cacheRead / ctx : 0;
+    const eff = q('.eff-value-cx');
+    if (eff) eff.textContent = ctx > 0 ? `${(rate * 100).toFixed(1)}%` : '';
+    const fill = q('.eff-fill-cx');
+    if (fill) fill.style.setProperty('--p', String(rate));
+    const effCx = q('.eff-cx');
+    if (effCx) effCx.dataset.on = ctx > 0 ? 'on' : 'off';
+
+    this.paintPlan();
+  }
+
+  /** The Codex plan panel. Run on every push and on the clock, so a reset window flips on time. */
+  private paintPlan(): void {
+    this.armResetTimer();
+    const plan = this.root.querySelector<HTMLElement>('.panel-plan');
+    if (!plan) return;
+    const lim = this.cxOn() ? this.codex?.limits : null;
+    if (!hasLimits(lim)) {
+      plan.dataset.on = 'off';
+      return;
+    }
+    plan.dataset.on = 'on';
+    const now = Date.now();
+    paintLimitRows(plan.querySelector('.lim-rows') as HTMLElement, lim, now, false);
+    (plan.querySelector('.plan-note') as HTMLElement).textContent = planNote(lim, now, false);
+  }
+
   private paintCharts(idx: UsageIndex): void {
-    // Daily, oldest to newest.
-    const days = Object.entries(idx.daily).sort((a, b) => a[0].localeCompare(b[0]));
+    const cx = this.cxOn() ? this.codex : null;
+    const totTip = (v: { input: number; output: number; cacheCreate: number; cacheRead: number; thinking: number; requests: number }): [string, string][] => [
+      ['total', full(totalOf(v as TokenTotals))],
+      ['generated', full(v.output)],
+      ['thinking', full(v.thinking)],
+      ['requests', full(v.requests)],
+    ];
+
+    // Daily, oldest to newest. With Codex shown, its days join the axis so both share the columns.
+    let days = Object.entries(idx.daily).sort((a, b) => a[0].localeCompare(b[0]));
+    if (cx) {
+      const keys = [...new Set([...Object.keys(idx.daily), ...Object.keys(cx.daily ?? {})])].sort();
+      days = keys.map((k) => [k, idx.daily[k] ?? emptyTotals()] as [string, TokenTotals]);
+    }
     const slot = this.root.querySelector('.chart-daily');
     if (slot) {
       slot.replaceChildren(
@@ -1133,10 +1506,27 @@ export class StatsView {
             ] as [string, string][],
           })),
           this.tip,
+          cx ? { skipZero: true } : {},
         ),
       );
     }
-    const legend = this.root.querySelector('.chart-daily-legend');
+    const slotCx = this.root.querySelector('.chart-daily-cx');
+    if (slotCx) {
+      slotCx.replaceChildren();
+      if (cx) {
+        slotCx.appendChild(
+          columns(
+            days.map(([k]) => {
+              const v = cx.daily?.[k];
+              return { key: k, value: v ? totalOf(v) : 0, label: `Codex, ${k}`, tip: v ? totTip(v) : undefined };
+            }),
+            this.tip,
+            { down: true, skipZero: true },
+          ),
+        );
+      }
+    }
+    const legend = this.root.querySelector('.chart-daily-legend .legend-text');
     if (legend && days.length) {
       legend.textContent = `${days[0][0]} to ${days[days.length - 1][0]}  ·  ${days.length} days`;
     }
@@ -1156,7 +1546,17 @@ export class StatsView {
       }))
       .sort((a, b) => b.value - a.value);
     const mslot = this.root.querySelector('.chart-models');
-    if (mslot) mslot.replaceChildren(breakdown(models, 5, this.tip));
+    if (mslot) {
+      if (!cx) mslot.replaceChildren(breakdown(models, 5, this.tip));
+      else {
+        // Claude's top three, then Codex's under its own heading and on its own scale.
+        const cxModels = Object.entries(cx.models ?? {})
+          .map(([label, v]) => ({ label, value: totalOf(v), tip: totTip(v) }))
+          .filter((r) => r.value > 0)
+          .sort((a, b) => b.value - a.value);
+        mslot.replaceChildren(this.withCodex(breakdown(models, 3, this.tip), cxModels.length ? breakdown(cxModels, 3, this.tip, true) : null));
+      }
+    }
 
     // Hour of day, aggregated across the retained hourly buckets.
     const byHour = new Array(24).fill(0);
@@ -1176,6 +1576,7 @@ export class StatsView {
       }
     }
 
+    const hourLabel = (h: number) => `${String(h).padStart(2, '0')}:00 to ${String((h + 1) % 24).padStart(2, '0')}:00`;
     const hslot = this.root.querySelector('.chart-hours');
     if (hslot) {
       hslot.replaceChildren(
@@ -1183,15 +1584,43 @@ export class StatsView {
           byHour.map((value, h) => ({
             key: String(h),
             value,
-            label: `${String(h).padStart(2, '0')}:00 to ${String((h + 1) % 24).padStart(2, '0')}:00`,
+            label: hourLabel(h),
             tip: [
               ['total', full(value)],
               ['requests', full(reqHour[h])],
             ] as [string, string][],
           })),
           this.tip,
+          cx ? { skipZero: true } : {},
         ),
       );
+    }
+    // Codex's hours hang below Claude's, pooled the same way over its own 14 days.
+    const hslotCx = this.root.querySelector('.chart-hours-cx');
+    if (hslotCx) {
+      hslotCx.replaceChildren();
+      if (cx) {
+        const cxHour = new Array(24).fill(0);
+        const cxReq = new Array(24).fill(0);
+        for (const [k, v] of Object.entries(cx.hourly ?? {})) {
+          const h = new Date(`${k}:00:00Z`).getHours();
+          if (!Number.isFinite(h)) continue;
+          cxHour[h] += totalOf(v);
+          cxReq[h] += v.requests;
+        }
+        hslotCx.appendChild(
+          columns(
+            cxHour.map((value, h) => ({
+              key: String(h),
+              value,
+              label: `Codex, ${hourLabel(h)}`,
+              tip: [['total', full(value)], ['requests', full(cxReq[h])]] as [string, string][],
+            })),
+            this.tip,
+            { down: true, skipZero: true },
+          ),
+        );
+      }
     }
 
     // Projects by total tokens, shown by folder name.
@@ -1225,14 +1654,36 @@ export class StatsView {
       })
       .sort((a, b) => b.value - a.value);
     const busiest = byHour.indexOf(Math.max(...byHour));
-    const hourLegend = this.root.querySelector('.panel-hours .chart-legend');
+    const hourLegend = this.root.querySelector('.panel-hours .chart-legend .legend-text');
     if (hourLegend && byHour[busiest] > 0) {
-      hourLegend.textContent =
-        `by hour of day, pooled across the last 14 days  ·  busiest ${String(busiest).padStart(2, '0')}:00`;
+      // Shorter with Codex shown, so the mirror key fits on the same line.
+      hourLegend.textContent = cx
+        ? `by hour, last 14 days  ·  busiest ${String(busiest).padStart(2, '0')}:00`
+        : `by hour of day, pooled across the last 14 days  ·  busiest ${String(busiest).padStart(2, '0')}:00`;
     }
 
     const pslot = this.root.querySelector('.chart-projects');
-    if (pslot) pslot.replaceChildren(breakdown(projects, 5, this.tip));
+    if (pslot) {
+      if (!cx) pslot.replaceChildren(breakdown(projects, 5, this.tip));
+      else {
+        const cxEntries = Object.entries(cx.projects ?? {}).map(([key, v]) => ({ path: v.display || key, v }));
+        const cxLabels = projectLabels(cxEntries.map((e) => e.path), this.projection.role === 'screen');
+        const cxProjects = cxEntries
+          .map(({ path: p, v }) => ({
+            label: cxLabels.get(p) ?? p,
+            value: totalOf(v),
+            tip: [
+              ['total', full(totalOf(v))],
+              ['generated', full(v.output)],
+              ['requests', full(v.requests)],
+              ['last used', v.lastSeen ? v.lastSeen.slice(0, 10) : 'unknown'],
+            ] as [string, string][],
+          }))
+          .filter((r) => r.value > 0)
+          .sort((a, b) => b.value - a.value);
+        pslot.replaceChildren(this.withCodex(breakdown(projects, 4, this.tip), cxProjects.length ? breakdown(cxProjects, 2, this.tip, true) : null));
+      }
+    }
     // Reconstructed history that could not be tied to a project is stated, not spread.
     const foot = this.root.querySelector('.proj-foot');
     const orphan = historyOf(idx)?.unattributedTokens ?? 0;
@@ -1460,15 +1911,13 @@ export class StatsView {
       b.classList.toggle('is-on', on);
       b.setAttribute('aria-selected', String(on));
     }
-    const showSky = mode === 'constellation';
-    this.constellation.setShown(showSky && this.visible);
-    if (showSky || !this.visible) this.canvas.stop();
-    else this.canvas.start();
+    this.syncLoops();
   }
 
   destroy(): void {
     this.canvas.stop();
     for (const o of Object.values(this.odos)) o.stop();
     if (this.clockTimer) window.clearInterval(this.clockTimer);
+    this.clearResetTimer();
   }
 }

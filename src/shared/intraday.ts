@@ -119,6 +119,34 @@ export function collectDay(
   return { day, asOf, bucketMinutes: BUCKET_MINUTES, projects, requests: Math.max(requests, 0), shapedRequests: shaped };
 }
 
+/** Tokens per five-minute slot of one collected day, all projects together. Length 288. */
+export function tokensPerSlot(raw: DayRaw): number[] {
+  const out = new Array<number>(BUCKETS_PER_DAY).fill(0);
+  for (const p of Object.values(raw.projects)) {
+    for (const [b, cell] of Object.entries(p.cells)) out[Number(b)] += cell[1];
+  }
+  return out;
+}
+
+/**
+ * Today's LOCAL day as 288 token counts, across live and archived
+ * contributions: the simple view's "Today, side by side" lane, the same for
+ * Claude and Codex. Null when the live/archived invariant is broken for a
+ * moment (a rebuild in progress), so a caller shows nothing rather than a
+ * curve that counts a file twice.
+ */
+export function todaySlotsOf(
+  live: Record<string, IntradaySource>,
+  archived: Record<string, IntradaySource>,
+  now: number = Date.now(),
+): number[] | null {
+  try {
+    return tokensPerSlot(collectDay(localDayKey(now), live, archived, 0, now));
+  } catch {
+    return null;
+  }
+}
+
 /** The picker's view of every day (`wall:timelapseDays`). */
 export interface TimelapseDays {
   today: string;

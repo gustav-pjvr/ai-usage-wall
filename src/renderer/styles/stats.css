@@ -1339,3 +1339,575 @@
 @media (max-height: 820px) {
   .const-caption { display: none; }
 }
+
+
+/* ══ Claude and Codex side by side ═════════════════════════════════════════ */
+
+/*
+ * docs/design/codex-side-by-side.md, section 4, and its mock. Two attributes
+ * on .stats drive all of it, written by StatsView:
+ *
+ *   data-view   detailed | simple       which of the two views is on screen
+ *   data-codex  on | off                Codex wanted, present and indexed
+ *
+ * `.cx` is Codex-only furniture and `.cl-only` is what it replaces. With
+ * Codex off every `.cx` is display:none, which is how the detailed view stays
+ * EXACTLY today's dashboard: nothing below changes a box unless data-codex is
+ * on, and the render suite compares the panel rectangles to make sure.
+ *
+ * Visibility is by data attribute throughout, never the `hidden` attribute on
+ * something with an author display rule (this project has shipped that bug
+ * four times).
+ */
+
+.stats {
+  /* Codex violet, clear of the teal, the cost green and the amber. */
+  --cdx: oklch(0.74 0.15 295);
+  --cdx-dim: oklch(0.55 0.11 295);
+  --cost: oklch(0.86 0.13 155);
+}
+
+.stats[data-codex='off'] .cx { display: none !important; }
+.stats[data-codex='on'] .cl-only { display: none !important; }
+
+.stats[data-view='simple'] .stats-grid { display: none; }
+.stats:not([data-view='simple']) .simple { display: none; }
+
+/* A measured nothing hides; it is never painted as 0. */
+.stats .panel-plan[data-on='off'],
+.stats .ran-line-cx[data-on='off'],
+.stats .cost-gap-cx[data-on='off'],
+.stats .eng-gap[data-on='off'],
+.stats .eff-cx[data-on='off'],
+.stats .eng-stat[data-on='off'],
+.stats .eng-limits[data-on='off'],
+.stats .lane[data-on='off'],
+.stats .lane-who[data-on='off'],
+.stats .today-handoff[data-on='off'],
+.stats .today-panel[data-on='off'] { display: none; }
+
+/* The provider label: a dot and the name. */
+.who {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  flex: 0 0 auto;
+  font-size: max(8px, calc(var(--u) * 10.5));
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.who-dot {
+  width: max(5px, calc(var(--u) * 8));
+  height: max(5px, calc(var(--u) * 8));
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.who-claude { color: var(--sig); }
+.who-codex { color: var(--cdx); }
+
+/* Label left, number right. With Codex off it holds the bare number where it always sat. */
+.split-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--u) * 10);
+  min-width: 0;
+}
+
+/* ── Detailed view, Codex on ────────────────────────────────────────────── */
+
+/* The top row makes room for the plan panel, as the mock does: hero 5, sky 4, stack 3. */
+.stats[data-codex='on'] .panel-live { grid-column: span 4; }
+.stats[data-codex='on'] .panel-stack { grid-column: span 3; }
+
+@media (max-width: 1500px) and (min-height: 1000px) {
+  .stats[data-codex='on'] .panel-live { grid-column: span 5; }
+}
+
+/* Hero: Claude's figure, then Codex's with its share in words, then its own strip. */
+.hero-who { margin-bottom: calc(var(--u) * 8); }
+
+.hero-cx { margin-top: calc(var(--u) * 16); }
+
+.hero-cx-row {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 14);
+  min-width: 0;
+}
+
+.hero-cx-value {
+  font-family: var(--mono);
+  font-size: calc(var(--u) * 40);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--cdx);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hero-cx-share {
+  min-width: 0;
+  font-size: max(8px, calc(var(--u) * 11));
+  color: oklch(0.68 0.015 230);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.comp-bar-cx { margin-top: calc(var(--u) * 10); }
+.compx-cacheRead { background: var(--cdx-dim); }
+.compx-cacheCreate { background: var(--cdx); }
+.compx-output { background: oklch(0.86 0.16 155); }
+.compx-input { background: oklch(0.85 0.15 75); }
+
+/* Cost and Hours: a Claude row and a Codex row each, a step smaller so both fit the stack. */
+.stats[data-codex='on'] .cost-value,
+.stats[data-codex='on'] .ran-value { font-size: calc(var(--u) * 20); }
+
+.cost-value-cx,
+.ran-value-cx {
+  font-family: var(--mono);
+  font-size: calc(var(--u) * 20);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.cost-value-cx { color: var(--cost); }
+.ran-value-cx { color: oklch(0.86 0.1 230); }
+
+.cost-body > .split-row.cx,
+.ran-body > .split-row.cx { margin-top: calc(var(--u) * 8); }
+
+/* Velocity and the Codex plan share the lower part of the stack. */
+.stack-low {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: calc(var(--u) * 12); /* the grid gap */
+}
+.stats[data-codex='on'] .stack-low .panel-vel { flex: 1 1 0; min-width: 0; }
+.stack-low .panel-plan { flex: 1 1 0; min-width: 0; --pi: 3; }
+.stats[data-codex='on'] .stack-low .panel-head { flex-wrap: wrap; row-gap: calc(var(--u) * 4); }
+.stats[data-codex='on'] .stack-low .panel-title { white-space: nowrap; }
+
+.plan-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(var(--u) * 8);
+}
+
+.lim-rows {
+  display: grid;
+  gap: calc(var(--u) * 8);
+}
+
+.lim-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--u) * 8);
+}
+
+.lim-label {
+  font-size: max(8px, calc(var(--u) * 10.5));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.68 0.015 235);
+  white-space: nowrap;
+}
+
+.lim-bar {
+  display: block;
+  height: max(4px, calc(var(--u) * 8));
+  min-width: 0;
+  border-radius: 999px;
+  background: oklch(1 0 0 / 0.08);
+  overflow: hidden;
+}
+
+.lim-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cdx);
+}
+
+.lim-num {
+  font-family: var(--mono);
+  font-size: calc(var(--u) * 16);
+  font-weight: 700;
+  line-height: 1;
+  text-align: right;
+  color: oklch(0.95 0.015 210);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lim-row[data-tone='warn'] .lim-fill { background: var(--warn); }
+.lim-row[data-tone='warn'] .lim-num { color: var(--warn); }
+.lim-row[data-tone='bad'] .lim-fill { background: var(--bad); }
+.lim-row[data-tone='bad'] .lim-num { color: var(--bad); }
+
+/* A window that has reset: the words take the place of the bar and the stale percent. */
+.lim-reset {
+  grid-column: 2 / -1;
+  min-width: 0;
+  font-size: max(8px, calc(var(--u) * 11));
+  color: oklch(0.74 0.02 225);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-note {
+  font-size: max(8px, calc(var(--u) * 10.5));
+  line-height: 1.35;
+  color: oklch(0.62 0.015 240);
+}
+
+/* Totals as a table with a Claude and a Codex column. */
+.counter-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: max(8px, calc(var(--u) * 15));
+}
+
+.counter-table th {
+  text-align: right;
+  font-size: max(8px, calc(var(--u) * 10));
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding-bottom: calc(var(--u) * 6);
+}
+.counter-table th.ct-cl { color: var(--sig); }
+.counter-table th.ct-cx { color: var(--cdx); }
+
+.counter-table td {
+  text-align: right;
+  padding: calc(var(--u) * 4) 0;
+  border-top: 1px solid oklch(1 0 0 / 0.05);
+  white-space: nowrap;
+}
+
+.counter-table td.ct-cl,
+.counter-table td.ct-cx {
+  font-family: var(--mono);
+  font-weight: 700;
+  color: oklch(0.95 0.015 210);
+  font-variant-numeric: tabular-nums;
+}
+
+.counter-table .ct-cx { padding-left: calc(var(--u) * 14); }
+
+.counter-table td.ct-label {
+  text-align: left;
+  font-size: max(8px, calc(var(--u) * 10.5));
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.68 0.02 225);
+}
+
+/* Mirrored columns: Codex hangs from the axis, on its own scale. */
+.chart-daily-cx,
+.chart-hours-cx {
+  flex: 0.62 1 0;
+  margin-top: calc(var(--u) * 3);
+}
+
+.cols-down,
+.cols-down .col { align-items: flex-start; }
+
+.cols-down .col-bar {
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(0deg, var(--cdx), oklch(0.42 0.1 295));
+  transform-origin: top;
+}
+
+.mirror-key { margin-left: calc(var(--u) * 12); }
+.mirror-cl { color: var(--sig); }
+.mirror-cx { color: var(--cdx); }
+
+/* Context efficiency: Claude's row and bar, Codex's row and bar, then the words. */
+.stats[data-codex='on'] .eff-value { font-size: calc(var(--u) * 34); }
+.stats[data-codex='on'] .eff-body > .eff-line { order: 1; }
+.stats[data-codex='on'] .eff-body > .eff-track { order: 2; }
+.stats[data-codex='on'] .eff-body > .eff-cx { order: 3; margin-top: calc(var(--u) * 14); }
+.stats[data-codex='on'] .eff-body > .eff-label { order: 4; margin-top: calc(var(--u) * 10); }
+.stats[data-codex='on'] .eff-body > .eff-note { order: 5; }
+
+/* Models and projects: Claude's, then Codex's under its own heading and scale. */
+.bd-stack {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(var(--u) * 7);
+  overflow: hidden;
+}
+.bd-stack .breakdown { flex: 0 0 auto; }
+
+.bd-group {
+  margin-top: calc(var(--u) * 3);
+  font-size: max(8px, calc(var(--u) * 10));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: oklch(0.6 0.015 240);
+}
+
+.bd-cx .bd-fill { background: linear-gradient(90deg, oklch(0.5 0.12 295), var(--cdx)); }
+.bd-cx .bd-value { color: oklch(0.76 0.12 295); }
+
+/* Request counts stay in the tooltip: two lists in one panel have no room for them. */
+.stats[data-codex='on'] .panel-models .bd-sub,
+.stats[data-codex='on'] .panel-projects .bd-sub { display: none; }
+
+/* The constellation's key for the violet ring. */
+.const-cx {
+  flex: 0 0 auto;
+  display: flex;
+  gap: calc(var(--u) * 16);
+  font-family: var(--mono);
+  font-size: max(8px, calc(var(--u) * 10.5));
+  color: oklch(0.62 0.015 240);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.const-cx-cl::before,
+.const-cx-ring::before {
+  content: '';
+  display: inline-block;
+  width: max(5px, calc(var(--u) * 8));
+  height: max(5px, calc(var(--u) * 8));
+  margin-right: calc(var(--u) * 6);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+.const-cx-cl::before { background: oklch(0.7 0.12 175); }
+.const-cx-ring::before { border: 1.5px solid var(--cdx); box-sizing: border-box; }
+
+/* ── Simple view ────────────────────────────────────────────────────────── */
+
+.simple {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: calc(var(--u) * 12);
+  transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.stats.is-loading .simple,
+.stats.is-nodata .simple { opacity: 0; }
+.stats.is-stale-data .simple { opacity: 0.55; filter: saturate(0.7); }
+
+.engines {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: calc(var(--u) * 12);
+}
+.stats[data-codex='off'] .engines { grid-template-columns: minmax(0, 1fr); }
+.stats[data-codex='off'] .engine-cx { display: none; }
+
+.engine { padding: calc(var(--u) * 26) calc(var(--u) * 34); }
+.engine-cl { --pi: 0; }
+.engine-cx { --pi: 1; }
+
+.eng-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: calc(var(--u) * 16);
+  min-width: 0;
+}
+
+.eng-name {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 10);
+  margin: 0;
+  font-size: max(9px, calc(var(--u) * 15));
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: oklch(0.92 0.015 220);
+  white-space: nowrap;
+}
+
+.eng-dot {
+  width: max(6px, calc(var(--u) * 11));
+  height: max(6px, calc(var(--u) * 11));
+  border-radius: 50%;
+}
+.engine-cl .eng-dot { background: var(--sig); }
+.engine-cx .eng-dot { background: var(--cdx); }
+
+.eng-models {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: max(8px, calc(var(--u) * 12));
+  color: oklch(0.66 0.015 235);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eng-big {
+  margin-top: calc(var(--u) * 26);
+  font-family: var(--mono);
+  font-size: calc(var(--u) * 132);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.engine-cl .eng-big { color: var(--sig); }
+.engine-cx .eng-big { color: var(--cdx); }
+.stats[data-codex='off'] .eng-big { font-size: calc(var(--u) * 150); }
+
+.eng-bigsub {
+  margin-top: calc(var(--u) * 12);
+  font-size: max(8px, calc(var(--u) * 14));
+  color: oklch(0.68 0.015 235);
+}
+
+.eng-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: calc(var(--u) * 20);
+  margin-top: calc(var(--u) * 34);
+  padding-top: calc(var(--u) * 22);
+  border-top: 1px solid oklch(1 0 0 / 0.07);
+}
+
+.eng-num {
+  font-family: var(--mono);
+  font-size: calc(var(--u) * 34);
+  font-weight: 700;
+  line-height: 1;
+  color: oklch(0.95 0.015 210);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.eng-cost .eng-num { color: var(--cost); }
+
+.eng-label {
+  margin-top: calc(var(--u) * 8);
+  font-size: max(8px, calc(var(--u) * 10.5));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.66 0.015 235);
+  white-space: nowrap;
+}
+
+.eng-spark {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: calc(var(--u) * 60);
+  margin-top: calc(var(--u) * 28);
+}
+.eng-spark svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.engine-cl .eng-spark rect { fill: oklch(0.66 0.12 195); }
+.engine-cl .eng-spark rect.is-today { fill: var(--sig); }
+.engine-cx .eng-spark rect { fill: oklch(0.62 0.12 295); }
+.engine-cx .eng-spark rect.is-today { fill: var(--cdx); }
+
+.eng-sparkfoot {
+  display: flex;
+  justify-content: space-between;
+  gap: calc(var(--u) * 10);
+  margin-top: calc(var(--u) * 6);
+  font-family: var(--mono);
+  font-size: max(8px, calc(var(--u) * 10.5));
+  color: oklch(0.58 0.015 240);
+  white-space: nowrap;
+}
+
+.eng-limits {
+  margin-top: calc(var(--u) * 18);
+  padding-top: calc(var(--u) * 18);
+  border-top: 1px solid oklch(1 0 0 / 0.07);
+  display: grid;
+  gap: calc(var(--u) * 12);
+}
+
+.eng-limits .lim-row {
+  grid-template-columns: calc(var(--u) * 130) minmax(0, 1fr) calc(var(--u) * 60) calc(var(--u) * 150);
+  gap: calc(var(--u) * 14);
+}
+.eng-limits .lim-bar { height: max(5px, calc(var(--u) * 10)); }
+.eng-limits .lim-num { font-size: calc(var(--u) * 20); }
+
+.lim-note {
+  font-size: max(8px, calc(var(--u) * 11));
+  color: oklch(0.66 0.015 235);
+  white-space: nowrap;
+}
+
+.eng-asof {
+  font-size: max(8px, calc(var(--u) * 11));
+  color: oklch(0.6 0.015 240);
+}
+
+.eng-nolimits {
+  margin-top: calc(var(--u) * 18);
+  padding-top: calc(var(--u) * 18);
+  border-top: 1px solid oklch(1 0 0 / 0.07);
+  font-size: max(8px, calc(var(--u) * 12));
+  line-height: 1.5;
+  color: oklch(0.62 0.015 240);
+}
+
+/* Today, side by side: a lane per provider on one 24-hour axis. */
+.today-panel { padding: calc(var(--u) * 16) calc(var(--u) * 34) calc(var(--u) * 18); --pi: 2; }
+
+.today-handoff {
+  font-size: max(8px, calc(var(--u) * 12));
+  color: oklch(0.72 0.015 230);
+  white-space: nowrap;
+}
+.today-handoff b { color: var(--cdx); font-weight: 600; }
+
+.lanes {
+  display: grid;
+  grid-template-columns: calc(var(--u) * 90) minmax(0, 1fr);
+  row-gap: calc(var(--u) * 8);
+  align-items: center;
+}
+
+.lane {
+  position: relative;
+  height: calc(var(--u) * 26);
+  min-width: 0;
+}
+.lane svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.lane-base { fill: oklch(1 0 0 / 0.08); }
+.lane-cl .lane-mark { fill: var(--sig); }
+.lane-cx .lane-mark { fill: var(--cdx); }
+.lane-now { fill: oklch(0.97 0.02 200 / 0.85); }
+
+.lane-axis {
+  grid-column: 2;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: max(8px, calc(var(--u) * 10.5));
+  color: oklch(0.58 0.015 240);
+}

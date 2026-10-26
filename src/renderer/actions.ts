@@ -30,6 +30,8 @@ interface MilestonesView {
 }
 
 interface UsageLike {
+  /** Present when this machine (or the source it is paired to) has Codex data. */
+  codex?: { indexing?: boolean } | null;
   projects?: Record<string, { display?: string }>;
   activeDays?: Record<string, number>;
   indexing?: boolean;
@@ -65,10 +67,51 @@ export class WallActions {
   private ms: MilestonesView | null = null;
   /** A day is being fetched: a second click must not start a second replay. */
   private loading = false;
+  /*
+   * The two view choices for Claude and Codex side by side
+   * (docs/design/codex-side-by-side.md): Simple | Detailed, and Codex on or
+   * off. Saved in settings by main.ts, which owns persistence; this only
+   * reports the click and paints what it is told.
+   */
+  private readonly seg: HTMLElement;
+  private readonly codexBtn: HTMLButtonElement;
+  private view: 'detailed' | 'simple' = 'detailed';
+  private showCodex = true;
+  onView: ((v: 'detailed' | 'simple') => void) | null = null;
+  onCodex: ((on: boolean) => void) | null = null;
 
   constructor() {
     this.root = el('div');
     this.root.id = 'wall-actions';
+
+    this.seg = el('div', 'wall-seg');
+    this.seg.setAttribute('role', 'group');
+    this.seg.setAttribute('aria-label', 'Dashboard view');
+    for (const [v, label] of [['simple', 'Simple'], ['detailed', 'Detailed']] as const) {
+      const b = el('button', 'wall-seg-btn', label);
+      b.type = 'button';
+      b.dataset.view = v;
+      b.addEventListener('click', () => {
+        if (this.view === v) return;
+        this.setPrefs(v, this.showCodex);
+        this.onView?.(v);
+      });
+      this.seg.append(b);
+    }
+
+    /*
+     * The Codex chip. Not in the DOM at all while the payload carries no Codex
+     * data (any other install of the stats edition): there is nothing to turn
+     * on, and a toggle that does nothing is a lie.
+     */
+    this.codexBtn = el('button', 'wall-codex');
+    this.codexBtn.type = 'button';
+    this.codexBtn.append(el('span', 'wall-codex-dot'), el('span', 'wall-codex-label', 'Codex'), el('span', 'wall-codex-track'));
+    this.codexBtn.addEventListener('click', () => {
+      const next = !this.showCodex;
+      this.setPrefs(this.view, next);
+      this.onCodex?.(next);
+    });
 
     this.todayBtn = el('button', 'wall-action wall-action-today', 'Today');
     this.todayBtn.type = 'button';
@@ -97,8 +140,9 @@ export class WallActions {
       this.playDay(day);
     };
 
-    this.root.append(this.todayBtn, this.daysBtn, this.msBtn, this.pop, this.picker.root);
+    this.root.append(this.seg, this.todayBtn, this.daysBtn, this.msBtn, this.pop, this.picker.root);
     this.setBadge(0);
+    this.setPrefs(this.view, this.showCodex);
 
     // A click anywhere outside closes whichever popover is open. pointerdown,
     // so it closes before the click lands on whatever was underneath.
@@ -111,6 +155,26 @@ export class WallActions {
     });
   }
 
+  /** Paint the saved choices. Idempotent: every state push repeats them. */
+  setPrefs(view: 'detailed' | 'simple', showCodex: boolean): void {
+    this.view = view;
+    this.showCodex = showCodex;
+    for (const b of this.seg.querySelectorAll<HTMLButtonElement>('.wall-seg-btn')) {
+      const on = b.dataset.view === view;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    }
+    this.codexBtn.dataset.on = showCodex ? 'on' : 'off';
+    this.codexBtn.setAttribute('aria-pressed', String(showCodex));
+    this.paintCodexTitle();
+  }
+
+  private paintCodexTitle(): void {
+    this.codexBtn.title = this.codexBtn.dataset.reading === 'on'
+      ? 'Still reading Codex sessions'
+      : this.showCodex ? 'Hide Codex' : 'Show Codex beside Claude';
+  }
+
   private get open(): Popover {
     const v = this.root.dataset.open;
     return v === 'milestones' || v === 'days' ? v : null;
@@ -119,6 +183,14 @@ export class WallActions {
   update(u: UsageLike): void {
     this.usage = u;
     const onScreen = u.projection?.role === 'screen';
+
+    // The chip exists only with Codex data, right after the view switch.
+    const hasCodex = !!u.codex && typeof u.codex === 'object';
+    if (hasCodex && !this.codexBtn.isConnected) this.seg.after(this.codexBtn);
+    else if (!hasCodex && this.codexBtn.isConnected) this.codexBtn.remove();
+    // First index still running: the choice can be made, but nothing shows yet (rule 15).
+    this.codexBtn.dataset.reading = hasCodex && u.codex?.indexing ? 'on' : 'off';
+    this.paintCodexTitle();
 
     /*
      * The replay needs this machine's five-minute detail, which does not cross

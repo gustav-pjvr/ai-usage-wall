@@ -81,8 +81,8 @@ export interface CodexView {
   sessions: { total: number; byClaude: number; byYou: number; byT3: number; other: number };
   /** Hours, same method as Claude (src/shared/active-time.ts). */
   activeTime: { seconds: number; since: number | null };
-  /** Tokens per five-minute slot of the LOCAL day, length 288. */
-  todaySlots: number[];
+  /** Tokens per five-minute slot of the LOCAL day, length 288. Absent when it could not be computed: the lane hides, never zeros. */
+  todaySlots?: number[];
   /** [epochMs, totalTokens, outputTokens] for the most recent responses, like Claude's `recent`. */
   recent: [number, number, number][];
   limits: CodexLimits | null;

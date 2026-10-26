@@ -59,7 +59,7 @@ const die = (what, err) => {
 };
 process.on('uncaughtException', (err) => die('uncaught exception', err));
 process.on('unhandledRejection', (err) => die('unhandled rejection', err));
-const WATCHDOG_MS = 240000;
+const WATCHDOG_MS = 480000;
 setTimeout(() => die('watchdog', new Error(`still running after ${WATCHDOG_MS / 1000}s`)), WATCHDOG_MS).unref();
 const path = require('node:path');
 const fs = require('node:fs');
@@ -310,8 +310,104 @@ function fixture(emptyIndex) {
       { title: '30 day streak', progress: 0.5, remaining: '16 days to go' },
     ],
   };
+
+  // Claude's five-minute slots for today, as main sends them for the simple view's lane.
+  idx.todaySlots = claudeSlots();
+  idx.codex = codexFixture(now);
   return idx;
 }
+
+/*
+ * Codex, from the real figures in docs/design/codex-side-by-side.md (measured
+ * 2026-10-26): 55,066,228 tokens over 762 responses, three models, 40 sessions
+ * of which Claude started 35, Gustav 3 and T3 Code 2, and a plan reading of
+ * 99% on the 5-hour window and 16% on the week. Normalised the way the
+ * contract says (fresh input = input_tokens - cached_input_tokens).
+ */
+const CX_TOTAL = 55_066_228;
+const cxTotals = (k) => ({
+  input: Math.round(3_431_679 * k),
+  output: Math.round(638_965 * k),
+  cacheCreate: 0,
+  cacheRead: Math.round(50_995_584 * k),
+  thinking: Math.round(138_275 * k),
+  requests: Math.round(762 * k),
+  webSearch: 0,
+  webFetch: 0,
+  costUsd: 65.7846 * k,
+  unpricedTokens: 0,
+});
+/** Codex's projects: two share a working directory with Claude's fixture projects, so two stars get the ring. */
+const CX_PROJECTS = [
+  ['C:\\Users\\HP 865 G10\\.t3\\scratch\\2026-10-23-these-are-the-components-i-3365f074', 15_521_714],
+  [WS + 'muchbetter-client-wall', 10_352_367],
+  [WS + 'pickleplay-south-africa', 5_658_907],
+  ['C:\\Users\\HP 865 G10\\Desktop\\Claude WorkSpace', 4_086_706],
+];
+const CX_HOUR = [2957076, 709811, 298733, 0, 0, 0, 0, 697549, 0, 4373411, 14109279, 8423428, 84671, 0, 1636257, 1428774, 0, 621821, 4229754, 0, 7735453, 2556417, 3507796, 1695998];
+
+function claudeSlots() {
+  const s = new Array(288).fill(0);
+  for (let i = 0; i < 288; i++) {
+    const on = (i >= 16 && i <= 46) || (i >= 120 && i <= 170) || i === 77 || i === 78 || (i >= 178 && i <= 180);
+    if (on && i % 5 !== 3) s[i] = 600_000 + ((i * 7919) % 40) * 900_000;
+  }
+  return s;
+}
+
+function codexFixture(now, opts = {}) {
+  const day = (k) => new Date(now - k * DAY_MS).toISOString().slice(0, 10);
+  const dailyTokens = [8_436_681, 11_766_448, 18_441_725, 7_979_693, 8_441_681];
+  const daily = {};
+  dailyTokens.forEach((v, i) => { daily[day(4 - i)] = cxTotals(v / CX_TOTAL); });
+  const hourly = {};
+  CX_HOUR.forEach((v, h) => {
+    if (!v) return;
+    const d = new Date(now - DAY_MS);
+    d.setHours(h, 0, 0, 0);
+    hourly[d.toISOString().slice(0, 13)] = cxTotals(v / CX_TOTAL);
+  });
+  const projects = {};
+  for (const [p, v] of CX_PROJECTS) {
+    projects[p.toLowerCase()] = { ...cxTotals(v / CX_TOTAL), lastSeen: new Date(now - 3_600_000).toISOString(), display: p };
+  }
+  const slots = new Array(288).fill(0);
+  [18253, 1112203, 729462, 845360, 596189, 741624, 877192, 1666193, 1855205].forEach((v, i) => { slots[131 + i] = v; });
+  return {
+    totals: cxTotals(1),
+    daily,
+    hourly,
+    models: {
+      'gpt-6-astra': cxTotals(27_380_867 / CX_TOTAL),
+      'gpt-6.1-sol': cxTotals(13_994_665 / CX_TOTAL),
+      'gpt-6-luna': cxTotals(13_690_696 / CX_TOTAL),
+    },
+    projects,
+    activeDays: { [dayKey(now)]: 101 },
+    sessions: { total: 40, byClaude: 35, byYou: 3, byT3: 2, other: 0 },
+    activeTime: { seconds: 19_080, since: Date.parse('2026-10-22T12:36:00Z') },
+    todaySlots: slots,
+    recent: [],
+    limits: {
+      at: new Date(now - 2 * 3_600_000).toISOString(),
+      plan: 'plus',
+      // Future resets by default; `resetPast` puts the 5-hour reset behind us, which must read as reset.
+      fiveHour: { usedPercent: 99, windowMinutes: 300, resetsAt: opts.resetPast ? now - 30 * 60_000 : now + 3 * 3_600_000 },
+      weekly: { usedPercent: 16, windowMinutes: 10_080, resetsAt: now + 6.5 * DAY_MS },
+    },
+    firstAt: '2026-10-22T12:36:00.000Z',
+    latestAt: new Date(now - 2 * 3_600_000).toISOString(),
+    indexing: false,
+  };
+}
+
+/*
+ * The detailed view's panel rectangles BEFORE Codex existed, measured on this
+ * machine from the renderer at ca81343 with this file's Claude fixture. With
+ * Codex off or absent the dashboard must be exactly this: [panel, left, top,
+ * width, height], rounded to 0.1px.
+ */
+const BEFORE_CODEX = {"2560x1440":[["panel-hero",34.7,106.7,1028.5,478.2],["panel-live",1079.1,106.7,1028.5,478.2],["panel-cost",2123.5,106.7,252.9,159.7],["panel-ran",2392.4,106.7,133,159.7],["panel-vel",2123.5,282.4,401.8,302.5],["panel-counters",34.7,600.9,819.6,382.6],["panel-daily",870.2,600.9,1028.5,382.6],["panel-eff",1914.7,600.9,610.7,382.6],["panel-models",34.7,999.4,819.6,382.6],["panel-hours",870.2,999.4,819.6,382.6],["panel-projects",1705.8,999.4,819.6,382.6]],"1920x1200":[["panel-hero",26,80,771.3,404.6],["panel-live",809.3,80,771.4,404.6],["panel-cost",1592.7,80,189.2,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1592.7,211.7,301.4,272.9],["panel-counters",26,496.6,614.7,323.7],["panel-daily",652.7,496.6,771.3,323.7],["panel-eff",1436,496.6,458,323.7],["panel-models",26,832.3,614.7,323.7],["panel-hours",652.7,832.3,614.7,323.7],["panel-projects",1279.3,832.3,614.7,323.7]],"1920x1080":[["panel-hero",26,80,771.3,358.5],["panel-live",809.3,80,771.4,358.5],["panel-cost",1592.7,80,189.2,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1592.7,211.7,301.4,226.8],["panel-counters",26,450.5,614.7,286.8],["panel-daily",652.7,450.5,771.3,286.8],["panel-eff",1436,450.5,458,286.8],["panel-models",26,749.2,614.7,286.8],["panel-hours",652.7,749.2,614.7,286.8],["panel-projects",1279.3,749.2,614.7,286.8]],"1600x900":[["panel-hero",21.7,66.7,642.8,299],["panel-live",674.4,66.7,642.8,299],["panel-cost",1327.2,66.7,157.3,99.8],["panel-ran",1494.5,66.7,83.8,99.8],["panel-vel",1327.2,176.5,251.1,189.2],["panel-counters",21.7,375.6,512.2,239.2],["panel-daily",543.9,375.6,642.8,239.2],["panel-eff",1196.7,375.6,381.7,239.2],["panel-models",21.7,624.8,512.2,239.2],["panel-hours",543.9,624.8,512.2,239.2],["panel-projects",1066.1,624.8,512.3,239.2]],"1512x982":[["panel-hero",20.5,63,607.4,332.9],["panel-live",637.3,63,607.4,332.9],["panel-cost",1254.2,63,148.5,95.7],["panel-ran",1412.2,63,79.3,95.7],["panel-vel",1254.2,168.1,237.3,227.8],["panel-counters",20.5,405.3,484.1,266.3],["panel-daily",514,405.3,607.4,266.3],["panel-eff",1130.8,405.3,360.7,266.3],["panel-models",20.5,681.1,484.1,266.3],["panel-hours",514,681.1,484.1,266.3],["panel-projects",1007.5,681.1,484.1,266.3]],"1440x900":[["panel-hero",19.5,60,578.5,303.3],["panel-live",607,60,578.5,303.3],["panel-cost",1194.5,60,140.6,91.3],["panel-ran",1344,60,76.5,91.3],["panel-vel",1194.5,160.2,226,203],["panel-counters",19.5,372.3,461,242.6],["panel-daily",489.5,372.3,578.5,242.6],["panel-eff",1077,372.3,343.5,242.6],["panel-models",19.5,623.9,461,242.7],["panel-hours",489.5,623.9,461,242.7],["panel-projects",959.5,623.9,461,242.7]],"1366x768":[["panel-hero",18.5,56.9,548.8,254.9],["panel-live",575.8,56.9,548.8,254.9],["panel-cost",1133.1,56.9,131,88.1],["panel-ran",1272.7,56.9,74.8,88.1],["panel-vel",1133.1,153.5,214.4,158.2],["panel-counters",18.5,320.3,437.3,203.9],["panel-daily",464.3,320.3,548.8,203.9],["panel-eff",1021.6,320.3,325.9,203.9],["panel-models",18.5,532.8,437.3,203.9],["panel-hours",464.3,532.8,437.3,203.9],["panel-projects",910.2,532.8,437.3,203.9]],"1280x800":[["panel-hero",18.2,56,513.3,267.8],["panel-live",539.9,56,513.3,267.8],["panel-cost",1061.5,56,117.6,87.3],["panel-ran",1187.5,56,74.3,87.3],["panel-vel",1061.5,151.6,200.3,172.1],["panel-counters",18.2,332.2,408.9,214.2],["panel-daily",435.5,332.2,513.3,214.2],["panel-eff",957.2,332.2,304.6,214.2],["panel-models",18.2,554.8,408.9,214.2],["panel-hours",435.5,554.8,409,214.2],["panel-projects",852.9,554.8,408.9,214.2]]};
 
 const state = (w, h) => ({
   clients: [],
@@ -484,9 +580,11 @@ app.whenReady().then(async () => {
   });
   const { emptyIndex } = require(bundle);
   const idx = fixture(emptyIndex);
+  /** When set, the next page load gets this instead of the fixture (a first payload of another shape). */
+  let usageOverride = null;
 
   ipcMain.handle('wall:getState', () => state(SIZES[0].w, SIZES[0].h));
-  ipcMain.handle('wall:getUsage', () => idx);
+  ipcMain.handle('wall:getUsage', () => usageOverride || idx);
   ipcMain.handle('wall:updateSettings', (_e, patch) => {
     saved.push(patch);
   });
@@ -1095,6 +1193,318 @@ app.whenReady().then(async () => {
     ok(`${size.w}x${size.h}   and it comes back when hours arrive`,
        await win.webContents.executeJavaScript(`document.querySelector('#view-stats .cost-row').dataset.hours === 'on'`));
   }
+
+  // ── Claude and Codex side by side ──────────────────────────────────────
+  //
+  // docs/design/codex-side-by-side.md. Four views (detailed and simple, Codex
+  // on and off) at every size, reached by REAL clicks on the controls, which
+  // must save through updateSettings. Detailed with Codex off must be the old
+  // dashboard to the pixel: its panel rectangles are compared with the ones
+  // measured before Codex existed.
+  console.log('\nClaude and Codex side by side\n');
+  const lastSaved = (key) => [...saved].reverse().find((x) => x && key in x);
+  const statsState = () => win.webContents.executeJavaScript(`(() => {
+    const s = document.querySelector('#view-stats .stats');
+    return { view: s.dataset.view, codex: s.dataset.codex };
+  })()`);
+
+  const CONTROLS = `(() => {
+    const a = document.querySelector('#wall-actions');
+    const seg = a.querySelector('.wall-seg');
+    const chip = a.querySelector('.wall-codex');
+    const today = a.querySelector('.wall-action-today');
+    const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0;
+    const sr = seg.getBoundingClientRect(), tr = today.getBoundingClientRect();
+    const cr = chip ? chip.getBoundingClientRect() : null;
+    const sw = document.querySelector('#mode-switch').getBoundingClientRect();
+    return {
+      seg: vis(seg), chip: vis(chip), chipInDom: !!chip,
+      order: !!cr && sr.right <= cr.left + 0.5 && cr.right <= tr.left + 0.5,
+      inside: sr.left >= 0 && (!cr || cr.right <= innerWidth + 0.5),
+      clearOfSwitch: sr.left >= sw.right + 4,
+      on: [...seg.querySelectorAll('.wall-seg-btn.is-on')].map((b) => b.dataset.view),
+      chipOn: chip ? chip.dataset.on : null,
+      px: Math.min(...[...a.querySelectorAll('.wall-seg-btn, .wall-codex-label')].map((e) => parseFloat(getComputedStyle(e).fontSize))),
+    };
+  })()`;
+
+  /* Everything the four views must show, read off the page in one go. */
+  const VIEW = `(() => {
+    const q = (s) => document.querySelector(s);
+    const shown = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
+    const text = (s) => { const e = q(s); return e && shown(e) ? e.textContent.trim() : null; };
+    const oneLine = (e) => !!e && e.getBoundingClientRect().height <= parseFloat(getComputedStyle(e).fontSize) * 1.4;
+    const insideOf = (e) => {
+      const p = e && e.closest('.panel');
+      if (!e || !p) return false;
+      const r = e.getBoundingClientRect(), b = p.getBoundingClientRect();
+      return r.width > 0 && r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.top >= b.top - 0.5 && r.bottom <= b.bottom + 0.5;
+    };
+    const nums = (sels) => sels.map((s) => q(s)).filter(shown);
+    const panels = [...document.querySelectorAll('#view-stats .stats-grid .panel')].filter((p) => p.getBoundingClientRect().width > 0)
+      .map((p) => { const r = p.getBoundingClientRect(); return [p.className.split(' ').find((c) => c.startsWith('panel-')), Math.round(r.left * 10) / 10, Math.round(r.top * 10) / 10, Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10]; });
+    const cxShown = [...document.querySelectorAll('#view-stats .stats-grid .cx')].filter(shown).length;
+    const plan = q('.panel-plan');
+    const g = window.__cswConstellation && window.__cswConstellation();
+    const engines = q('.engines'), ecl = q('.engine-cl'), ecx = q('.engine-cx');
+    const detailNums = nums(['.hero-value', '.hero-cx-value', '.cost-value', '.cost-value-cx', '.ran-value', '.ran-value-cx', '.eff-value', '.eff-value-cx']);
+    const simpleNums = nums(['.engine-cl .eng-big', '.engine-cx .eng-big', ...[...document.querySelectorAll('.eng-num')].map((_, i) => '.eng-stat:nth-child(' + (i % 3 + 1) + ') .eng-num')]);
+    const allNums = [...document.querySelectorAll('.engine .eng-big, .engine .eng-num')].filter(shown);
+    return {
+      panels, cxShown,
+      heroCx: text('.hero-cx-value'), share: text('.hero-cx-share'),
+      costCx: text('.cost-value-cx'), hoursCx: text('.ran-value-cx'),
+      table: shown(q('.counter-table')) ? [...document.querySelectorAll('.counter-table tr[data-key]')].map((tr) => [tr.dataset.key, tr.querySelector('.ct-cl').textContent, tr.querySelector('.ct-cx').textContent]) : null,
+      effCx: text('.eff-value-cx'),
+      plan: shown(plan) ? plan.querySelector('.plan-body').textContent : null,
+      planRows: shown(plan) ? [...plan.querySelectorAll('.lim-row')].map((r) => r.dataset.tone + ':' + r.textContent) : [],
+      dailyCx: [...document.querySelectorAll('.chart-daily-cx .col-bar')].filter(shown).length,
+      hoursCxBars: [...document.querySelectorAll('.chart-hours-cx .col-bar')].filter(shown).length,
+      modelsCx: [...document.querySelectorAll('.panel-models .bd-cx .bd-row')].filter(shown).length,
+      projectsCx: [...document.querySelectorAll('.panel-projects .bd-cx .bd-row')].filter(shown).length,
+      groups: [...document.querySelectorAll('.bd-group')].filter(shown).map((e) => e.textContent),
+      ringed: g ? g.ringed : null,
+      mirrorKeys: [...document.querySelectorAll('.mirror-key')].filter(shown).length,
+      detailOneLine: detailNums.every(oneLine), detailInside: detailNums.every(insideOf), detailCount: detailNums.length,
+      simpleOneLine: allNums.every(oneLine), simpleInside: allNums.every(insideOf), simpleCount: allNums.length,
+      engines: [ecl, ecx].map(shown),
+      clFull: shown(ecl) && Math.abs(ecl.getBoundingClientRect().width - engines.getBoundingClientRect().width) < 1,
+      sideBySide: shown(ecl) && shown(ecx) && Math.abs(ecl.getBoundingClientRect().top - ecx.getBoundingClientRect().top) < 1 && ecx.getBoundingClientRect().left > ecl.getBoundingClientRect().right,
+      bigCl: text('.engine-cl .eng-big'), bigCx: text('.engine-cx .eng-big'),
+      todayCl: text('.engine-cl .eng-today .eng-num'), todayCx: text('.engine-cx .eng-today .eng-num'),
+      costSimpleCx: text('.engine-cx .eng-cost .eng-num'),
+      limits: shown(q('.eng-limits')) ? q('.eng-limits').textContent : null,
+      limitRows: [...document.querySelectorAll('.eng-limits .lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent),
+      nolimits: text('.eng-nolimits'),
+      lanes: [...document.querySelectorAll('.lanes .lane')].filter(shown).length,
+      laneMarks: [...document.querySelectorAll('.lane-cx .lane-mark')].length,
+      handoff: text('.today-handoff'),
+      sparkCx: [...document.querySelectorAll('.engine-cx .eng-spark rect')].length,
+    };
+  })()`;
+
+  const sameRects = (got, want) => {
+    if (!want || got.length !== want.length) return `${got.length} panels, expected ${want ? want.length : 'none'}`;
+    const bad = [];
+    for (const w of want) {
+      const g = got.find((x) => x[0] === w[0]);
+      if (!g) { bad.push(`${w[0]} missing`); continue; }
+      for (let i = 1; i < 5; i++) if (Math.abs(g[i] - w[i]) > 1) { bad.push(`${w[0]} ${JSON.stringify(g.slice(1))} vs ${JSON.stringify(w.slice(1))}`); break; }
+    }
+    return bad.join('; ');
+  };
+
+  // The controls, at the reference size, before anything is clicked.
+  await measure(win, { w: 1920, h: 1080 });
+  const c0 = await win.webContents.executeJavaScript(CONTROLS);
+  ok(`the Simple | Detailed switch and the Codex chip sit before Today (${c0.on.join(',')} on, Codex ${c0.chipOn})`,
+     c0.seg && c0.chip && c0.order && c0.inside && c0.clearOfSwitch, JSON.stringify(c0));
+  ok('the defaults are the detailed view with Codex shown', c0.on.join() === 'detailed' && c0.chipOn === 'on' &&
+     JSON.stringify(await statsState()) === JSON.stringify({ view: 'detailed', codex: 'on' }));
+  ok(`the controls' text is legible (${c0.px}px)`, c0.px >= 8);
+
+  const CONFIGS = [
+    { name: 'detailed', view: 'detailed', codex: true },
+    { name: 'detailed-off', view: 'detailed', codex: false },
+    { name: 'simple-off', view: 'simple', codex: false },
+    { name: 'simple', view: 'simple', codex: true },
+  ];
+  const savesBefore = saved.length;
+  for (const cfg of CONFIGS) {
+    // Get there with real clicks on the controls, from whatever is on screen now.
+    await measure(win, { w: 1920, h: 1080 });
+    const now = await statsState();
+    if ((now.view === 'simple') !== (cfg.view === 'simple')) {
+      await clickEl(`#wall-actions .wall-seg-btn[data-view="${cfg.view}"]`);
+      ok(`a real click on ${cfg.view} switches the view and saves it`,
+         (await statsState()).view === cfg.view && lastSaved('statsView')?.statsView === cfg.view, JSON.stringify(lastSaved('statsView')));
+    }
+    if ((now.codex === 'on') !== cfg.codex) {
+      await clickEl('#wall-actions .wall-codex');
+      ok(`a real click on the Codex chip turns Codex ${cfg.codex ? 'on' : 'off'} and saves it`,
+         (await statsState()).codex === (cfg.codex ? 'on' : 'off') && lastSaved('showCodex')?.showCodex === cfg.codex, JSON.stringify(lastSaved('showCodex')));
+    }
+    // A view switch replays the panel entrance; measure the settled layout, not the animation.
+    await wait(1400);
+
+    for (const size of SIZES) {
+      const r = await measure(win, size);
+      const tag = `${cfg.name.padEnd(12)} ${size.w}x${size.h}`;
+      if (SHOTS) fs.writeFileSync(path.join(SHOTS, `${cfg.name}-${size.w}x${size.h}.png`), (await win.webContents.capturePage()).toPNG());
+      if (r.fatal) { ok(tag, false, r.fatal); continue; }
+      ok(`${tag}   everything inside its panel, nothing overflowing`, r.findings.length === 0,
+         r.findings.slice(0, 6).join('\n        ') + (r.findings.length > 6 ? `\n        (+${r.findings.length - 6} more)` : ''));
+      ok(`${tag}   smallest text ${r.smallest}px (>= 8, on .${r.smallestOn})`, r.smallest >= 8);
+      ok(`${tag}   status strip inside, mode switch clear (${r.stripOver}px, ${r.switchOver}px)`, r.stripOver <= 1 && r.switchOver <= 0);
+      const c = await win.webContents.executeJavaScript(CONTROLS);
+      ok(`${tag}   controls inside the window, clear of the switch, legible (${c.px}px)`,
+         c.seg && c.chip && c.order && c.inside && c.clearOfSwitch && c.px >= 8, JSON.stringify(c));
+      const v = await win.webContents.executeJavaScript(VIEW);
+
+      if (cfg.name === 'detailed') {
+        const share = (() => {
+          const mine = CX_TOTAL, claude = 48_100_000 + 62_400_000 + 690_000_000 + 25_300_000_000;
+          const pct = (mine / (mine + claude)) * 100;
+          return `${pct >= 0.1 ? pct.toFixed(1) : pct.toFixed(2)}% of the two together`;
+        })();
+        ok(`${tag}   hero: Codex ${v.heroCx}, "${v.share}"`, v.heroCx === '55.07M' && v.share === share, `${v.heroCx} / ${v.share}`);
+        ok(`${tag}   cost ${v.costCx} and hours ${v.hoursCx} split Claude / Codex, every number one line and inside its panel`,
+           v.costCx === '$65.78' && v.hoursCx === '5' && v.detailOneLine && v.detailInside && v.detailCount === 8, JSON.stringify({ n: v.detailCount, one: v.detailOneLine, inside: v.detailInside }));
+        ok(`${tag}   Codex plan: 99% (red) and 16%, with its reading's age`,
+           v.planRows.length === 2 && /^bad:5 h99%$/.test(v.planRows[0]) && /^ok:week16%$/.test(v.planRows[1]) && /Read 2h ago/.test(v.plan), JSON.stringify([v.planRows, v.plan]));
+        ok(`${tag}   Totals has a Codex column (prompts left empty, never 0)`,
+           JSON.stringify(v.table) === JSON.stringify([['requests', '72K', '762'], ['sessions', '58', '40'], ['prompts', '4,812', ''], ['days', '14', '5'], ['output', '62.4M', '639K'], ['thinking', '0', '138K']]), JSON.stringify(v.table));
+        ok(`${tag}   context efficiency for both (Codex ${v.effCx})`, v.effCx === '93.7%');
+        ok(`${tag}   mirrored daily (${v.dailyCx} Codex days) and hours (${v.hoursCxBars} Codex hours), labelled`,
+           v.dailyCx === 5 && v.hoursCxBars === CX_HOUR.filter(Boolean).length && v.mirrorKeys === 6);
+        ok(`${tag}   models and projects list Codex under "Codex, its own scale" (${v.modelsCx} and ${v.projectsCx})`,
+           v.modelsCx === 3 && v.projectsCx === 2 && v.groups.length === 2 && v.groups.every((t) => t === 'Codex, its own scale'));
+        ok(`${tag}   constellation rings the stars Codex worked on (${(v.ringed || []).join(', ')})`,
+           Array.isArray(v.ringed) && v.ringed.length === 2 && v.ringed.includes('muchbetter-client-wall') && v.ringed.includes('pickleplay-south-africa'));
+      }
+      if (cfg.name === 'detailed-off') {
+        const diff = sameRects(v.panels, BEFORE_CODEX[`${size.w}x${size.h}`]);
+        ok(`${tag}   exactly the dashboard before Codex: same ${v.panels.length} panel rectangles`, diff === '', diff);
+        ok(`${tag}   no Codex furniture on screen, no ring`, v.cxShown === 0 && Array.isArray(v.ringed) && v.ringed.length === 0, `${v.cxShown} shown, ringed ${JSON.stringify(v.ringed)}`);
+      }
+      if (cfg.name === 'simple') {
+        ok(`${tag}   two engine cards side by side (${v.bigCl} and ${v.bigCx})`, v.sideBySide && v.bigCl === '26.10B' && v.bigCx === '55.07M');
+        ok(`${tag}   every number one line and inside its card (${v.simpleCount})`, v.simpleOneLine && v.simpleInside && v.simpleCount === 8);
+        ok(`${tag}   requests today ${v.todayCl} and ${v.todayCx}, Codex cost ${v.costSimpleCx}`, v.todayCl === '2,685' && v.todayCx === '101' && v.costSimpleCx === '$65.78');
+        ok(`${tag}   Codex plan limits 99% and 16% with reset times; Claude says it has none on disk`,
+           v.limitRows.length === 2 && /^bad:5-hour window99%resets /.test(v.limitRows[0]) && /^ok:This week16%resets /.test(v.limitRows[1]) &&
+           /Plus plan\. Read at .+ \(2h ago\), when Codex last ran\./.test(v.limits) && /no plan limits on disk/.test(v.nolimits || ''), JSON.stringify([v.limitRows, v.limits, v.nolimits]));
+        ok(`${tag}   two lanes on one axis, and "${v.handoff}"`, v.lanes === 2 && v.laneMarks === 9 && v.handoff === 'Claude started 35 of 40 Codex sessions' && v.sparkCx === 5);
+      }
+      if (cfg.name === 'simple-off') {
+        ok(`${tag}   one Claude card across the full width (${v.bigCl}), one lane, no hand-off line`,
+           v.clFull && v.engines.join() === 'true,false' && v.lanes === 1 && v.handoff === null && v.bigCl === '26.10B');
+        ok(`${tag}   its numbers one line and inside (${v.simpleCount})`, v.simpleOneLine && v.simpleInside && v.simpleCount === 4);
+      }
+    }
+  }
+  ok(`every click saved through updateSettings (${saved.length - savesBefore} saves)`,
+     saved.slice(savesBefore).filter((x) => 'statsView' in x || 'showCodex' in x).length === 3);
+
+  // The saved choice is applied from a state push, as on load and on the other monitor.
+  await measure(win, { w: 1920, h: 1080 });
+  const pushedView = state(1920, 1080);
+  pushedView.settings.statsView = 'detailed';
+  pushedView.settings.showCodex = false;
+  win.webContents.send('wall:state', pushedView);
+  await wait(300);
+  const afterPush = await statsState();
+  const cPush = await win.webContents.executeJavaScript(CONTROLS);
+  ok('a state push applies the saved view and Codex choice, controls included',
+     afterPush.view === 'detailed' && afterPush.codex === 'off' && cPush.on.join() === 'detailed' && cPush.chipOn === 'off', JSON.stringify([afterPush, cPush]));
+  pushedView.settings.showCodex = true;
+  win.webContents.send('wall:state', pushedView);
+  await wait(300);
+  ok('and back on', (await statsState()).codex === 'on');
+
+  // A window whose reset time has passed shows as reset, never its stale percent.
+  const resetIdx = { ...idx, codex: codexFixture(Date.now(), { resetPast: true }) };
+  win.webContents.send('wall:usage', resetIdx);
+  await wait(400);
+  const rd = await win.webContents.executeJavaScript(VIEW);
+  ok(`detailed: a 5-hour window that has reset reads "${(rd.planRows[0] || '').split(':').slice(1).join(':')}", not 99%`,
+     rd.planRows.length === 2 && /^reset:5 hreset at /.test(rd.planRows[0]) && !/99/.test(rd.plan) && /^ok:week16%$/.test(rd.planRows[1]), JSON.stringify(rd.planRows));
+  await clickEl('#wall-actions .wall-seg-btn[data-view="simple"]');
+  await wait(1400);
+  const rs = await win.webContents.executeJavaScript(VIEW);
+  if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'simple-reset-1920x1080.png'), (await win.webContents.capturePage()).toPNG());
+  ok('simple: the same window reads as reset, not 99%',
+     rs.limitRows.length === 2 && /^reset:5-hour windowreset at .+, not read since$/.test(rs.limitRows[0]) && !/99%/.test(rs.limits), JSON.stringify(rs.limitRows));
+
+  // A plan window resets while the stats are on screen: shown as reset at that moment, not up to 20 s later.
+  const firstRow = async () => (await win.webContents.executeJavaScript(VIEW)).limitRows[0] || '';
+  const resetsSoon = (ms) => {
+    const cx = codexFixture(Date.now());
+    cx.limits.fiveHour.resetsAt = Date.now() + ms;
+    return { ...idx, codex: cx };
+  };
+  win.webContents.send('wall:usage', resetsSoon(1500));
+  await wait(500);
+  ok('simple: a 5-hour window still reads as its percent before it resets', /^bad:5-hour window99%/.test(await firstRow()), await firstRow());
+  await wait(1500);
+  ok('simple: and as reset 2 s later, long before the 20 s clock would have said so', /^reset:5-hour window/.test(await firstRow()), await firstRow());
+
+  // Hidden when it resets, then shown again: repainted on becoming visible, not on the next 20 s tick.
+  win.webContents.send('wall:usage', resetsSoon(2000));
+  await wait(300);
+  await clickEl('#mode-switch .mode-btn[data-mode="clients"]');
+  await wait(2600);
+  await clickEl('#mode-switch .mode-btn[data-mode="stats"]');
+  await wait(250);
+  ok('a window that reset while the stats were hidden reads as reset the moment they are shown', /^reset:5-hour window/.test(await firstRow()), await firstRow());
+  const planNowhere = await win.webContents.executeJavaScript(`(() => document.querySelector('.stats').dataset.view)()`);
+  ok('and the view is still the simple one', planNowhere === 'simple', planNowhere);
+
+  // The unpriced caveat and the all-unpriced cost, in the simple view, for both engines.
+  const gaps = () => win.webContents.executeJavaScript(`(() => {
+    const shown = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
+    const one = (sel) => {
+      const e = document.querySelector(sel);
+      if (!shown(e)) return null;
+      const p = e.closest('.panel'), r = e.getBoundingClientRect(), b = p.getBoundingClientRect();
+      return { text: e.textContent, oneLine: r.height <= parseFloat(getComputedStyle(e).fontSize) * 1.6, inside: r.left >= b.left - 0.5 && r.right <= b.right + 0.5 && r.bottom <= b.bottom + 0.5 };
+    };
+    return { gapCl: one('.engine-cl .eng-gap'), gapCx: one('.engine-cx .eng-gap'), costCl: one('.engine-cl .eng-cost .eng-num'), costCx: one('.engine-cx .eng-cost .eng-num') };
+  })()`);
+  const base = await gaps();
+  ok('simple: with every token priced there is no caveat and both costs show', base.gapCl === null && base.gapCx === null && !!base.costCl && !!base.costCx, JSON.stringify(base));
+  const part = { ...idx, totals: { ...idx.totals, unpricedTokens: 1_500_000 }, codex: { ...codexFixture(Date.now()), totals: { ...cxTotals(1), unpricedTokens: 2_000_000 } } };
+  win.webContents.send('wall:usage', part);
+  await wait(500);
+  const g1 = await gaps();
+  ok('simple: Claude\'s card says how many tokens from an unpriced model are not counted, and keeps its cost',
+     g1.gapCl && /^1\.50M tokens from an unpriced model are not counted$/.test(g1.gapCl.text) && g1.gapCl.oneLine && g1.gapCl.inside && !!g1.costCl, JSON.stringify(g1.gapCl));
+  ok('simple: so does Codex\'s, in the detailed view\'s words, and keeps its cost',
+     g1.gapCx && /^Codex: 2\.00M tokens from an unpriced model are not counted$/.test(g1.gapCx.text) && g1.gapCx.oneLine && g1.gapCx.inside && !!g1.costCx, JSON.stringify(g1.gapCx));
+  const allClaude = idx.totals.input + idx.totals.output + idx.totals.cacheCreate + idx.totals.cacheRead;
+  const every = { ...idx, totals: { ...idx.totals, unpricedTokens: allClaude }, codex: { ...codexFixture(Date.now()), totals: { ...cxTotals(1), unpricedTokens: CX_TOTAL } } };
+  win.webContents.send('wall:usage', every);
+  await wait(500);
+  const g2 = await gaps();
+  ok('simple: with every token unpriced the cost is hidden, never $0.00, and the caveat stays',
+     g2.costCl === null && g2.costCx === null && !!g2.gapCl && !!g2.gapCx, JSON.stringify(g2));
+  win.webContents.send('wall:usage', idx);
+  await wait(400);
+
+  // No Codex data at all: no chip, and every view as it was.
+  win.webContents.send('wall:usage', { ...idx, codex: undefined });
+  await wait(400);
+  const none = await win.webContents.executeJavaScript(CONTROLS);
+  const noneView = await win.webContents.executeJavaScript(VIEW);
+  ok('with no Codex data the chip is not in the DOM at all', none.chipInDom === false && none.seg);
+  ok('and the simple view is one Claude card and one lane', (await statsState()).codex === 'off' && noneView.clFull && noneView.lanes === 1);
+  await clickEl('#wall-actions .wall-seg-btn[data-view="detailed"]');
+  await wait(1400);
+  for (const size of [{ w: 1920, h: 1080 }, { w: 1366, h: 768 }]) {
+    await measure(win, size);
+    const nv = await win.webContents.executeJavaScript(VIEW);
+    if (SHOTS) fs.writeFileSync(path.join(SHOTS, `detailed-absent-${size.w}x${size.h}.png`), (await win.webContents.capturePage()).toPNG());
+    const diff = sameRects(nv.panels, BEFORE_CODEX[`${size.w}x${size.h}`]);
+    ok(`${size.w}x${size.h}   detailed with no Codex data is the dashboard before Codex`, diff === '' && nv.cxShown === 0, diff || `${nv.cxShown} Codex elements shown`);
+  }
+  win.webContents.send('wall:usage', idx);
+  await wait(400);
+  ok('the chip comes back when Codex data arrives', (await win.webContents.executeJavaScript(CONTROLS)).chip === true);
+
+  // A payload with no lane at all, from the very first paint: no empty "Today, side by side" panel.
+  usageOverride = { ...idx, todaySlots: undefined, codex: { ...codexFixture(Date.now()), todaySlots: undefined } };
+  await win.loadFile(RENDERER);
+  await wait(2600);
+  await clickEl('#wall-actions .wall-seg-btn[data-view="simple"]');
+  await wait(1400);
+  const noLanes = await win.webContents.executeJavaScript(`(() => {
+    const shown = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
+    const p = document.querySelector('.today-panel');
+    return { panel: shown(p), on: p && p.dataset.on, lanes: [...document.querySelectorAll('.lanes .lane')].filter(shown).length, cards: [...document.querySelectorAll('.engine')].filter(shown).length, view: document.querySelector('.stats').dataset.view };
+  })()`);
+  ok('a first payload with no todaySlots shows no empty Today panel', noLanes.view === 'simple' && noLanes.panel === false && noLanes.on === 'off' && noLanes.lanes === 0 && noLanes.cards === 2, JSON.stringify(noLanes));
+  usageOverride = null;
+
 
   win.destroy();
   console.log(`\n${pass} passed, ${fail} failed\n`);

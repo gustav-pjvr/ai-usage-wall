@@ -109,6 +109,14 @@ ok('defaults to the constellation', normaliseSettings({}).topPanel === 'constell
 ok('the live trace is kept when chosen', normaliseSettings({ topPanel: 'throughput' }).topPanel === 'throughput');
 ok('anything else falls back to the constellation', normaliseSettings({ topPanel: 'clients' }).topPanel === 'constellation');
 
+console.log('\nsettings: the stats view and the Codex toggle');
+ok('the wall opens on the detailed view', normaliseSettings({}).statsView === 'detailed');
+ok('simple is kept when chosen', normaliseSettings({ statsView: 'simple' }).statsView === 'simple');
+ok('anything else falls back to detailed', normaliseSettings({ statsView: 'SIMPLE' }).statsView === 'detailed');
+ok('Codex is shown by default', normaliseSettings({}).showCodex === true);
+ok('off is kept', normaliseSettings({ showCodex: false }).showCodex === false);
+ok('only a real false turns it off', normaliseSettings({ showCodex: 0 }).showCodex === true && normaliseSettings({ showCodex: 'false' }).showCodex === true);
+
 console.log('\nsettings: round trip');
 const once = normaliseSettings({ mode: 'clients', opacity: 0.5, notes: 'hi', monitors: [2] });
 ok('normalising twice changes nothing', same(normaliseSettings(once), once));

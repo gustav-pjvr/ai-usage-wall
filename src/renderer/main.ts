@@ -38,6 +38,9 @@ interface WallState {
     backgroundOpacity: number;
     notes: string;
     topPanel: 'constellation' | 'throughput';
+    /** Claude and Codex side by side (src/shared/codex-view.ts). Optional: an older main omits them. */
+    statsView?: 'detailed' | 'simple';
+    showCodex?: boolean;
   };
   capability: { tier: 'low' | 'balanced' | 'high'; cores: number; memoryGb: number; gpuAccelerated: boolean; reasons: string[] };
   focusMode: boolean;
@@ -121,6 +124,36 @@ statsView.onTopPanel = (mode) => {
   );
 };
 statsMount.appendChild(statsView.root);
+
+/*
+ * Simple | Detailed and Codex on or off (docs/design/codex-side-by-side.md).
+ * Saved like the top panel choice, so they survive a restart and a second
+ * monitor follows. A click applies at once; the state push that follows the
+ * save repeats the same values, and applyViewPrefs is idempotent.
+ */
+let viewPref: 'detailed' | 'simple' = 'detailed';
+let codexPref = true;
+/** The values last read from settings, so a resize re-render does not re-apply a stale state. */
+let lastSavedView: 'detailed' | 'simple' | null = null;
+let lastSavedCodex: boolean | null = null;
+function applyViewPrefs(): void {
+  statsView.setPrefs(viewPref, codexPref);
+  wallActions.setPrefs(viewPref, codexPref);
+}
+wallActions.onView = (v) => {
+  viewPref = v;
+  applyViewPrefs();
+  void window.wall.updateSettings({ statsView: v }).catch((err: unknown) =>
+    console.error('[renderer] could not save the dashboard view:', err),
+  );
+};
+wallActions.onCodex = (on) => {
+  codexPref = on;
+  applyViewPrefs();
+  void window.wall.updateSettings({ showCodex: on }).catch((err: unknown) =>
+    console.error('[renderer] could not save the Codex choice:', err),
+  );
+};
 
 /*
  * The shareable build has one view, so the second one is REMOVED rather than
@@ -626,6 +659,21 @@ function render(): void {
   // in both editions and both views.
   notesBar.setText(state.settings.notes);
   statsView.setTopPanel(state.settings.topPanel ?? 'constellation');
+  /*
+   * Defaults per the contract: the wall opens on the detailed view, with Codex
+   * shown. Applied only when the SAVED values change: render() also runs on
+   * every resize, and re-reading a state that predates a click would undo the
+   * click until the save's own push arrives.
+   */
+  const savedView = state.settings.statsView === 'simple' ? 'simple' : 'detailed';
+  const savedCodex = state.settings.showCodex !== false;
+  if (savedView !== lastSavedView || savedCodex !== lastSavedCodex) {
+    lastSavedView = savedView;
+    lastSavedCodex = savedCodex;
+    viewPref = savedView;
+    codexPref = savedCodex;
+    applyViewPrefs();
+  }
   // Everything past the body-level settings is the client wall, which the
   // shareable build does not have. Laying out zero cards on every state push
   // and every resize is work for nobody.

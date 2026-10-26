@@ -264,6 +264,27 @@ console.log('\nprojection: skipping frames a screen would not see change');
      frameKey(a) !== frameKey(toWire(index, { ...opts, shareProjectNames: false })));
 }
 
+console.log('\na T3 Code scratch folder is labelled, not shown as a prompt fragment (2026-10-26)');
+{
+  const m = labelProjects(['C:\\u\\.t3\\scratch\\2026-10-23-these-are-the-components-i-3365f074', 'C:\\u\\.t3\\scratch\\misc', 'C:\\w\\fps-game']);
+  const v = [...m.values()];
+  ok('a dated scratch folder reads "T3 scratch, 23 Oct"', v[0] === 'T3 scratch, 23 Oct', JSON.stringify(v));
+  ok('an undated one reads "T3 scratch"; a normal folder is unchanged', v[1] === 'T3 scratch' && v[2] === 'fps-game', JSON.stringify(v));
+}
+
+console.log('\ntwo project paths with the same label keep their cost (2026-10-26)');
+{
+  const t = (cost) => ({ input: 1, output: 1, cacheCreate: 0, cacheRead: 0, thinking: 0, requests: 1, webSearch: 0, webFetch: 0, costUsd: cost, unpricedTokens: 5 });
+  const twin = { projects: {
+    'c:\\a\\site': { ...t(2.5), lastSeen: '2026-10-01', display: 'C:\\a\\site' },
+    'c:\\a\\site\\.': { ...t(1.25), lastSeen: '2026-10-02', display: 'C:\\a\\site' },
+  } };
+  const w = toWire(twin, { shareProjectNames: true, sourceLabel: '', indexing: false });
+  const only = Object.values(w.projects);
+  ok('the merged label carries both costs and both unpriced counts',
+     only.length === 1 && Math.abs(only[0].costUsd - 3.75) < 1e-9 && only[0].unpricedTokens === 10, JSON.stringify(only));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 await fs.rm(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

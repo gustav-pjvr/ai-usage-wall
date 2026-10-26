@@ -135,6 +135,24 @@ console.log('\na record that is half written when the size is taken');
      `got ${two.index.totals.requests}`);
 }
 
+console.log('\na COMPLETE record whose newline is not written yet (2026-10-26)');
+{
+  /*
+   * Unlike the fragment above, this record already parses. It used to be
+   * counted when first seen AND again when re-read after its newline arrived.
+   */
+  const f3 = path.join(PROJ, 'no-newline.jsonl');
+  const before = (await refreshIndex(emptyIndex())).index.totals.requests;
+  await fs.writeFile(f3, rec(1) + rec(2).trimEnd(), 'utf8');
+  const one = await refreshIndex(emptyIndex());
+  ok('the record without its newline is not counted yet', one.index.totals.requests === before + 1,
+     `got ${one.index.totals.requests - before}`);
+  await fs.appendFile(f3, '\n', 'utf8');
+  const two = await refreshIndex(one.index);
+  ok('and once its newline arrives it is counted exactly once', two.index.totals.requests === before + 2,
+     `got ${two.index.totals.requests - before}`);
+}
+
 console.log('\nindex version 6: five-minute slots per file, and local active days');
 {
   const { loadIndex, saveIndex, INDEX_VERSION } = require(out);

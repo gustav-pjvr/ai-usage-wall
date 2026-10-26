@@ -32,6 +32,11 @@
  *
  * Set CSW_SHOTS to a directory to also write a PNG per size. Measurements say
  * nothing overflows; a picture says whether it still looks like the dashboard.
+ *
+ * Set CSW_SITE_SHOT to a directory to write the download page's screenshots
+ * (site-<view>.png, 1920x1080) for publishing: the fixture's project names are
+ * swapped for neutral ones, the version label is the real one and the note is
+ * cleared. Checks that name fixture projects then fail; use it for pictures only.
  */
 
 const { app, BrowserWindow, ipcMain } = require('electron');
@@ -76,6 +81,18 @@ app.commandLine.appendSwitch('force-color-profile', 'srgb');
 
 const SHOTS = process.env.CSW_SHOTS || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+const SITE_SHOT = process.env.CSW_SITE_SHOT || '';
+if (SITE_SHOT) fs.mkdirSync(SITE_SHOT, { recursive: true });
+/** Neutral names for a public picture: the fixture's are real client projects. */
+const SITE_NAMES = {
+  'muchbetter-client-wall': 'travel-game',
+  harbourofstreamers: 'polytrack-analysis',
+  'pixelplay-north-coast': 'physics-game',
+  'supabase-keepalive': 'notes-api',
+  'b2mx-website-production': 'portfolio-site',
+  'keystone-football-migration': 'asset-pipeline',
+};
+const siteName = (n) => (SITE_SHOT && SITE_NAMES[n]) || n;
 
 const saved = [];
 let seenCalls = 0;
@@ -235,7 +252,7 @@ function fixture(emptyIndex) {
     'supabase-keepalive',
     'b2mx-website-production',
     'keystone-football-migration',
-  ];
+  ].map(siteName);
   // Keyed like the real index: the lowercased cwd, with the original casing in
   // `display`. Uppercase keys here once meant the active project and the links
   // were never exercised, because nothing could find them by the real key.
@@ -359,8 +376,8 @@ const cxTotals = (k) => ({
 /** Codex's projects: two share a working directory with Claude's fixture projects, so two stars get the ring. */
 const CX_PROJECTS = [
   ['C:\\Users\\Demo User\\.t3\\scratch\\2026-10-23-these-are-the-components-i-3365f074', 15_521_714],
-  [WS + 'muchbetter-client-wall', 10_352_367],
-  [WS + 'pixelplay-north-coast', 5_658_907],
+  [WS + siteName('muchbetter-client-wall'), 10_352_367],
+  [WS + siteName('pixelplay-north-coast'), 5_658_907],
   ['C:\\Users\\Demo User\\Desktop\\Claude WorkSpace', 4_086_706],
 ];
 const CX_HOUR = [2957076, 709811, 298733, 0, 0, 0, 0, 697549, 0, 4373411, 14109279, 8423428, 84671, 0, 1636257, 1428774, 0, 621821, 4229754, 0, 7735453, 2556417, 3507796, 1695998];
@@ -452,7 +469,7 @@ const state = (w, h) => ({
   capability: { tier: 'high', cores: 8, memoryGb: 16, gpuAccelerated: true, reasons: [] },
   focusMode: false,
   mode: 'stats',
-  appVersion: '0.9.11',
+  appVersion: SITE_SHOT ? require('../package.json').version : '0.9.11',
   effectiveLayerMode: 'desktop',
   inputReachable: true,
   display: { id: 1, width: w, height: h, scaleFactor: 1, isPrimary: true, index: 0, total: 1 },
@@ -1405,6 +1422,11 @@ app.whenReady().then(async () => {
     { name: 'simple', view: 'simple', codex: true },
   ];
   const savesBefore = saved.length;
+  // A public picture carries no note: put back the empty one an earlier check replaced.
+  if (SITE_SHOT) {
+    win.webContents.send('wall:state', state(1920, 1080));
+    await wait(300);
+  }
   for (const cfg of CONFIGS) {
     // Get there with real clicks on the controls, from whatever is on screen now.
     await measure(win, { w: 1920, h: 1080 });
@@ -1426,6 +1448,9 @@ app.whenReady().then(async () => {
       const r = await measure(win, size);
       const tag = `${cfg.name.padEnd(12)} ${size.w}x${size.h}`;
       if (SHOTS) fs.writeFileSync(path.join(SHOTS, `${cfg.name}-${size.w}x${size.h}.png`), (await win.webContents.capturePage()).toPNG());
+      if (SITE_SHOT && size.w === 1920 && size.h === 1080 && cfg.codex) {
+        fs.writeFileSync(path.join(SITE_SHOT, `site-${cfg.name}.png`), (await win.webContents.capturePage()).toPNG());
+      }
       if (r.fatal) { ok(tag, false, r.fatal); continue; }
       ok(`${tag}   everything inside its panel, nothing overflowing`, r.findings.length === 0,
          r.findings.slice(0, 6).join('\n        ') + (r.findings.length > 6 ? `\n        (+${r.findings.length - 6} more)` : ''));

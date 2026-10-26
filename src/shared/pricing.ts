@@ -91,6 +91,45 @@ const BEFORE_REPRICE = new Map<ModelPrice, ModelPrice>([
   [SONNET_55, SONNET_5],
 ]);
 
+/*
+ * OpenAI models, for Codex (docs/design/codex-side-by-side.md section 3).
+ *
+ * Read from developers.openai.com/api/docs/pricing on 2026-10-26: standard
+ * tier, short context, USD per 1M tokens, input / cached input / output.
+ * Expressed in this table's own terms, a cached-input price is a fraction of
+ * the input price, and a cache write at the 30-minute rate is 1.25x input,
+ * which is exactly WRITE_5M below: Codex records do not say which TTL a write
+ * used, so every write is priced at the 30-minute rate (none so far).
+ *
+ * Reasoning is inside `output_tokens` in every Codex record, so it is billed
+ * once, at the output rate. Long-context pricing (over 272K input tokens)
+ * cannot apply: Codex's context window is 258,400.
+ *
+ * Exact ids only, plus a dated snapshot of the same id (below). No prefix
+ * rules: `gpt-6-sol` is a different model from `gpt-6.1-sol` with a price of
+ * its own, and a guessed price is worse than an honest "unpriced". None of
+ * these has a REPRICED_AT history.
+ */
+/** gpt-6-astra: $10 / $1 / $50. */
+const GPT_6_ASTRA: ModelPrice = { input: 10, output: 50, cacheReadFactor: 0.1 };
+/** gpt-6.1-sol: $2 / $0.10 / $10. */
+const GPT_61_SOL: ModelPrice = { input: 2, output: 10, cacheReadFactor: 0.05 };
+/** gpt-6-luna: $0.10 / $0.01 / $0.50. */
+const GPT_6_LUNA: ModelPrice = { input: 0.1, output: 0.5, cacheReadFactor: 0.1 };
+
+const OPENAI: Record<string, ModelPrice> = {
+  'gpt-6-astra': GPT_6_ASTRA,
+  'gpt-6.1-sol': GPT_61_SOL,
+  'gpt-6-luna': GPT_6_LUNA,
+};
+
+/** `gpt-6-astra-2026-10-01` is the same model as `gpt-6-astra`; anything else is not. */
+function openAiPrice(model: string): ModelPrice | null {
+  if (Object.prototype.hasOwnProperty.call(OPENAI, model)) return OPENAI[model];
+  const dated = /^(.+)-\d{4}-\d{2}-\d{2}$/.exec(model);
+  return dated && Object.prototype.hasOwnProperty.call(OPENAI, dated[1]) ? OPENAI[dated[1]] : null;
+}
+
 /** Exact ids first. Anything else falls through to the prefix rules below. */
 const EXACT: Record<string, ModelPrice> = {
   'claude-fable-5-1': FABLE_51,
@@ -158,6 +197,7 @@ function currentPrice(model: string): ModelPrice | null {
   if (!model) return null;
   const exact = EXACT[model];
   if (exact) return exact;
+  if (model.startsWith('gpt-')) return openAiPrice(model);
   // Longest prefix first, so `claude-fable-5-1` never matches `claude-fable-5`.
   for (const [p, price] of [...PREFIXES].sort((a, b) => b[0].length - a[0].length)) {
     if (model.startsWith(p)) return price;

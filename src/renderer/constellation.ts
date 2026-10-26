@@ -78,6 +78,15 @@ export class ConstellationPanel {
    * this panel exists under: repaint on change, never on a timer.
    */
   private signature = '';
+  /**
+   * Names (project keys and labels) Codex also worked in, or null with Codex
+   * off. A star matching one is ringed in Codex violet. Part of the signature,
+   * so toggling Codex repaints once and a push that changes nothing does not.
+   */
+  private codex: Set<string> | null = null;
+  private codexSig = '';
+  /** Labels of the stars that were ringed on the last paint, for the render suite. */
+  private ringed: string[] = [];
 
   constructor(private readonly tip: TipHost) {
     this.node = el('div', 'const-wrap');
@@ -93,7 +102,10 @@ export class ConstellationPanel {
     );
     const sky = el('div', 'const-sky');
     sky.append(this.canvas, this.pulse, this.empty);
-    this.node.append(sky, this.caption);
+    // Shown only with Codex on screen (the `cx` rule in stats.css): what the violet ring means.
+    const cxKey = el('div', 'const-cx cx');
+    cxKey.append(el('span', 'const-cx-cl', 'Claude work'), el('span', 'const-cx-ring', 'ringed: Codex worked here too'));
+    this.node.append(sky, this.caption, cxKey);
 
     new ResizeObserver(() => {
       this.dirty = true;
@@ -107,6 +119,7 @@ export class ConstellationPanel {
     (window as unknown as { __cswConstellation?: () => unknown }).__cswConstellation = () => ({
       layout: this.layout,
       labels: this.labels,
+      ringed: this.ringed,
       paintMs: this.lastPaintMs,
       canvas: this.canvas.getBoundingClientRect().toJSON(),
     });
@@ -156,6 +169,15 @@ export class ConstellationPanel {
     ]);
     if (signature === this.signature) return;
     this.signature = signature;
+    this.dirty = true;
+    this.schedule();
+  }
+
+  setCodex(names: Set<string> | null): void {
+    const sig = names ? [...names].sort().join('\u0000') : '';
+    if (sig === this.codexSig && (names === null) === (this.codex === null)) return;
+    this.codexSig = sig;
+    this.codex = names;
     this.dirty = true;
     this.schedule();
   }
@@ -227,6 +249,22 @@ export class ConstellationPanel {
       ctx.fillStyle = `oklch(${(0.45 + s.brightness * 0.35).toFixed(3)} 0.14 ${s.hue.toFixed(0)} / ${(0.35 + s.brightness * 0.65).toFixed(3)})`;
       roundRect(ctx, s.x - half, s.y - half, s.size, s.size, r);
       ctx.fill();
+    }
+
+    // Codex worked here too: a violet ring, a little outside the star, clamped into the sky.
+    this.ringed = [];
+    if (this.codex) {
+      ctx.strokeStyle = 'oklch(0.74 0.15 295)';
+      ctx.lineWidth = 1.6;
+      for (const s of layout.stars) {
+        if (!this.codex.has(s.key.toLowerCase()) && !this.codex.has(s.label)) continue;
+        this.ringed.push(s.label);
+        const side = s.size + 7;
+        const x = Math.max(1, Math.min(w - side - 1, s.x - side / 2));
+        const y = Math.max(1, Math.min(h - side - 1, s.y - side / 2));
+        roundRect(ctx, x, y, side, side, Math.max(3, side * 0.3));
+        ctx.stroke();
+      }
     }
 
     // In step with the rest of the dashboard's label tier: 9 to 12px.

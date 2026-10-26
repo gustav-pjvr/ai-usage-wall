@@ -66,6 +66,17 @@ export interface Settings {
    * losing the trace, so it is a toggle in the panel's header.
    */
   topPanel: 'constellation' | 'throughput';
+  /**
+   * The stats dashboard: the detailed grid (the wall as it has always been) or
+   * the simple side-by-side cards (docs/design/codex-side-by-side.md). Gustav:
+   * the wall opens on the detailed view.
+   */
+  statsView: 'detailed' | 'simple';
+  /**
+   * Whether Codex is shown beside Claude. Only matters on a wall that has Codex
+   * data; one without behaves as if this were off and shows no toggle.
+   */
+  showCodex: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -89,6 +100,8 @@ const DEFAULTS: Settings = {
   debug: false,
   notes: '',
   topPanel: 'constellation',
+  statsView: 'detailed',
+  showCodex: true,
 };
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
@@ -140,6 +153,8 @@ export function normaliseSettings(raw: unknown): Settings {
     notes:
       typeof r.notes === 'string' ? Array.from(r.notes).slice(0, NOTES_MAX).join('') : DEFAULTS.notes,
     topPanel: r.topPanel === 'throughput' ? 'throughput' : DEFAULTS.topPanel,
+    statsView: r.statsView === 'simple' ? 'simple' : DEFAULTS.statsView,
+    showCodex: r.showCodex !== false,
   };
 }
 

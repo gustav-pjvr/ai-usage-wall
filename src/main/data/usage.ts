@@ -238,7 +238,7 @@ export interface UsageIndex {
   unavailableReason?: string;
 }
 
-const emptyTotals = (): TokenTotals => ({
+export const emptyTotals = (): TokenTotals => ({
   input: 0,
   output: 0,
   cacheCreate: 0,
@@ -251,7 +251,7 @@ const emptyTotals = (): TokenTotals => ({
   unpricedTokens: 0,
 });
 
-function addInto(target: TokenTotals, u: TokenTotals): void {
+export function addInto(target: TokenTotals, u: TokenTotals): void {
   target.input += u.input;
   target.output += u.output;
   target.cacheCreate += u.cacheCreate;
@@ -269,7 +269,7 @@ export function emptyContrib(): FileContribution {
 }
 
 /** The aggregates a record lands in, shared by the index and each file's contribution. */
-type Aggregates = Pick<UsageIndex, 'totals' | 'daily' | 'models' | 'projects' | 'sessions' | 'activeDays'>;
+export type Aggregates = Pick<UsageIndex, 'totals' | 'daily' | 'models' | 'projects' | 'sessions' | 'activeDays'>;
 
 /**
  * Fold one record into a set of aggregates.
@@ -330,7 +330,7 @@ export function fold(
  * Add a whole file's contribution back into aggregates, for a file a rebuild
  * could not re-read. Sessions are unioned, since one id can span files.
  */
-function absorb(into: Aggregates, c: FileContribution): void {
+export function absorb(into: Aggregates, c: FileContribution): void {
   addInto(into.totals, c.totals);
   for (const [k, v] of Object.entries(c.daily)) addInto((into.daily[k] ??= emptyTotals()), v);
   for (const [k, v] of Object.entries(c.models)) addInto((into.models[k] ??= emptyTotals()), v);
@@ -449,6 +449,15 @@ async function ingestFile(
       lastLineBytes = Buffer.byteLength(line, 'utf8') + 1;
       consumed += lastLineBytes;
       sawAnyLine = true;
+      /*
+       * A line with no newline after it yet is not counted, even when it
+       * already parses. Its bytes are left below the offset (see after the
+       * loop), so it is read again next pass, and counting it now as well
+       * counted that response twice (found 2026-10-26 by the Codex reader's
+       * build; on real data it had never happened, because Claude Code
+       * writes a record and its newline together).
+       */
+      if (consumed > size - fromOffset) break;
       // Yield to the event loop periodically. The cold index is several seconds
       // of work and the wall must stay responsive while it runs.
       if (++processed % 2000 === 0) await new Promise((r) => setImmediate(r));
@@ -625,7 +634,7 @@ export interface RefreshOptions {
  * Absence from the directory listing is not evidence either, because
  * listTranscripts quietly skips any folder it cannot read.
  */
-async function isGone(p: string): Promise<boolean> {
+export async function isGone(p: string): Promise<boolean> {
   try {
     await fs.stat(p);
     return false;

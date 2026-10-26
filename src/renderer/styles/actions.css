@@ -550,3 +550,108 @@ body[data-mode='clients'] #wall-actions { display: none; }
   .wall-action,
   .dp-day { transition: none; }
 }
+
+
+/* ── Simple | Detailed, and the Codex chip ──────────────────────────────── */
+
+/*
+ * docs/design/codex-side-by-side.md and its mock: before Today, Any day and
+ * Milestones. Full strength rather than the dimmed action buttons, because
+ * they say which view this is. Clicks only, like everything up here. The
+ * chip is removed from the DOM when there is no Codex data.
+ */
+.wall-seg {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid oklch(1 0 0 / 0.09);
+  background: oklch(0.19 0.014 245 / 0.72);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+}
+
+.wall-seg-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: oklch(0.66 0.015 235);
+  font-family: inherit;
+  font-size: max(9px, calc(var(--u) * 11));
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding: calc(var(--u) * 5) calc(var(--u) * 12);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.25s cubic-bezier(0.22, 1, 0.36, 1), background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wall-seg-btn:hover:not(.is-on) { color: oklch(0.9 0.02 225); }
+
+.wall-seg-btn.is-on {
+  background: oklch(1 0 0 / 0.1);
+  color: oklch(0.96 0.01 220);
+  cursor: default;
+}
+
+.wall-codex {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 7);
+  padding: calc(var(--u) * 6) calc(var(--u) * 14);
+  border-radius: 999px;
+  border: 1px solid oklch(1 0 0 / 0.09);
+  background: oklch(0.19 0.014 245 / 0.72);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.3);
+  color: oklch(0.88 0.02 225);
+  font-family: inherit;
+  font-size: max(9px, calc(var(--u) * 11));
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wall-codex-dot {
+  width: max(5px, calc(var(--u) * 8));
+  height: max(5px, calc(var(--u) * 8));
+  border-radius: 50%;
+  background: oklch(0.74 0.15 295);
+}
+
+.wall-codex-track {
+  position: relative;
+  width: max(18px, calc(var(--u) * 26));
+  height: max(10px, calc(var(--u) * 14));
+  border-radius: 999px;
+  background: oklch(0.74 0.15 295 / 0.38);
+  transition: background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wall-codex-track::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: calc(100% - 2px - max(6px, calc(var(--u) * 10)));
+  width: max(6px, calc(var(--u) * 10));
+  height: max(6px, calc(var(--u) * 10));
+  border-radius: 50%;
+  background: oklch(0.8 0.13 295);
+  transform: translateY(-50%);
+  transition: left 0.25s cubic-bezier(0.22, 1, 0.36, 1), background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.wall-codex[data-on='off'] { color: oklch(0.72 0.015 230); }
+.wall-codex[data-on='off'] .wall-codex-track { background: oklch(1 0 0 / 0.12); }
+.wall-codex[data-on='off'] .wall-codex-track::after { left: 2px; background: oklch(0.62 0.015 240); }
+
+/* First Codex index still running: the choice is kept, nothing is shown yet. */
+.wall-codex[data-reading='on'] { opacity: 0.6; cursor: progress; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wall-seg-btn,
+  .wall-codex-track,
+  .wall-codex-track::after { transition: none; }
+}

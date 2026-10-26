@@ -29,6 +29,11 @@ export function labelProjects(paths: string[]): Map<string, string> {
 
   const out = new Map<string, string>();
   for (const p of paths) {
+    const scratch = scratchLabel(p);
+    if (scratch) {
+      out.set(p, scratch);
+      continue;
+    }
     const segs = segsOf(p);
     const leaf = segs.pop() || p;
     const ambiguous = (leafCounts.get(leaf.toLowerCase()) || 0) > 1 && segs.length > 0;
@@ -37,7 +42,24 @@ export function labelProjects(paths: string[]): Map<string, string> {
   return out;
 }
 
+/**
+ * T3 Code runs a thread with no project in a scratch folder named after the
+ * date and the first words of the prompt (`.t3\scratch\2026-10-23-these-are-...`).
+ * That name is a fragment of a prompt, not a project, so it is shown as
+ * "T3 scratch, 23 Oct" (Gustav saw the raw folder name in the design check,
+ * 2026-10-26). Null for any other path.
+ */
+function scratchLabel(p: string): string | null {
+  const segs = segsOf(p);
+  const i = segs.findIndex((s, k) => s.toLowerCase() === '.t3' && (segs[k + 1] ?? '').toLowerCase() === 'scratch');
+  if (i < 0) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(segs[i + 2] ?? '');
+  if (!m) return 'T3 scratch';
+  const when = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Number.isNaN(when.getTime()) ? 'T3 scratch' : `T3 scratch, ${when.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`;
+}
+
 /** One path, with no set to disambiguate against. */
 export function labelOf(path: string): string {
-  return segsOf(path).pop() || path;
+  return scratchLabel(path) ?? (segsOf(path).pop() || path);
 }

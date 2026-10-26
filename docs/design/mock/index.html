@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude Stats | Claude and Codex (design mock)</title>
+<script src="data.js"></script>
+<style>
+  :root {
+    --u: min(calc(100vw / 1920), calc(100vh / 1080));
+    --sig: oklch(0.78 0.14 195);        /* Claude: the wall's existing signal teal */
+    --cdx: oklch(0.74 0.15 295);        /* Codex: violet, clear of teal, green and amber */
+    --cost: oklch(0.86 0.13 155);
+    --warn: oklch(0.8 0.14 75);
+    --bad: oklch(0.72 0.17 25);
+    --panel-bg: oklch(0.175 0.016 245);
+    --panel-edge: oklch(1 0 0 / 0.075);
+    --ink: oklch(0.93 0.01 220);
+    --ink-soft: oklch(0.6 0.015 240);
+    --ink-dim: oklch(0.45 0.015 240);
+    --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+    --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    background: oklch(0.13 0.014 250);
+    color: var(--ink);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+  .wall { position: absolute; inset: 0; padding: calc(var(--u) * 80) calc(var(--u) * 26) calc(var(--u) * 30); }
+  .wall::before {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(oklch(1 0 0 / 0.045) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0 / 0.045) 1px, transparent 1px);
+    background-size: 64px 64px; opacity: 0.45;
+    mask-image: radial-gradient(120% 100% at 50% 0%, black 30%, transparent 85%);
+  }
+
+  /* ── Top chrome ───────────────────────────────────────────── */
+  .notes { position: absolute; top: calc(var(--u) * 10); left: calc(var(--u) * 26); font-family: var(--mono); font-size: calc(var(--u) * 13); color: oklch(0.85 0.01 220); }
+  .modes { position: absolute; top: calc(var(--u) * 38); left: 50%; transform: translateX(-50%); display: flex; padding: 3px; border-radius: 999px; background: oklch(0.2 0.02 220 / 0.8); border: 1px solid var(--panel-edge); }
+  .modes span { padding: calc(var(--u) * 6) calc(var(--u) * 16); border-radius: 999px; font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.1em; color: var(--ink-dim); }
+  .modes span.on { background: oklch(0.32 0.05 200); color: oklch(0.85 0.1 195); }
+  .actions { position: absolute; top: calc(var(--u) * 38); right: calc(var(--u) * 26); display: flex; gap: calc(var(--u) * 6); align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: calc(var(--u) * 7); padding: calc(var(--u) * 6) calc(var(--u) * 14); border-radius: 999px; border: 1px solid oklch(1 0 0 / 0.09); background: oklch(0.19 0.014 245 / 0.72); font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: oklch(0.78 0.02 225); }
+  .chip.dim { opacity: 0.55; }
+  .seg { display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid oklch(1 0 0 / 0.09); background: oklch(0.19 0.014 245 / 0.72); }
+  .seg span { padding: calc(var(--u) * 5) calc(var(--u) * 12); border-radius: 999px; font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.09em; color: var(--ink-dim); }
+  .seg span.on { background: oklch(1 0 0 / 0.1); color: var(--ink); }
+  .dot { width: calc(var(--u) * 8); height: calc(var(--u) * 8); border-radius: 50%; display: inline-block; }
+  .dot.c { background: var(--sig); } .dot.x { background: var(--cdx); }
+  .toggle { width: calc(var(--u) * 26); height: calc(var(--u) * 14); border-radius: 999px; background: oklch(0.74 0.15 295 / 0.35); position: relative; }
+  .toggle::after { content: ''; position: absolute; top: 2px; right: 2px; width: calc(var(--u) * 10); height: calc(var(--u) * 10); border-radius: 50%; background: var(--cdx); }
+  .toggle.off { background: oklch(1 0 0 / 0.1); } .toggle.off::after { right: auto; left: 2px; background: var(--ink-dim); }
+
+  /* ── Panels ───────────────────────────────────────────────── */
+  .panel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: calc(var(--u) * 14) calc(var(--u) * 16); border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--panel-edge); overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.22); }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 10); margin-bottom: calc(var(--u) * 10); }
+  .title { font-size: calc(var(--u) * 11.5); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: oklch(0.82 0.02 220); }
+  .tag { font-family: var(--mono); font-size: calc(var(--u) * 9.5); letter-spacing: 0.12em; padding: 2px 6px; border-radius: 4px; border: 1px solid; }
+  .tag.m { color: var(--sig); border-color: oklch(0.78 0.14 195 / 0.5); }
+  .tag.d { color: var(--warn); border-color: oklch(0.8 0.14 75 / 0.5); }
+  .label { font-size: max(8px, calc(var(--u) * 10.5)); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+  .note { font-size: max(8px, calc(var(--u) * 11)); color: var(--ink-soft); }
+  .num { font-family: var(--mono); font-weight: 700; letter-spacing: -0.01em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .c { color: var(--sig); } .x { color: var(--cdx); }
+  .who { display: inline-flex; align-items: center; gap: calc(var(--u) * 6); font-size: max(8px, calc(var(--u) * 10.5)); font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; }
+
+  /* ══ SIMPLE VIEW ═════════════════════════════════════════════ */
+  .simple { position: relative; height: 100%; display: grid; grid-template-rows: 1fr auto; gap: calc(var(--u) * 12); }
+  .engines { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--u) * 12); min-height: 0; }
+  body.nocodex .engines { grid-template-columns: 1fr; }
+  body.nocodex .engine.cx { display: none; }
+  .engine { padding: calc(var(--u) * 26) calc(var(--u) * 34); }
+  .engine .top { display: flex; justify-content: space-between; align-items: baseline; }
+  .engine .name { font-size: calc(var(--u) * 15); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; display: flex; align-items: center; gap: calc(var(--u) * 10); }
+  .engine .name .dot { width: calc(var(--u) * 11); height: calc(var(--u) * 11); }
+  .engine .models { font-family: var(--mono); font-size: calc(var(--u) * 12); color: var(--ink-soft); }
+  .engine .big { font-size: calc(var(--u) * 132); margin-top: calc(var(--u) * 26); }
+  body.nocodex .engine .big { font-size: calc(var(--u) * 150); }
+  .engine .bigsub { margin-top: calc(var(--u) * 12); font-size: calc(var(--u) * 14); color: var(--ink-soft); }
+  .engine .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: calc(var(--u) * 20); margin-top: calc(var(--u) * 34); padding-top: calc(var(--u) * 22); border-top: 1px solid oklch(1 0 0 / 0.07); }
+  .engine .row .num { font-size: calc(var(--u) * 34); }
+  .engine .row .label { margin-top: calc(var(--u) * 8); }
+  .engine .cost { color: var(--cost); }
+  .spark { margin-top: calc(var(--u) * 28); flex: 1 1 auto; min-height: calc(var(--u) * 92); position: relative; }
+  .spark svg { position: absolute; inset: 0; }
+  .spark svg { width: 100%; height: 100%; display: block; }
+  .sparkfoot { display: flex; justify-content: space-between; margin-top: calc(var(--u) * 6); font-family: var(--mono); font-size: max(8px, calc(var(--u) * 10.5)); color: var(--ink-dim); }
+  .limits { margin-top: calc(var(--u) * 18); padding-top: calc(var(--u) * 20); border-top: 1px solid oklch(1 0 0 / 0.07); display: grid; gap: calc(var(--u) * 12); }
+  .limit { display: grid; grid-template-columns: calc(var(--u) * 130) 1fr calc(var(--u) * 60) calc(var(--u) * 150); align-items: center; gap: calc(var(--u) * 14); }
+  .bar { height: calc(var(--u) * 10); border-radius: 999px; background: oklch(1 0 0 / 0.07); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 999px; }
+  .limit .num { font-size: calc(var(--u) * 20); text-align: right; }
+  .limits .asof { font-size: max(8px, calc(var(--u) * 11)); color: var(--ink-dim); }
+  .nolimits { margin-top: calc(var(--u) * 18); padding-top: calc(var(--u) * 20); border-top: 1px solid oklch(1 0 0 / 0.07); font-size: max(8px, calc(var(--u) * 12)); color: var(--ink-dim); line-height: 1.5; }
+
+  .today { padding: calc(var(--u) * 16) calc(var(--u) * 34) calc(var(--u) * 18); }
+  .lanes { display: grid; grid-template-columns: calc(var(--u) * 90) 1fr; row-gap: calc(var(--u) * 8); align-items: center; margin-top: calc(var(--u) * 6); }
+  .lane { height: calc(var(--u) * 26); position: relative; }
+  .lane svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .axis { grid-column: 2; display: flex; justify-content: space-between; font-family: var(--mono); font-size: max(8px, calc(var(--u) * 10.5)); color: var(--ink-dim); }
+  body.nocodex .lane-x, body.nocodex .lane-x-label, body.nocodex .handoff { display: none; }
+  .handoff { font-size: max(8px, calc(var(--u) * 12)); color: var(--ink-soft); }
+  .handoff b { color: var(--cdx); font-weight: 600; }
+
+  /* ══ DETAILED VIEW ═══════════════════════════════════════════ */
+  .grid { position: relative; height: 100%; display: grid; grid-template-columns: repeat(12, 1fr); grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr); gap: calc(var(--u) * 12); }
+  .s5 { grid-column: span 5; } .s4 { grid-column: span 4; } .s3 { grid-column: span 3; }
+  .stack { grid-column: span 3; display: flex; flex-direction: column; gap: calc(var(--u) * 12); min-height: 0; }
+  .stack .panel { flex: 1 1 0; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: calc(var(--u) * 14); }
+  body.nocodex .pair { grid-template-columns: 1fr; }
+  body.nocodex .cxonly { display: none !important; }
+  .hero-big { font-size: calc(var(--u) * 92); color: oklch(0.96 0.02 200); text-shadow: 0 0 40px oklch(0.78 0.14 195 / 0.25); }
+  .hero-x { display: flex; align-items: baseline; gap: calc(var(--u) * 14); margin-top: calc(var(--u) * 18); }
+  .hero-x .num { font-size: calc(var(--u) * 40); }
+  .comp { display: flex; height: calc(var(--u) * 6); border-radius: 3px; overflow: hidden; margin-top: calc(var(--u) * 10); background: oklch(1 0 0 / 0.06); }
+  .comp i { display: block; height: 100%; }
+  .mini .num { font-size: calc(var(--u) * 22); }
+  .mini .label { margin-top: calc(var(--u) * 5); }
+  .split { display: grid; gap: calc(var(--u) * 10); align-content: center; flex: 1; }
+  .splitrow { display: flex; align-items: baseline; justify-content: space-between; gap: calc(var(--u) * 10); }
+  .splitrow .num { font-size: calc(var(--u) * 24); }
+  .tbl { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: calc(var(--u) * 15); }
+  .tbl th { text-align: right; font-family: var(--sans); font-size: max(8px, calc(var(--u) * 10)); letter-spacing: 0.14em; color: var(--ink-soft); font-weight: 600; padding-bottom: calc(var(--u) * 8); }
+  .tbl th:first-child, .tbl td:first-child { text-align: left; font-family: var(--sans); font-size: max(8px, calc(var(--u) * 10.5)); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
+  .tbl td { text-align: right; padding: calc(var(--u) * 5) 0; border-top: 1px solid oklch(1 0 0 / 0.05); font-weight: 700; }
+  .chart { flex: 1; min-height: 0; position: relative; }
+  .chart svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .legend { display: flex; gap: calc(var(--u) * 16); margin-top: calc(var(--u) * 8); font-family: var(--mono); font-size: max(8px, calc(var(--u) * 10.5)); color: var(--ink-dim); }
+  .list { display: grid; gap: calc(var(--u) * 9); }
+  .li .top2 { display: flex; justify-content: space-between; font-size: calc(var(--u) * 12.5); }
+  .li .top2 .num { font-size: calc(var(--u) * 12); font-weight: 600; }
+  .li .bar { height: calc(var(--u) * 4); margin-top: calc(var(--u) * 4); }
+  .group { font-size: max(8px, calc(var(--u) * 10)); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-top: calc(var(--u) * 4); }
+  .stars { flex: 1; position: relative; }
+  .star { position: absolute; border-radius: 22%; }
+  .star b { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 4px; font-family: var(--mono); font-size: calc(var(--u) * 11); white-space: nowrap; color: oklch(0.86 0.02 220); font-weight: 600; }
+  .ring { position: absolute; inset: -5px; border-radius: 30%; border: 2px solid var(--cdx); }
+  .stamp { position: fixed; bottom: calc(var(--u) * 8); left: calc(var(--u) * 26); font-family: var(--mono); font-size: max(8px, calc(var(--u) * 10.5)); letter-spacing: 0.08em; color: oklch(0.8 0.14 75); }
+</style>
+</head>
+<body>
+<div class="wall">
+  <div class="notes">written on the other monitor</div>
+  <div class="modes"><span class="on">CLAUDE STATS</span><span>CLIENTS</span></div>
+  <div class="actions">
+    <span class="seg"><span id="segS">SIMPLE</span><span id="segD">DETAILED</span></span>
+    <span class="chip"><span class="dot x"></span>CODEX<span class="toggle" id="tgl"></span></span>
+    <span class="chip dim">TODAY</span><span class="chip dim">ANY DAY</span><span class="chip dim">MILESTONES</span>
+  </div>
+  <main id="root" style="position:relative;height:100%"></main>
+  <div class="stamp">DESIGN MOCK, REAL FIGURES FROM 26 OCT 2026. NOT THE BUILT APP.</div>
+</div>
+<script>
+const M = window.MOCK;
+const view = ((location.search+location.hash).match(/simple|detailed/) || ['simple'])[0];
+const codex = !/off/.test(location.search+location.hash);
+document.body.classList.toggle('nocodex', !codex);
+document.getElementById(view === 'simple' ? 'segS' : 'segD').classList.add('on');
+document.getElementById('tgl').classList.toggle('off', !codex);
+
+const C = { tokens: 77.18e9, cost: '$54,001.71', hours: '310', reqToday: '2,424', since: '20 Jun', eff: 97.2, req: '236,778' };
+const X = { tokens: 55.07e6, cost: '$65.78', hours: '4', reqToday: '101', since: '22 Oct', eff: 93.7, req: '762' };
+const fmt = (n) => n >= 1e9 ? (n / 1e9).toFixed(2) + 'B' : n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'K' : String(Math.round(n));
+const leaf = (p) => p.split(/[\\/]/).filter(Boolean).pop();
+const tidy = (m) => m.replace('claude-', '').replace(/-(\d)-(\d)$/, ' $1.$2').replace(/-(\d)$/, ' $1');
+
+function bars(values, color, opts = {}) {
+  const w = 1000, h = 100, n = values.length, max = Math.max(...values, 1), gap = opts.gap ?? 6;
+  const bw = (w - gap * (n - 1)) / n;
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${values.map((v, i) => {
+    const bh = v > 0 ? Math.max(2, (v / max) * (h - 2)) : 0;
+    const y = opts.down ? 0 : h - bh;
+    return `<rect x="${i * (bw + gap)}" y="${y}" width="${bw}" height="${bh}" rx="2" fill="${color}" opacity="${i === n - 1 ? 1 : 0.75}"/>`;
+  }).join('')}</svg>`;
+}
+function lane(slots, color) {
+  const w = 288, max = Math.max(...slots, 1);
+  return `<svg viewBox="0 0 ${w} 10" preserveAspectRatio="none">
+    <rect x="0" y="4.5" width="${w}" height="1" fill="oklch(1 0 0 / 0.08)"/>
+    ${slots.map((v, i) => v > 0 ? `<rect x="${i}" y="${5 - 5 * Math.max(0.25, Math.sqrt(v / max))}" width="0.9" height="${10 * Math.max(0.25, Math.sqrt(v / max))}" fill="${color}"/>` : '').join('')}
+    <rect x="${M.nowMin / 5}" y="0" width="0.6" height="10" fill="oklch(0.97 0.02 200 / 0.8)"/>
+  </svg>`;
+}
+const dayLabels = M.days.map((d) => new Date(d + 'T12:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }));
+
+function engine(p, key) {
+  const isX = key === 'x';
+  const models = (isX ? M.codexModels : M.claudeModels).slice(0, 3).map((m) => tidy(m[0])).join(' · ');
+  const daily = isX ? M.codexDaily : M.claudeDaily;
+  const col = isX ? 'var(--cdx)' : 'var(--sig)';
+  const limits = isX ? `
+    <div class="limits">
+      <div class="limit"><span class="label">5-hour window</span><span class="bar"><i style="width:99%;background:var(--bad)"></i></span><span class="num" style="color:var(--bad)">99%</span><span class="note">resets 16:00</span></div>
+      <div class="limit"><span class="label">This week</span><span class="bar"><i style="width:16%;background:var(--cdx)"></i></span><span class="num">16%</span><span class="note">resets Mon 2 Nov</span></div>
+      <div class="asof">Plus plan. Read at 11:39, when Codex last ran.</div>
+    </div>` : `<div class="nolimits">Claude Code keeps no plan limits on disk, so none are shown.<br>Hours count since 11 Jul; tokens and cost since ${p.since}.</div>`;
+  return `
+  <section class="panel engine ${isX ? 'cx' : 'cl'}">
+    <div class="top"><span class="name"><span class="dot ${key}"></span>${isX ? 'Codex' : 'Claude Code'}</span><span class="models">${models}</span></div>
+    <div class="num big ${key}">${fmt(p.tokens)}</div>
+    <div class="bigsub">tokens processed since ${p.since}</div>
+    <div class="row">
+      <div><div class="num cost">${p.cost}</div><div class="label">cost at API list prices</div></div>
+      <div><div class="num">${p.hours}</div><div class="label">hours</div></div>
+      <div><div class="num">${p.reqToday}</div><div class="label">requests today</div></div>
+    </div>
+    <div class="spark">${bars(daily, col)}</div>
+    <div class="sparkfoot"><span>${dayLabels[0]}</span><span>last 14 days, its own scale</span><span>today</span></div>
+    ${limits}
+  </section>`;
+}
+
+function simple() {
+  return `<div class="simple">
+    <div class="engines">${engine(C, 'c')}${engine(X, 'x')}</div>
+    <section class="panel today">
+      <div class="head"><span class="title">Today, side by side</span><span class="handoff">Claude started <b>35 of 40</b> Codex sessions</span></div>
+      <div class="lanes">
+        <span class="who c"><span class="dot c"></span>Claude</span><div class="lane">${lane(M.claudeSlots, 'oklch(0.78 0.14 195)')}</div>
+        <span class="who x lane-x-label"><span class="dot x"></span>Codex</span><div class="lane lane-x">${lane(M.codexSlots, 'oklch(0.74 0.15 295)')}</div>
+        <div class="axis"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+      </div>
+    </section>
+  </div>`;
+}
+
+function detailed() {
+  const cm = M.claudeModels, xm = M.codexModels, cmax = cm[0][1], xmax = xm[0][1];
+  const stars = [
+    ['Jarvis', 40, 20, 46, 0], ['Minecraft', 64, 44, 38, 0], ['claude-code-mods', 22, 54, 36, 0],
+    ['fps-game', 76, 18, 30, 1], ['dashboard', 46, 70, 22, 1], ['muchbetter-client-wall', 14, 22, 26, 0],
+  ];
+  return `<div class="grid">
+    <section class="panel s5">
+      <div class="head"><span class="title">Total tokens processed</span><span class="tag m">MEASURED</span></div>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center">
+        <div class="who c"><span class="dot c"></span>Claude Code</div>
+        <div class="num hero-big" style="margin-top:calc(var(--u)*8)">${fmt(C.tokens)}</div>
+        <div class="comp"><i style="width:96.9%;background:var(--sig)"></i><i style="width:2.6%;background:oklch(0.62 0.1 200)"></i><i style="width:0.5%;background:var(--cost)"></i></div>
+        <div class="hero-x cxonly"><span class="who x"><span class="dot x"></span>Codex</span><span class="num x">${fmt(X.tokens)}</span><span class="note">0.07% of the two together</span></div>
+        <div class="comp cxonly"><i style="width:92.6%;background:var(--cdx)"></i><i style="width:6.2%;background:oklch(0.6 0.1 295)"></i><i style="width:1.2%;background:var(--cost)"></i></div>
+        <div class="legend"><span>cache reads</span><span>fresh input</span><span>generated</span></div>
+      </div>
+    </section>
+    <section class="panel s4">
+      <div class="head"><span class="title">Constellation</span><span class="tag m">MEASURED</span></div>
+      <div class="stars">${stars.map(([n, x, y, s, isX]) => `<div class="star" style="left:${x}%;top:${y}%;width:${s * 0.6}px;height:${s * 0.6}px;background:${isX ? 'oklch(0.7 0.13 295)' : 'oklch(0.7 0.12 175)'}">${isX ? '<span class="ring cxonly"></span>' : ''}<b>${n}</b></div>`).join('')}</div>
+      <div class="legend cxonly"><span><span class="dot c"></span> Claude work</span><span><span class="dot x"></span> ringed: Codex worked here too</span></div>
+    </section>
+    <div class="stack">
+      <section class="panel">
+        <div class="head"><span class="title">Total cost</span><span class="tag d">DERIVED</span></div>
+        <div class="split">
+          <div class="splitrow"><span class="who c"><span class="dot c"></span>Claude</span><span class="num" style="color:var(--cost)">${C.cost}</span></div>
+          <div class="splitrow cxonly"><span class="who x"><span class="dot x"></span>Codex</span><span class="num" style="color:var(--cost)">${X.cost}</span></div>
+          <div class="note">at API list prices, all projects</div>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="head"><span class="title">Hours</span><span class="tag d">DERIVED</span></div>
+        <div class="split">
+          <div class="splitrow"><span class="who c"><span class="dot c"></span>Claude</span><span class="num">${C.hours}</span></div>
+          <div class="splitrow cxonly"><span class="who x"><span class="dot x"></span>Codex</span><span class="num">${X.hours}</span></div>
+        </div>
+      </section>
+      <section class="panel cxonly">
+        <div class="head"><span class="title">Codex plan</span><span class="tag m">MEASURED</span></div>
+        <div class="split">
+          <div class="limit" style="grid-template-columns:auto 1fr auto;gap:calc(var(--u)*10)"><span class="label">5 h</span><span class="bar"><i style="width:99%;background:var(--bad)"></i></span><span class="num" style="font-size:calc(var(--u)*16);color:var(--bad)">99%</span></div>
+          <div class="limit" style="grid-template-columns:auto 1fr auto;gap:calc(var(--u)*10)"><span class="label">week</span><span class="bar"><i style="width:16%;background:var(--cdx)"></i></span><span class="num" style="font-size:calc(var(--u)*16)">16%</span></div>
+          <div class="note">resets 16:00 and Mon 2 Nov. Read at 11:39</div>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel s4">
+      <div class="head"><span class="title">Totals</span><span class="tag m">MEASURED</span></div>
+      <table class="tbl"><tr><th></th><th class="c">CLAUDE</th><th class="x cxonly">CODEX</th></tr>
+        <tr><td>Requests</td><td>${C.req}</td><td class="cxonly">${X.req}</td></tr>
+        <tr><td>Sessions</td><td>227</td><td class="cxonly">40</td></tr>
+        <tr><td>Generated</td><td>183.0M</td><td class="cxonly">639.0K</td></tr>
+        <tr><td>Thinking</td><td>50.5M</td><td class="cxonly">138.3K</td></tr>
+        <tr><td>Days active</td><td>102</td><td class="cxonly">5</td></tr>
+      </table>
+    </section>
+    <section class="panel s5">
+      <div class="head"><span class="title">Daily activity</span><span class="tag m">MEASURED</span></div>
+      <div class="chart" style="flex:1.2">${bars(M.claudeDaily, 'oklch(0.72 0.13 195)')}</div>
+      <div class="chart cxonly" style="flex:0.8;margin-top:4px">${bars(M.codexDaily, 'oklch(0.7 0.14 295)', { down: true })}</div>
+      <div class="legend"><span>${dayLabels[0]} to ${dayLabels[13]}</span><span class="c">Claude, up</span><span class="x cxonly">Codex, down</span><span>each on its own scale</span></div>
+    </section>
+    <section class="panel s3">
+      <div class="head"><span class="title">Context efficiency</span><span class="tag d">DERIVED</span></div>
+      <div class="split">
+        <div><div class="splitrow"><span class="who c"><span class="dot c"></span>Claude</span><span class="num" style="color:var(--cost);font-size:calc(var(--u)*34)">${C.eff}%</span></div><div class="bar" style="margin-top:6px"><i style="width:${C.eff}%;background:var(--cost)"></i></div></div>
+        <div class="cxonly"><div class="splitrow"><span class="who x"><span class="dot x"></span>Codex</span><span class="num" style="color:var(--cost);font-size:calc(var(--u)*34)">${X.eff}%</span></div><div class="bar" style="margin-top:6px"><i style="width:${X.eff}%;background:var(--cost)"></i></div></div>
+        <div class="note">of context served from cache</div>
+      </div>
+    </section>
+
+    <section class="panel s4">
+      <div class="head"><span class="title">Models</span><span class="tag m">MEASURED</span></div>
+      <div class="list">
+        ${cm.slice(0, 3).map(([m, v]) => `<div class="li"><div class="top2"><span>${tidy(m)}</span><span class="num c">${fmt(v)}</span></div><div class="bar"><i style="width:${(v / cmax) * 100}%;background:var(--sig)"></i></div></div>`).join('')}
+        <div class="group cxonly">Codex, its own scale</div>
+        ${xm.map(([m, v]) => `<div class="li cxonly"><div class="top2"><span>${m}</span><span class="num x">${fmt(v)}</span></div><div class="bar"><i style="width:${(v / xmax) * 100}%;background:var(--cdx)"></i></div></div>`).join('')}
+      </div>
+    </section>
+    <section class="panel s4">
+      <div class="head"><span class="title">When you work</span><span class="tag m">MEASURED</span></div>
+      <div class="chart" style="flex:1.2">${bars(M.claudeHour, 'oklch(0.72 0.13 195)', { gap: 4 })}</div>
+      <div class="chart cxonly" style="flex:0.8;margin-top:4px">${bars(M.codexHour, 'oklch(0.7 0.14 295)', { gap: 4, down: true })}</div>
+      <div class="legend"><span>00</span><span style="margin-left:auto">06</span><span style="margin-left:auto">12</span><span style="margin-left:auto">18</span><span style="margin-left:auto">23</span></div>
+    </section>
+    <section class="panel s4">
+      <div class="head"><span class="title">Top projects</span><span class="tag m">MEASURED</span></div>
+      <div class="list">
+        ${M.claudeProjects.slice(0, 4).map(([p, v]) => `<div class="li"><div class="top2"><span><span class="dot c"></span> ${leaf(p)}</span><span class="num c">${fmt(v)}</span></div><div class="bar"><i style="width:${(v / M.claudeProjects[0][1]) * 100}%;background:var(--sig)"></i></div></div>`).join('')}
+        <div class="group cxonly">Codex, its own scale</div>
+        ${M.codexProjects.slice(0, 2).map(([p, v]) => `<div class="li cxonly"><div class="top2"><span><span class="dot x"></span> ${leaf(p).replace(/^2026-10-23-.*/, 'T3 scratch thread')}</span><span class="num x">${fmt(v)}</span></div><div class="bar"><i style="width:${(v / M.codexProjects[0][1]) * 100}%;background:var(--cdx)"></i></div></div>`).join('')}
+      </div>
+    </section>
+  </div>`;
+}
+document.getElementById('root').innerHTML = view === 'simple' ? simple() : detailed();
+</script>
+</body>
+</html>

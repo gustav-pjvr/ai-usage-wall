@@ -19,11 +19,13 @@
  *   - The Anthropic Usage/Cost Admin API needs an admin API key issued to an
  *     organisation. It does not cover Claude subscription usage and there is no
  *     such key on this machine.
- *   - There is NO local record of remaining quota, plan limits or reset times.
- *     Hitting a limit shows up only as free-text inside a transcript
+ *   - The TRANSCRIPTS hold no record of remaining quota, plan limits or reset
+ *     times. Hitting a limit shows up only as free-text inside a transcript
  *     ("You've hit your session limit"), which is indistinguishable from an
- *     assistant message discussing rate limiting. So the dashboard shows no
- *     quota or headroom figure at all rather than a guessed one.
+ *     assistant message discussing rate limiting. (Correction, 2026-10-26:
+ *     Claude Code does keep its own plan reading in `~/.claude.json`, and
+ *     src/main/data/claude-limits.ts reads that one key; nothing here
+ *     guesses one.)
  *   - Money. On a subscription, per-token pricing is not what is billed, so a
  *     currency figure here would be invented. Tokens are reported instead.
  *

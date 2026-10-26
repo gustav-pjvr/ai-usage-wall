@@ -314,7 +314,26 @@ function fixture(emptyIndex) {
   // Claude's five-minute slots for today, as main sends them for the simple view's lane.
   idx.todaySlots = claudeSlots();
   idx.codex = codexFixture(now);
+  idx.claudeLimits = claudeFixture(now);
   return idx;
+}
+
+/*
+ * Claude's plan reading as main sends it (src/shared/claude-limits.ts), from
+ * Gustav's live reading on 2026-10-26: session 86% used, weekly 7%, weekly
+ * Fable 0%, fetched three minutes ago. `resetPast` puts the session's reset
+ * behind us, which must read as reset; `resetIn` puts it that many ms ahead.
+ */
+function claudeFixture(now, opts = {}) {
+  const sessionReset = opts.resetPast ? now - 20 * 60_000 : now + (opts.resetIn ?? 2 * 3_600_000);
+  return {
+    at: new Date(now - 3 * 60_000).toISOString(),
+    rows: [
+      { label: '5 h', usedPercent: 86, resetsAt: sessionReset },
+      { label: 'week', usedPercent: 7, resetsAt: now + 6.9 * DAY_MS },
+      { label: 'week, Fable', usedPercent: 0, resetsAt: now + 6.9 * DAY_MS + 60_000 },
+    ],
+  };
 }
 
 /*
@@ -404,8 +423,13 @@ function codexFixture(now, opts = {}) {
 /*
  * The detailed view's panel rectangles BEFORE Codex existed, measured on this
  * machine from the renderer at ca81343 with this file's Claude fixture. With
- * Codex off or absent the dashboard must be exactly this: [panel, left, top,
- * width, height], rounded to 0.1px.
+ * Codex off or absent AND no Claude plan reading the dashboard must be exactly
+ * this: [panel, left, top, width, height], rounded to 0.1px.
+ *
+ * Changed on purpose in 0.10.1 (docs/design/codex-side-by-side.md, section 5):
+ * with a Claude plan reading and Codex off, the plan panel sits beside Recent
+ * volume. That layout is CLAUDE_PLAN_BASELINE below: every other panel exactly
+ * as here, and the old Recent volume box split in two by one grid gap.
  */
 const BEFORE_CODEX = {"2560x1440":[["panel-hero",34.7,106.7,1028.5,478.2],["panel-live",1079.1,106.7,1028.5,478.2],["panel-cost",2123.5,106.7,252.9,159.7],["panel-ran",2392.4,106.7,133,159.7],["panel-vel",2123.5,282.4,401.8,302.5],["panel-counters",34.7,600.9,819.6,382.6],["panel-daily",870.2,600.9,1028.5,382.6],["panel-eff",1914.7,600.9,610.7,382.6],["panel-models",34.7,999.4,819.6,382.6],["panel-hours",870.2,999.4,819.6,382.6],["panel-projects",1705.8,999.4,819.6,382.6]],"1920x1200":[["panel-hero",26,80,771.3,404.6],["panel-live",809.3,80,771.4,404.6],["panel-cost",1592.7,80,189.2,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1592.7,211.7,301.4,272.9],["panel-counters",26,496.6,614.7,323.7],["panel-daily",652.7,496.6,771.3,323.7],["panel-eff",1436,496.6,458,323.7],["panel-models",26,832.3,614.7,323.7],["panel-hours",652.7,832.3,614.7,323.7],["panel-projects",1279.3,832.3,614.7,323.7]],"1920x1080":[["panel-hero",26,80,771.3,358.5],["panel-live",809.3,80,771.4,358.5],["panel-cost",1592.7,80,189.2,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1592.7,211.7,301.4,226.8],["panel-counters",26,450.5,614.7,286.8],["panel-daily",652.7,450.5,771.3,286.8],["panel-eff",1436,450.5,458,286.8],["panel-models",26,749.2,614.7,286.8],["panel-hours",652.7,749.2,614.7,286.8],["panel-projects",1279.3,749.2,614.7,286.8]],"1600x900":[["panel-hero",21.7,66.7,642.8,299],["panel-live",674.4,66.7,642.8,299],["panel-cost",1327.2,66.7,157.3,99.8],["panel-ran",1494.5,66.7,83.8,99.8],["panel-vel",1327.2,176.5,251.1,189.2],["panel-counters",21.7,375.6,512.2,239.2],["panel-daily",543.9,375.6,642.8,239.2],["panel-eff",1196.7,375.6,381.7,239.2],["panel-models",21.7,624.8,512.2,239.2],["panel-hours",543.9,624.8,512.2,239.2],["panel-projects",1066.1,624.8,512.3,239.2]],"1512x982":[["panel-hero",20.5,63,607.4,332.9],["panel-live",637.3,63,607.4,332.9],["panel-cost",1254.2,63,148.5,95.7],["panel-ran",1412.2,63,79.3,95.7],["panel-vel",1254.2,168.1,237.3,227.8],["panel-counters",20.5,405.3,484.1,266.3],["panel-daily",514,405.3,607.4,266.3],["panel-eff",1130.8,405.3,360.7,266.3],["panel-models",20.5,681.1,484.1,266.3],["panel-hours",514,681.1,484.1,266.3],["panel-projects",1007.5,681.1,484.1,266.3]],"1440x900":[["panel-hero",19.5,60,578.5,303.3],["panel-live",607,60,578.5,303.3],["panel-cost",1194.5,60,140.6,91.3],["panel-ran",1344,60,76.5,91.3],["panel-vel",1194.5,160.2,226,203],["panel-counters",19.5,372.3,461,242.6],["panel-daily",489.5,372.3,578.5,242.6],["panel-eff",1077,372.3,343.5,242.6],["panel-models",19.5,623.9,461,242.7],["panel-hours",489.5,623.9,461,242.7],["panel-projects",959.5,623.9,461,242.7]],"1366x768":[["panel-hero",18.5,56.9,548.8,254.9],["panel-live",575.8,56.9,548.8,254.9],["panel-cost",1133.1,56.9,131,88.1],["panel-ran",1272.7,56.9,74.8,88.1],["panel-vel",1133.1,153.5,214.4,158.2],["panel-counters",18.5,320.3,437.3,203.9],["panel-daily",464.3,320.3,548.8,203.9],["panel-eff",1021.6,320.3,325.9,203.9],["panel-models",18.5,532.8,437.3,203.9],["panel-hours",464.3,532.8,437.3,203.9],["panel-projects",910.2,532.8,437.3,203.9]],"1280x800":[["panel-hero",18.2,56,513.3,267.8],["panel-live",539.9,56,513.3,267.8],["panel-cost",1061.5,56,117.6,87.3],["panel-ran",1187.5,56,74.3,87.3],["panel-vel",1061.5,151.6,200.3,172.1],["panel-counters",18.2,332.2,408.9,214.2],["panel-daily",435.5,332.2,513.3,214.2],["panel-eff",957.2,332.2,304.6,214.2],["panel-models",18.2,554.8,408.9,214.2],["panel-hours",435.5,554.8,409,214.2],["panel-projects",852.9,554.8,408.9,214.2]]};
 
@@ -537,6 +561,30 @@ const PROBE = `(() => {
 })()`;
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+/*
+ * BEFORE_CODEX with a Claude plan reading and Codex off (0.10.1): the top row
+ * makes room for the plan panel as it does for Codex (hero 5, sky 4, stack 3),
+ * and Recent volume and Plan limits share the lower stack. Measured on this
+ * machine from the 0.10.1 renderer; re-measure with CSW_PRINT_BASELINE=1.
+ * Everything not listed here must still be exactly BEFORE_CODEX.
+ */
+const CLAUDE_PLAN_TOP = {
+  "2560x1440":[["panel-live",1079.1,106.7,819.6,478.2],["panel-cost",1914.7,106.7,461.8,159.7],["panel-ran",2392.4,106.7,133,159.7],["panel-vel",1914.7,282.4,297.3,302.5],["panel-plan",2228,282.4,297.4,302.5]],
+  "1920x1200":[["panel-live",809.3,80,614.7,404.6],["panel-cost",1436,80,345.9,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1436,211.7,223,272.9],["panel-plan",1671,211.7,223,272.9]],
+  "1920x1080":[["panel-live",809.3,80,614.7,358.5],["panel-cost",1436,80,345.9,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1436,211.7,223,226.8],["panel-plan",1671,211.7,223,226.8]],
+  "1600x900":[["panel-live",674.4,66.7,512.3,299],["panel-cost",1196.7,66.7,287.9,99.8],["panel-ran",1494.5,66.7,83.8,99.8],["panel-vel",1196.7,176.5,185.8,189.2],["panel-plan",1392.5,176.5,185.9,189.2]],
+  "1512x982":[["panel-live",637.3,63,484.1,332.9],["panel-cost",1130.8,63,271.9,95.7],["panel-ran",1412.2,63,79.3,95.7],["panel-vel",1130.8,168.1,175.6,227.8],["panel-plan",1315.9,168.1,175.6,227.8]],
+  "1440x900":[["panel-live",607,60,461,303.3],["panel-cost",1077,60,258.1,91.3],["panel-ran",1344,60,76.5,91.3],["panel-vel",1077,160.2,167.3,203],["panel-plan",1253.2,160.2,167.3,203]],
+  "1366x768":[["panel-live",575.8,56.9,437.3,254.9],["panel-cost",1021.6,56.9,242.5,88.1],["panel-ran",1272.7,56.9,74.8,88.1],["panel-vel",1021.6,153.5,158.7,158.2],["panel-plan",1188.8,153.5,158.7,158.2]],
+  "1280x800":[["panel-live",539.9,56,408.9,267.8],["panel-cost",957.2,56,221.9,87.3],["panel-ran",1187.5,56,74.3,87.3],["panel-vel",957.2,151.6,148.1,172.1],["panel-plan",1113.7,151.6,148.1,172.1]],
+};
+const TOP_ROW = ['panel-live', 'panel-cost', 'panel-ran', 'panel-vel', 'panel-plan'];
+function CLAUDE_PLAN_BASELINE(key) {
+  const top = CLAUDE_PLAN_TOP[key];
+  if (!top) return null;
+  return [...BEFORE_CODEX[key].filter((p) => !TOP_ROW.includes(p[0])), ...top];
+}
+
 /** Enough for one IPC round trip to the main process and back. */
 const SETTLE = 150;
 
@@ -1257,7 +1305,28 @@ app.whenReady().then(async () => {
       table: shown(q('.counter-table')) ? [...document.querySelectorAll('.counter-table tr[data-key]')].map((tr) => [tr.dataset.key, tr.querySelector('.ct-cl').textContent, tr.querySelector('.ct-cx').textContent]) : null,
       effCx: text('.eff-value-cx'),
       plan: shown(plan) ? plan.querySelector('.plan-body').textContent : null,
-      planRows: shown(plan) ? [...plan.querySelectorAll('.lim-row')].map((r) => r.dataset.tone + ':' + r.textContent) : [],
+      planRows: shown(plan) ? [...plan.querySelectorAll('.lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent) : [],
+      planGroups: shown(plan) ? [...plan.querySelectorAll('.plan-group')].filter(shown).map((g) => ({
+        kind: g.classList.contains('plan-cl') ? 'claude' : 'codex',
+        who: g.querySelector('.who').textContent,
+        age: g.querySelector('.plan-age').textContent,
+        note: shown(g.querySelector('.plan-note')) ? g.querySelector('.plan-note').textContent : null,
+        rows: [...g.querySelectorAll('.lim-row')].map((r) => r.dataset.tone + ':' + r.textContent),
+      })) : [],
+      clPlanRows: shown(plan) ? [...plan.querySelectorAll('.plan-cl .lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent) : [],
+      cxPlanRows: shown(plan) ? [...plan.querySelectorAll('.plan-cx .lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent) : [],
+      /* Claude's ok fill against Claude's own teal, Codex's against its violet. */
+      fills: (() => {
+        const f = (sel) => { const e = q(sel); return shown(e) ? getComputedStyle(e).backgroundColor : null; };
+        const c = (sel) => { const e = q(sel); return shown(e) ? getComputedStyle(e).color : null; };
+        return { cl: f('.lim-cl .lim-row[data-tone="ok"] .lim-fill'), clWho: c('.plan-cl .who-claude'), cx: f('.lim-cx .lim-row[data-tone="ok"] .lim-fill'), cxWho: c('.plan-cx .who-codex') };
+      })(),
+      besideVel: (() => {
+        const v = q('.panel-vel'), p = plan;
+        if (!shown(v) || !shown(p)) return false;
+        const a = v.getBoundingClientRect(), b = p.getBoundingClientRect();
+        return Math.abs(a.top - b.top) < 1 && Math.abs(a.height - b.height) < 1 && b.left > a.right;
+      })(),
       dailyCx: [...document.querySelectorAll('.chart-daily-cx .col-bar')].filter(shown).length,
       hoursCxBars: [...document.querySelectorAll('.chart-hours-cx .col-bar')].filter(shown).length,
       modelsCx: [...document.querySelectorAll('.panel-models .bd-cx .bd-row')].filter(shown).length,
@@ -1273,8 +1342,13 @@ app.whenReady().then(async () => {
       bigCl: text('.engine-cl .eng-big'), bigCx: text('.engine-cx .eng-big'),
       todayCl: text('.engine-cl .eng-today .eng-num'), todayCx: text('.engine-cx .eng-today .eng-num'),
       costSimpleCx: text('.engine-cx .eng-cost .eng-num'),
-      limits: shown(q('.eng-limits')) ? q('.eng-limits').textContent : null,
-      limitRows: [...document.querySelectorAll('.eng-limits .lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent),
+      limits: shown(q('.engine-cx .eng-limits')) ? q('.engine-cx .eng-limits').textContent : null,
+      limitRows: [...document.querySelectorAll('.engine-cx .eng-limits .lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent),
+      clLimits: shown(q('.engine-cl .eng-limits')) ? q('.engine-cl .eng-asof').textContent : null,
+      clLimitRows: [...document.querySelectorAll('.engine-cl .eng-limits .lim-row')].filter(shown).map((r) => r.dataset.tone + ':' + r.textContent),
+      clFill: (() => { const e = q('.engine-cl .lim-row[data-tone="ok"] .lim-fill'); return shown(e) ? getComputedStyle(e).backgroundColor : null; })(),
+      clDot: (() => { const e = q('.engine-cl .eng-dot'); return shown(e) ? getComputedStyle(e).backgroundColor : null; })(),
+      since: text('.eng-since'),
       nolimits: text('.eng-nolimits'),
       lanes: [...document.querySelectorAll('.lanes .lane')].filter(shown).length,
       laneMarks: [...document.querySelectorAll('.lane-cx .lane-mark')].length,
@@ -1302,6 +1376,27 @@ app.whenReady().then(async () => {
   ok('the defaults are the detailed view with Codex shown', c0.on.join() === 'detailed' && c0.chipOn === 'on' &&
      JSON.stringify(await statsState()) === JSON.stringify({ view: 'detailed', codex: 'on' }));
   ok(`the controls' text is legible (${c0.px}px)`, c0.px >= 8);
+
+  /** The simple view's Claude card with the fixture's reading: three rows like Codex's, the reading's age, the period footnote, no old note. */
+  const claudeCardOk = (v) =>
+    v.clLimitRows.length === 3 &&
+    /^warn:5-hour window86%resets /.test(v.clLimitRows[0]) &&
+    /^ok:This week7%resets /.test(v.clLimitRows[1]) &&
+    /^ok:This week, Fable0%resets /.test(v.clLimitRows[2]) &&
+    /^Read at \d\d:\d\d \(\d+m ago\), by Claude Code\.$/.test(v.clLimits || '') &&
+    /^Hours count since .+; tokens and cost since .+\.$/.test(v.since || '') &&
+    v.nolimits === null && !!v.clFill && v.clFill === v.clDot;
+  /** The detailed plan panel with both readings: Claude's group first, then Codex's, each with its age and its resets. */
+  const planBothOk = (v) =>
+    v.planGroups.length === 2 && v.planGroups[0].kind === 'claude' && v.planGroups[1].kind === 'codex' &&
+    JSON.stringify(v.planGroups[0].rows) === JSON.stringify(['warn:5 h86%', 'ok:week7%', 'ok:week, Fable0%']) &&
+    JSON.stringify(v.planGroups[1].rows) === JSON.stringify(['bad:5 h99%', 'ok:week16%']) &&
+    /^read \d+m ago$/.test(v.planGroups[0].age) && v.planGroups[1].age === 'read 2h ago' &&
+    /^resets .+ and .+$/.test(v.planGroups[0].note || '') && /^resets .+ and .+$/.test(v.planGroups[1].note || '');
+  /** The detailed plan panel with Claude's reading only. */
+  const planClaudeOnlyOk = (v) =>
+    v.planGroups.length === 1 && v.planGroups[0].kind === 'claude' && v.planRows.length === 3 && v.cxPlanRows.length === 0 &&
+    /^read \d+m ago$/.test(v.planGroups[0].age) && v.besideVel && !!v.fills.cl && v.fills.cl === v.fills.clWho;
 
   const CONFIGS = [
     { name: 'detailed', view: 'detailed', codex: true },
@@ -1350,8 +1445,10 @@ app.whenReady().then(async () => {
         ok(`${tag}   hero: Codex ${v.heroCx}, "${v.share}"`, v.heroCx === '55.07M' && v.share === share, `${v.heroCx} / ${v.share}`);
         ok(`${tag}   cost ${v.costCx} and hours ${v.hoursCx} split Claude / Codex, every number one line and inside its panel`,
            v.costCx === '$65.78' && v.hoursCx === '5' && v.detailOneLine && v.detailInside && v.detailCount === 8, JSON.stringify({ n: v.detailCount, one: v.detailOneLine, inside: v.detailInside }));
-        ok(`${tag}   Codex plan: 99% (red) and 16%, with its reading's age`,
-           v.planRows.length === 2 && /^bad:5 h99%$/.test(v.planRows[0]) && /^ok:week16%$/.test(v.planRows[1]) && /Read 2h ago/.test(v.plan), JSON.stringify([v.planRows, v.plan]));
+        ok(`${tag}   Plan limits: Claude first (86% amber, 7%, Fable 0%, read 3m ago), then Codex (99% red, 16%, read 2h ago)`,
+           planBothOk(v), JSON.stringify(v.planGroups));
+        ok(`${tag}   the plan panel sits beside Recent volume; Claude's bars teal, Codex's violet`,
+           v.besideVel && !!v.fills.cl && v.fills.cl === v.fills.clWho && v.fills.cx === v.fills.cxWho && v.fills.cl !== v.fills.cx, JSON.stringify([v.besideVel, v.fills]));
         ok(`${tag}   Totals has a Codex column (prompts left empty, never 0)`,
            JSON.stringify(v.table) === JSON.stringify([['requests', '72K', '762'], ['sessions', '58', '40'], ['prompts', '4,812', ''], ['days', '14', '5'], ['output', '62.4M', '639K'], ['thinking', '0', '138K']]), JSON.stringify(v.table));
         ok(`${tag}   context efficiency for both (Codex ${v.effCx})`, v.effCx === '93.7%');
@@ -1363,23 +1460,29 @@ app.whenReady().then(async () => {
            Array.isArray(v.ringed) && v.ringed.length === 2 && v.ringed.includes('muchbetter-client-wall') && v.ringed.includes('pickleplay-south-africa'));
       }
       if (cfg.name === 'detailed-off') {
-        const diff = sameRects(v.panels, BEFORE_CODEX[`${size.w}x${size.h}`]);
-        ok(`${tag}   exactly the dashboard before Codex: same ${v.panels.length} panel rectangles`, diff === '', diff);
+        // Changed on purpose in 0.10.1: the Claude plan sits beside Recent volume, every other panel as before.
+        if (process.env.CSW_PRINT_BASELINE) console.log(`BASELINE "${size.w}x${size.h}":${JSON.stringify(v.panels.filter((p) => TOP_ROW.includes(p[0])))},`);
+        const diff = sameRects(v.panels, CLAUDE_PLAN_BASELINE(`${size.w}x${size.h}`));
+        ok(`${tag}   the dashboard before Codex, with the plan panel beside Recent volume: same ${v.panels.length} panel rectangles`, diff === '', diff);
         ok(`${tag}   no Codex furniture on screen, no ring`, v.cxShown === 0 && Array.isArray(v.ringed) && v.ringed.length === 0, `${v.cxShown} shown, ringed ${JSON.stringify(v.ringed)}`);
+        ok(`${tag}   Plan limits shows Claude's rows only, in teal`, planClaudeOnlyOk(v), JSON.stringify([v.planGroups, v.fills]));
       }
       if (cfg.name === 'simple') {
         ok(`${tag}   two engine cards side by side (${v.bigCl} and ${v.bigCx})`, v.sideBySide && v.bigCl === '26.10B' && v.bigCx === '55.07M');
         ok(`${tag}   every number one line and inside its card (${v.simpleCount})`, v.simpleOneLine && v.simpleInside && v.simpleCount === 8);
         ok(`${tag}   requests today ${v.todayCl} and ${v.todayCx}, Codex cost ${v.costSimpleCx}`, v.todayCl === '2,685' && v.todayCx === '101' && v.costSimpleCx === '$65.78');
-        ok(`${tag}   Codex plan limits 99% and 16% with reset times; Claude says it has none on disk`,
+        ok(`${tag}   Codex plan limits 99% and 16% with reset times`,
            v.limitRows.length === 2 && /^bad:5-hour window99%resets /.test(v.limitRows[0]) && /^ok:This week16%resets /.test(v.limitRows[1]) &&
-           /Plus plan\. Read at .+ \(2h ago\), when Codex last ran\./.test(v.limits) && /no plan limits on disk/.test(v.nolimits || ''), JSON.stringify([v.limitRows, v.limits, v.nolimits]));
+           /Plus plan\. Read at .+ \(2h ago\), when Codex last ran\./.test(v.limits), JSON.stringify([v.limitRows, v.limits]));
+        ok(`${tag}   Claude's card shows its plan the same way: 86%, 7%, Fable 0%, reset times, "${v.clLimits}"`,
+           claudeCardOk(v), JSON.stringify([v.clLimitRows, v.clLimits, v.since, v.nolimits, v.clFill, v.clDot]));
         ok(`${tag}   two lanes on one axis, and "${v.handoff}"`, v.lanes === 2 && v.laneMarks === 9 && v.handoff === 'Claude started 35 of 40 Codex sessions' && v.sparkCx === 5);
       }
       if (cfg.name === 'simple-off') {
         ok(`${tag}   one Claude card across the full width (${v.bigCl}), one lane, no hand-off line`,
            v.clFull && v.engines.join() === 'true,false' && v.lanes === 1 && v.handoff === null && v.bigCl === '26.10B');
         ok(`${tag}   its numbers one line and inside (${v.simpleCount})`, v.simpleOneLine && v.simpleInside && v.simpleCount === 4);
+        ok(`${tag}   and its plan rows, as with Codex on`, claudeCardOk(v), JSON.stringify([v.clLimitRows, v.clLimits, v.since]));
       }
     }
   }
@@ -1407,8 +1510,8 @@ app.whenReady().then(async () => {
   win.webContents.send('wall:usage', resetIdx);
   await wait(400);
   const rd = await win.webContents.executeJavaScript(VIEW);
-  ok(`detailed: a 5-hour window that has reset reads "${(rd.planRows[0] || '').split(':').slice(1).join(':')}", not 99%`,
-     rd.planRows.length === 2 && /^reset:5 hreset at /.test(rd.planRows[0]) && !/99/.test(rd.plan) && /^ok:week16%$/.test(rd.planRows[1]), JSON.stringify(rd.planRows));
+  ok(`detailed: a 5-hour window that has reset reads "${(rd.cxPlanRows[0] || '').split(':').slice(1).join(':')}", not 99%`,
+     rd.cxPlanRows.length === 2 && /^reset:5 hreset at /.test(rd.cxPlanRows[0]) && !/99/.test(rd.plan) && /^ok:week16%$/.test(rd.cxPlanRows[1]), JSON.stringify(rd.cxPlanRows));
   await clickEl('#wall-actions .wall-seg-btn[data-view="simple"]');
   await wait(1400);
   const rs = await win.webContents.executeJavaScript(VIEW);
@@ -1471,8 +1574,8 @@ app.whenReady().then(async () => {
   win.webContents.send('wall:usage', idx);
   await wait(400);
 
-  // No Codex data at all: no chip, and every view as it was.
-  win.webContents.send('wall:usage', { ...idx, codex: undefined });
+  // No Codex data and no Claude plan reading: no chip, and every view as it was.
+  win.webContents.send('wall:usage', { ...idx, codex: undefined, claudeLimits: undefined });
   await wait(400);
   const none = await win.webContents.executeJavaScript(CONTROLS);
   const noneView = await win.webContents.executeJavaScript(VIEW);
@@ -1485,11 +1588,119 @@ app.whenReady().then(async () => {
     const nv = await win.webContents.executeJavaScript(VIEW);
     if (SHOTS) fs.writeFileSync(path.join(SHOTS, `detailed-absent-${size.w}x${size.h}.png`), (await win.webContents.capturePage()).toPNG());
     const diff = sameRects(nv.panels, BEFORE_CODEX[`${size.w}x${size.h}`]);
-    ok(`${size.w}x${size.h}   detailed with no Codex data is the dashboard before Codex`, diff === '' && nv.cxShown === 0, diff || `${nv.cxShown} Codex elements shown`);
+    ok(`${size.w}x${size.h}   detailed with no Codex data and no Claude reading is the dashboard before Codex`, diff === '' && nv.cxShown === 0 && nv.plan === null, diff || `${nv.cxShown} Codex elements shown`);
+  }
+  // Codex absent but a Claude reading: the plan panel beside Recent volume, with Claude's rows only.
+  win.webContents.send('wall:usage', { ...idx, codex: undefined });
+  await wait(400);
+  for (const size of [{ w: 1920, h: 1080 }, { w: 1366, h: 768 }]) {
+    const r = await measure(win, size);
+    const nv = await win.webContents.executeJavaScript(VIEW);
+    const diff = sameRects(nv.panels, CLAUDE_PLAN_BASELINE(`${size.w}x${size.h}`));
+    ok(`${size.w}x${size.h}   detailed with no Codex data but a Claude reading: plan beside Recent volume, Claude's rows only`,
+       diff === '' && nv.cxShown === 0 && planClaudeOnlyOk(nv) && r.findings.length === 0,
+       diff || JSON.stringify([nv.planGroups, r.findings.slice(0, 3)]));
   }
   win.webContents.send('wall:usage', idx);
   await wait(400);
   ok('the chip comes back when Codex data arrives', (await win.webContents.executeJavaScript(CONTROLS)).chip === true);
+
+  // ── Claude's plan limits (docs/design/codex-side-by-side.md, section 5) ──
+  //
+  // The four views above already carry the fixture's Claude reading at every
+  // size. These are the other three states, also at every size and in both
+  // views: a Claude window that has reset, no Claude reading with Codex on,
+  // and no Claude reading with Codex off (which must be the old dashboard).
+  console.log('\nClaude plan limits: a reset window and no reading, every size, both views\n');
+  const setPrefs = async (view, codex) => {
+    const st = state(1920, 1080);
+    st.settings.statsView = view;
+    st.settings.showCodex = codex;
+    win.webContents.send('wall:state', st);
+    await wait(1400);
+  };
+  const SCENARIOS = [
+    { name: 'claude-reset', codex: true, payload: () => ({ ...idx, claudeLimits: claudeFixture(Date.now(), { resetPast: true }) }) },
+    { name: 'claude-none', codex: true, payload: () => ({ ...idx, claudeLimits: undefined }) },
+    { name: 'claude-none-off', codex: false, payload: () => ({ ...idx, claudeLimits: undefined }) },
+  ];
+  for (const sc of SCENARIOS) {
+    win.webContents.send('wall:usage', sc.payload());
+    for (const view of ['detailed', 'simple']) {
+      await setPrefs(view, sc.codex);
+      for (const size of SIZES) {
+        const r = await measure(win, size);
+        const tag = `${(sc.name + ' ' + view).padEnd(24)} ${size.w}x${size.h}`;
+        if (SHOTS) fs.writeFileSync(path.join(SHOTS, `${sc.name}-${view}-${size.w}x${size.h}.png`), (await win.webContents.capturePage()).toPNG());
+        if (r.fatal) { ok(tag, false, r.fatal); continue; }
+        ok(`${tag}   everything inside its panel, nothing overflowing`, r.findings.length === 0,
+           r.findings.slice(0, 6).join('\n        ') + (r.findings.length > 6 ? `\n        (+${r.findings.length - 6} more)` : ''));
+        ok(`${tag}   smallest text ${r.smallest}px (>= 8, on .${r.smallestOn})`, r.smallest >= 8);
+        const v = await win.webContents.executeJavaScript(VIEW);
+        if (sc.name === 'claude-reset' && view === 'detailed') {
+          ok(`${tag}   Claude's session reads "${(v.clPlanRows[0] || '').split(':').slice(1).join(':')}", not 86%; its note keeps only the windows still current`,
+             v.clPlanRows.length === 3 && /^reset:5 hreset at (.+ )?\d\d:\d\d$/.test(v.clPlanRows[0]) && !/86/.test(v.plan) &&
+             v.clPlanRows[1] === 'ok:week7%' && v.planGroups.length === 2 && /^resets [^,]+$/.test(v.planGroups[0].note || ''),
+             JSON.stringify(v.planGroups));
+        }
+        if (sc.name === 'claude-reset' && view === 'simple') {
+          ok(`${tag}   Claude's card reads its session as reset, not read since, never 86%`,
+             v.clLimitRows.length === 3 && /^reset:5-hour windowreset at .+, not read since$/.test(v.clLimitRows[0]) &&
+             !v.clLimitRows.some((x) => /86%/.test(x)) && /^ok:This week7%resets /.test(v.clLimitRows[1]), JSON.stringify(v.clLimitRows));
+        }
+        if (sc.name === 'claude-none' && view === 'detailed') {
+          ok(`${tag}   no Claude reading: Plan limits holds Codex's rows only, beside Recent volume`,
+             v.planGroups.length === 1 && v.planGroups[0].kind === 'codex' && v.clPlanRows.length === 0 &&
+             JSON.stringify(v.cxPlanRows) === JSON.stringify(['bad:5 h99%', 'ok:week16%']) && v.besideVel, JSON.stringify(v.planGroups));
+        }
+        if (sc.name === 'claude-none-off' && view === 'detailed') {
+          const diff = sameRects(v.panels, BEFORE_CODEX[`${size.w}x${size.h}`]);
+          ok(`${tag}   no Claude reading and no Codex: exactly the dashboard before Codex, no plan panel`,
+             diff === '' && v.plan === null && v.cxShown === 0, diff || JSON.stringify(v.planGroups));
+        }
+        if (sc.name.startsWith('claude-none') && view === 'simple') {
+          ok(`${tag}   no Claude reading: no Claude rows and no 0, the period footnote stays, no old note`,
+             v.clLimitRows.length === 0 && v.clLimits === null && /^Hours count since /.test(v.since || '') && v.nolimits === null &&
+             (sc.codex ? v.sideBySide : v.clFull), JSON.stringify([v.clLimitRows, v.clLimits, v.since]));
+        }
+      }
+    }
+  }
+
+  // The one-shot reset timer covers Claude's windows too, with Codex off so nothing else can arm it.
+  await measure(win, { w: 1920, h: 1080 });
+  for (const view of ['simple', 'detailed']) {
+    await setPrefs(view, false);
+    const rowOf = async () => {
+      const v = await win.webContents.executeJavaScript(VIEW);
+      return (view === 'simple' ? v.clLimitRows[0] : v.clPlanRows[0]) || '';
+    };
+    win.webContents.send('wall:usage', { ...idx, claudeLimits: claudeFixture(Date.now(), { resetIn: 1500 }) });
+    await wait(500);
+    const before = await rowOf();
+    await wait(1500);
+    const after = await rowOf();
+    ok(`${view}: a Claude window reads as its percent before it resets ("${before}") and as reset 2 s later ("${after}"), Codex off`,
+       /^warn:5(-hour window| h)86%/.test(before) && /^reset:5(-hour window| h)reset at /.test(after), JSON.stringify([before, after]));
+  }
+  win.webContents.send('wall:usage', idx);
+
+  // Clean pictures of both views with the Claude reading, Codex on and off, no popover over them.
+  if (SHOTS) {
+    for (const [view, codex] of [['detailed', true], ['simple', true], ['detailed', false], ['simple', false]]) {
+      await setPrefs(view, codex);
+      for (const size of [{ w: 1920, h: 1080 }, { w: 1366, h: 768 }]) {
+        await measure(win, size);
+        const popOpen = await win.webContents.executeJavaScript(`(() => { const p = document.querySelector('.ms-pop'); return !!p && getComputedStyle(p).display !== 'none'; })()`);
+        if (popOpen) {
+          await clickEl(view === 'simple' ? '#view-stats .today-panel' : '#view-stats .panel-daily');
+          await wait(300);
+        }
+        fs.writeFileSync(path.join(SHOTS, `plan-${view}${codex ? '' : '-codex-off'}-${size.w}x${size.h}.png`), (await win.webContents.capturePage()).toPNG());
+      }
+    }
+  }
+  await setPrefs('detailed', true);
 
   // A payload with no lane at all, from the very first paint: no empty "Today, side by side" panel.
   usageOverride = { ...idx, todaySlots: undefined, codex: { ...codexFixture(Date.now()), todaySlots: undefined } };

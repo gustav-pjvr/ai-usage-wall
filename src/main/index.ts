@@ -57,6 +57,8 @@ import {
   type CodexIndex,
 } from './data/codex-usage';
 import type { CodexView } from '../shared/codex-view';
+import { createClaudeLimitsKeeper } from './data/claude-limits';
+import type { ClaudeLimits } from '../shared/claude-limits';
 import { activeTime, type ActiveTime } from '../shared/active-time';
 import {
   applyLayerMode,
@@ -154,6 +156,16 @@ let codexDirty = false;
 let codexLastRun = 0;
 let codexLastSave = 0;
 const codexViews = createCodexViewKeeper();
+
+/*
+ * Claude's plan limits from `~/.claude.json` (src/main/data/claude-limits.ts):
+ * only the reading Claude Code keeps there, never anything else from the file.
+ * Polled once a minute with a stat; re-read only when the file changed; a push
+ * uses the kept value and never touches the disk.
+ */
+const claudeLimits = createClaudeLimitsKeeper();
+let claudeLimitsTimer: NodeJS.Timeout | null = null;
+const CLAUDE_LIMITS_POLL_MS = 60_000;
 /** Whether the last pass found the sessions folder, so its absence is logged once, not every sweep. */
 let codexPresent: boolean | null = null;
 
@@ -1537,7 +1549,34 @@ function claudeTodaySlots(merged: ReturnType<typeof mergedUsage>): number[] | nu
   return todaySlotsOf(merged.files, currentHistory().entries);
 }
 
-function usageForRenderer(merged = mergedUsage(), active = activeTimeNow(), codex = codexNow()): Record<string, unknown> {
+/** Claude's plan reading for this machine's own payload. Never on a screen: it shows the source's. */
+function claudeLimitsNow(): ClaudeLimits | null {
+  return projection.isScreen() ? null : claudeLimits.current();
+}
+
+/**
+ * Poll the reading: once now, then every 60 s. A push only when the reading
+ * itself changed, so Claude Code rewriting the file for other reasons costs a
+ * stat and nothing more. Not on a screen.
+ */
+function startClaudeLimits(): void {
+  const poll = (): void => {
+    if (projection.isScreen()) return;
+    void claudeLimits
+      .refresh()
+      .then((changed) => {
+        if (changed) pushUsage();
+      })
+      .catch(() => undefined);
+  };
+  poll();
+  if (!claudeLimitsTimer) {
+    claudeLimitsTimer = setInterval(poll, CLAUDE_LIMITS_POLL_MS);
+    claudeLimitsTimer.unref?.();
+  }
+}
+
+function usageForRenderer(merged = mergedUsage(), active = activeTimeNow(), codex = codexNow(), plan = claudeLimitsNow()): Record<string, unknown> {
   /*
    * A SCREEN shows the source's numbers, not its own. It does not index its own
    * transcripts at all while paired, so `usage` here is an empty index and
@@ -1555,6 +1594,7 @@ function usageForRenderer(merged = mergedUsage(), active = activeTimeNow(), code
   return {
     ...rest,
     ...(codex ? { codex } : {}),
+    ...(plan ? { claudeLimits: plan } : {}),
     ...(todaySlots ? { todaySlots } : {}),
     peak: currentPeak(),
     // This machine's own ledger. A screen has none: it is not indexing, and the
@@ -1590,10 +1630,12 @@ function pushUsage(): void {
   const merged = mergedUsage();
   const active = activeTimeNow();
   const codex = codexNow();
+  const plan = claudeLimitsNow();
   // The wire builds its optional `codex` block from this, masking projects
-  // like Claude's (src/shared/projection-wire.ts).
-  projection.offerUsage({ ...merged, activeTime: active, ...(codex ? { codex } : {}) }, usageIndexing);
-  const payload = usageForRenderer(merged, active, codex);
+  // like Claude's, and re-validates `claudeLimits` field by field
+  // (src/shared/projection-wire.ts).
+  projection.offerUsage({ ...merged, activeTime: active, ...(codex ? { codex } : {}), ...(plan ? { claudeLimits: plan } : {}) }, usageIndexing);
+  const payload = usageForRenderer(merged, active, codex, plan);
   for (const w of windows) {
     if (w.win.isDestroyed()) continue;
     w.win.webContents.send('wall:usage', payload);
@@ -1831,6 +1873,7 @@ function quit(): void {
   if (codexTimer) clearTimeout(codexTimer);
   codexWatcher?.close();
   if (codexSweep) clearInterval(codexSweep);
+  if (claudeLimitsTimer) clearInterval(claudeLimitsTimer);
   // Only once something was read: an empty index must not overwrite a good cache.
   if (codexLastRun) void saveCodexIndex(codexCacheFile(), withCodexPending(codexUsage)).catch(() => undefined);
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
@@ -2098,6 +2141,7 @@ if (!app.requestSingleInstanceLock()) {
           console.log('[usage] projection off, resuming local indexing');
           void refreshUsage('projection-off').then(startUsageWatch);
           void refreshCodex('projection-off').then(startCodexWatch);
+          startClaudeLimits();
         }
       },
       onUsage: () => pushUsage(),
@@ -2120,6 +2164,7 @@ if (!app.requestSingleInstanceLock()) {
     } else {
       void refreshUsage('startup').then(startUsageWatch);
       void refreshCodex('startup').then(startCodexWatch);
+      startClaudeLimits();
     }
     if (!isStatsOnly) startWatching();
 

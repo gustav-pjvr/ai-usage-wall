@@ -25,6 +25,7 @@
 import { labelProjects } from './project-label';
 import { buildLinks, type Link } from './constellation';
 import type { CodexLimits, CodexLimitWindow, CodexProject, CodexView } from './codex-view';
+import { cleanClaudeLimits, type ClaudeLimits } from './claude-limits';
 
 export const WIRE_VERSION = 1;
 
@@ -119,6 +120,14 @@ export interface ProjectedUsage {
    * no Codex sends nothing, so the screen shows no Codex toggle.
    */
   codex?: CodexView;
+  /**
+   * The source's Claude plan reading (src/shared/claude-limits.ts): its time,
+   * and per row a label, the percent used and the reset time. Nothing else
+   * from `~/.claude.json` exists on the source's side to send, and this is
+   * rebuilt by cleanClaudeLimits leaving and arriving. Optional: absent when
+   * the source has no valid reading, so the screen shows no Claude rows.
+   */
+  claudeLimits?: ClaudeLimits;
 }
 
 export interface WireActiveTime {
@@ -348,6 +357,12 @@ function wireCodex(c: any, share: boolean, homeDirName: string | undefined, from
 /** The field when there is Codex to show, nothing otherwise. */
 const codexField = (v: CodexView | undefined): { codex?: CodexView } => (v ? { codex: v } : {});
 
+/** The Claude plan reading, re-validated and rebuilt, when there is a valid one; nothing otherwise. */
+const claudeLimitsField = (v: unknown): { claudeLimits?: ClaudeLimits } => {
+  const c = cleanClaudeLimits(v);
+  return c ? { claudeLimits: c } : {};
+};
+
 export function toWire(index: any, opts: WireOptions): ProjectedUsage {
   const idx = index ?? {};
 
@@ -473,6 +488,7 @@ export function toWire(index: any, opts: WireOptions): ProjectedUsage {
     ...(idx.history ? { history: wireHistory(idx.history) } : {}),
     ...activeField(idx.activeTime),
     ...codexField(wireCodex(idx.codex, opts.shareProjectNames, opts.homeDirName, true)),
+    ...claudeLimitsField(idx.claudeLimits),
   };
 }
 
@@ -551,5 +567,7 @@ export function fromWire(w: ProjectedUsage): Record<string, unknown> {
     ...activeField(w.activeTime),
     // Re-validated on arrival. Projects only when the source shares names.
     ...codexField(wireCodex(w.codex, w.projectsShared === true, undefined, false)),
+    // Re-validated on arrival, row by row.
+    ...claudeLimitsField(w.claudeLimits),
   };
 }

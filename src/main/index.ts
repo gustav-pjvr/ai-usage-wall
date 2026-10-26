@@ -8,6 +8,7 @@
  * when one card changes.
  */
 
+import { refreshT3, withT3, type T3Snapshot } from './data/t3-usage';
 import { currentPeak, loadPeak, offerPeak } from './data/peak';
 import { evaluateMilestones, loadMilestones, markMilestonesSeen, milestonesForRenderer } from './data/milestones';
 import { velocityOf } from '../shared/velocity';
@@ -99,6 +100,7 @@ let stopWatching: (() => void) | null = null;
 let focusMode = false;
 let hidden = false;
 let usage: UsageIndex = emptyIndex();
+let t3Usage: T3Snapshot | undefined;
 /*
  * Contributions from a cache of an older INDEX_VERSION, waiting for a refresh
  * with a readable history store to archive the ones whose transcript is gone.
@@ -242,6 +244,7 @@ async function refreshUsage(reason: string): Promise<void> {
     if (!port.ready) await loadHistory(app.getPath('userData'));
     const result = await refreshIndex(usage, (p) => pushUsageProgress(p), { history: port, staleFiles });
     usage = result.index;
+    t3Usage = await refreshT3(app.getPath('userData'), t3Usage);
     if (port.ready && Object.keys(staleFiles).length) {
       // Settled: archived, or back in the live index. Anything else (locked) waits.
       staleFiles = Object.fromEntries(
@@ -1342,8 +1345,8 @@ function withPending(u: UsageIndex): UsageIndex {
  * a few thousand keys, cheap next to a push, so it is recomputed rather than
  * cached and can never be stale.
  */
-function mergedUsage(): ReturnType<typeof mergeHistory<UsageIndex>> {
-  return mergeHistory(usage, currentHistory());
+function mergedUsage() {
+  return withT3(mergeHistory(usage, currentHistory()), currentHistory(), historyPort().ready ? t3Usage : undefined, staleFiles);
 }
 
 /**
@@ -1357,7 +1360,7 @@ function mergedUsage(): ReturnType<typeof mergeHistory<UsageIndex>> {
  * once per push rather than kept, so it can never be stale.
  */
 function activeTimeNow(): ActiveTime {
-  return activeTime(usage.files, currentHistory().entries);
+  return activeTime(mergedUsage().files, currentHistory().entries);
 }
 
 function usageForRenderer(merged = mergedUsage(), active = activeTimeNow()): Record<string, unknown> {
@@ -1382,7 +1385,7 @@ function usageForRenderer(merged = mergedUsage(), active = activeTimeNow()): Rec
     milestones: milestonesForRenderer(merged, usageIndexing),
     activeTime: active,
     // Transcripts on disk. Archived ones are counted in `history`, never here.
-    fileCount: Object.keys(files).length,
+    fileCount: Object.keys(files).filter((p) => !p.startsWith('t3:')).length,
     indexing: usageIndexing,
     projection: projection.projectionStatus(),
   };
@@ -1709,12 +1712,12 @@ function registerIpc(): void {
    */
   const timelapseReady = (): boolean => !usageIndexing && !usage.unavailable && !projection.isScreen();
   ipcMain.handle('wall:timelapseDays', () =>
-    timelapseReady() ? offeredDays(mergedUsage().activeDays, usage.files, currentHistory().entries) : null,
+    timelapseReady() ? offeredDays(mergedUsage().activeDays, mergedUsage().files, currentHistory().entries) : null,
   );
   ipcMain.handle('wall:timelapseDay', (_e, day: unknown) => {
     if (!timelapseReady() || typeof day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
     try {
-      return collectDay(day, usage.files, currentHistory().entries, mergedUsage().activeDays[day] ?? 0, Date.now());
+      return collectDay(day, mergedUsage().files, currentHistory().entries, mergedUsage().activeDays[day] ?? 0, Date.now());
     } catch (err) {
       // Only a broken live/archived invariant throws. Say so in the log; the
       // renderer shows "Could not read that day" rather than a wrong curve.

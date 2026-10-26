@@ -177,3 +177,34 @@ listed below Claude's. Codex off: exactly today's dashboard.
 **Scale rule.** Codex is 0.07% of the two together, so on a shared scale it
 would be invisible. Every chart gives each its own scale and says so; the hero
 states the share in words.
+
+## 5. Next release: Claude plan limits (Gustav, 2026-10-26)
+
+Asked for after trying 0.10.0: "Why cant we have the usage limits for claude
+here too?" The 2026-10-10 survey said Claude Code keeps no plan limits on
+disk. That was wrong: `~/.claude.json` holds `cachedUsageUtilization`, a
+reading Claude Code fetches itself (`fetchedAtMs`, last seen 2026-10-26 12:17
+UTC). Fields used, nothing else (the file also holds account details and
+tokens; read only this key):
+
+- `utilization.five_hour` and `utilization.seven_day`: `utilization` (percent
+  used) and `resets_at` (ISO).
+- `utilization.limits[]`: `kind` (`session`, `weekly_all`, `weekly_scoped`),
+  `percent`, `resets_at`, `severity`, and for `weekly_scoped` the model
+  (`scope.model.display_name`, e.g. "Fable").
+
+Checked the same minute against T3 Code's Limits page, which shows percent
+LEFT: Claude session 14% left (86% used), weekly 93% left (7% used), weekly
+Fable 100% left (0% used), resets matching to the minute.
+
+Decisions:
+- A Claude plan panel beside Codex's, in the Detailed view's right stack and
+  on the Simple view's Claude card (replacing "no plan limits on disk").
+- Displayed exactly as the Codex panel: percent USED, reset times, and the
+  reading's age; a window past its `resets_at` shows as reset, never the
+  stale percent. One row per window: session, weekly, and each scoped weekly
+  limit (e.g. "Week, Fable").
+- Read-only, only that key, never any credential; a missing or malformed key
+  hides the panel (never 0). Watched like the transcripts, since Claude Code
+  rewrites the file when it refreshes the reading.
+- Paired screens: carried in the wire like Codex's limits.

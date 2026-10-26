@@ -1375,6 +1375,9 @@
 
 /* A measured nothing hides; it is never painted as 0. */
 .stats .panel-plan[data-on='off'],
+.stats .plan-group[data-on='off'],
+.stats .plan-note[data-on='off'],
+.stats .eng-since[data-on='off'],
 .stats .ran-line-cx[data-on='off'],
 .stats .cost-gap-cx[data-on='off'],
 .stats .eng-gap[data-on='off'],
@@ -1419,12 +1422,20 @@
 
 /* ── Detailed view, Codex on ────────────────────────────────────────────── */
 
-/* The top row makes room for the plan panel, as the mock does: hero 5, sky 4, stack 3. */
-.stats[data-codex='on'] .panel-live { grid-column: span 4; }
-.stats[data-codex='on'] .panel-stack { grid-column: span 3; }
+/*
+ * The top row makes room for the plan panel, as the mock does: hero 5, sky 4,
+ * stack 3. Also with Codex off whenever there is a Claude plan reading
+ * (`data-plan`, written by paintPlan): the plan panel sits beside Recent
+ * volume either way (section 5 of the design note).
+ */
+.stats[data-codex='on'] .panel-live,
+.stats[data-plan='on'] .panel-live { grid-column: span 4; }
+.stats[data-codex='on'] .panel-stack,
+.stats[data-plan='on'] .panel-stack { grid-column: span 3; }
 
 @media (max-width: 1500px) and (min-height: 1000px) {
-  .stats[data-codex='on'] .panel-live { grid-column: span 5; }
+  .stats[data-codex='on'] .panel-live,
+  .stats[data-plan='on'] .panel-live { grid-column: span 5; }
 }
 
 /* Hero: Claude's figure, then Codex's with its share in words, then its own strip. */
@@ -1485,17 +1496,29 @@
 .cost-body > .split-row.cx,
 .ran-body > .split-row.cx { margin-top: calc(var(--u) * 8); }
 
-/* Velocity and the Codex plan share the lower part of the stack. */
+/*
+ * Velocity and the plan limits share the lower part of the stack whenever
+ * there is a plan reading, Claude's or Codex's (`data-plan` on .stack-low,
+ * written by paintPlan). With neither, velocity has the row to itself.
+ */
 .stack-low {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
   gap: calc(var(--u) * 12); /* the grid gap */
 }
-.stats[data-codex='on'] .stack-low .panel-vel { flex: 1 1 0; min-width: 0; }
-.stack-low .panel-plan { flex: 1 1 0; min-width: 0; --pi: 3; }
-.stats[data-codex='on'] .stack-low .panel-head { flex-wrap: wrap; row-gap: calc(var(--u) * 4); }
-.stats[data-codex='on'] .stack-low .panel-title { white-space: nowrap; }
+.stats[data-codex='on'] .stack-low .panel-vel,
+.stack-low[data-plan='on'] .panel-vel { flex: 1 1 0; min-width: 0; }
+/*
+ * Size containment: the plan's rows never make the lower stack taller (which
+ * would squeeze the cost row above it); the panel takes the height velocity
+ * sets, and the render suite proves its rows fit in it.
+ */
+.stack-low .panel-plan { flex: 1 1 0; min-width: 0; contain: size; --pi: 3; }
+.stats[data-codex='on'] .stack-low .panel-head,
+.stack-low[data-plan='on'] .panel-head { flex-wrap: wrap; row-gap: calc(var(--u) * 4); }
+.stats[data-codex='on'] .stack-low .panel-title,
+.stack-low[data-plan='on'] .panel-title { white-space: nowrap; }
 
 .plan-body {
   flex: 1;
@@ -1506,24 +1529,62 @@
   gap: calc(var(--u) * 8);
 }
 
+/* One group per provider: its name and the reading's age, its rows, its resets. */
+.plan-group {
+  display: grid;
+  gap: calc(var(--u) * 5);
+  min-width: 0;
+}
+
+.plan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--u) * 8);
+  min-width: 0;
+}
+
+.plan-age {
+  font-size: max(8px, calc(var(--u) * 10.5));
+  color: oklch(0.62 0.015 240);
+  white-space: nowrap;
+}
+
+/* Both groups shown: tighter, so seven lines fit where two used to. */
+.panel-plan[data-groups='2'] .plan-body { gap: calc(var(--u) * 7); }
+.panel-plan[data-groups='2'] .plan-group { gap: calc(var(--u) * 2); }
+.panel-plan[data-groups='2'] .lim-rows { row-gap: calc(var(--u) * 3); }
+.panel-plan[data-groups='2'] .plan-note { line-height: 1.2; }
+.panel-plan[data-groups='2'] .lim-num { font-size: calc(var(--u) * 13); }
+.panel-plan[data-groups='2'] .lim-bar { height: max(3px, calc(var(--u) * 6)); }
+
+/*
+ * The rows share one set of columns (subgrid), so every bar in a group starts
+ * at the same x whatever its label: "week, Fable" next to "5 h".
+ */
 .lim-rows {
   display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: calc(var(--u) * 8);
 }
 
 .lim-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: calc(var(--u) * 8);
 }
 
 .lim-label {
+  min-width: 0;
+  max-width: calc(var(--u) * 92);
   font-size: max(8px, calc(var(--u) * 10.5));
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: oklch(0.68 0.015 235);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lim-bar {
@@ -1541,6 +1602,8 @@
   border-radius: inherit;
   background: var(--cdx);
 }
+/* Claude's rows in its teal; the warn and bad tones below still win. */
+.lim-cl .lim-fill { background: var(--sig); }
 
 .lim-num {
   font-family: var(--mono);
@@ -1570,9 +1633,13 @@
 }
 
 .plan-note {
+  min-width: 0;
   font-size: max(8px, calc(var(--u) * 10.5));
   line-height: 1.35;
   color: oklch(0.62 0.015 240);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Totals as a table with a Claude and a Codex column. */
@@ -1848,10 +1915,12 @@
   gap: calc(var(--u) * 12);
 }
 
-.eng-limits .lim-row {
-  grid-template-columns: calc(var(--u) * 130) minmax(0, 1fr) calc(var(--u) * 60) calc(var(--u) * 150);
-  gap: calc(var(--u) * 14);
+.eng-limits .lim-rows {
+  grid-template-columns: auto minmax(0, 1fr) calc(var(--u) * 60) calc(var(--u) * 150);
+  column-gap: calc(var(--u) * 14);
 }
+/* At least the width the Codex card always had; Claude's "This week, Fable" may take more. */
+.eng-limits .lim-label { min-width: calc(var(--u) * 130); max-width: calc(var(--u) * 240); }
 .eng-limits .lim-bar { height: max(5px, calc(var(--u) * 10)); }
 .eng-limits .lim-num { font-size: calc(var(--u) * 20); }
 
@@ -1866,13 +1935,12 @@
   color: oklch(0.6 0.015 240);
 }
 
-.eng-nolimits {
-  margin-top: calc(var(--u) * 18);
-  padding-top: calc(var(--u) * 18);
-  border-top: 1px solid oklch(1 0 0 / 0.07);
-  font-size: max(8px, calc(var(--u) * 12));
-  line-height: 1.5;
-  color: oklch(0.62 0.015 240);
+/* Which period Claude's hours and tokens count from: a footnote, under the plan rows when there are any. */
+.eng-since {
+  margin-top: calc(var(--u) * 12);
+  font-size: max(8px, calc(var(--u) * 10.5));
+  line-height: 1.4;
+  color: oklch(0.58 0.015 240);
 }
 
 /* Today, side by side: a lane per provider on one 24-hour axis. */

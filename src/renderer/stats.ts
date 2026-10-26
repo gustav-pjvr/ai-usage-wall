@@ -6,7 +6,8 @@
  *   DERIVED   computed from measured values, with the method stated
  * and anything that cannot be known is stated as unavailable rather than
  * filled with a plausible number. See src/main/data/usage.ts for what was
- * ruled out and why (quota, plan limits and cost are all unobtainable here).
+ * ruled out and why; plan limits are read from Claude Code's own reading
+ * (src/main/data/claude-limits.ts).
  *
  * MOTION BUDGET. This runs on a wall that is up 24/7, so the animation loop
  * only turns while the stats view is actually on screen, and it throttles hard
@@ -19,8 +20,9 @@ import { formatHours } from '../shared/active-time';
 import { labelProjects } from '../shared/project-label';
 import { ConstellationPanel } from './constellation';
 import { velocityOf, VELOCITY_WINDOW_MS } from '../shared/velocity';
-import { windowCurrent, type CodexView } from '../shared/codex-view';
-import { SimpleView, hasLimits, paintLimitRows, planNote, shareText, who, type ClaudeUsage } from './side-by-side';
+import type { CodexView } from '../shared/codex-view';
+import { cleanClaudeLimits, type ClaudeLimits } from '../shared/claude-limits';
+import { SimpleView, claudeRows, codexRows, hasLimits, paintLimitRows, readAgo, resetsText, shareText, who, type ClaudeUsage, type PlanRow } from './side-by-side';
 
 /** Minutes in the velocity window, for turning the rate back into a total. */
 const VELOCITY_WINDOW_MIN = VELOCITY_WINDOW_MS / 60_000;
@@ -661,12 +663,15 @@ export class StatsView {
   private view: 'detailed' | 'simple' = 'detailed';
   private wantCodex = true;
   private codex: CodexView | null = null;
+  /** Claude's plan reading (src/shared/claude-limits.ts), validated on arrival. Null hides its rows. */
+  private claudePlan: ClaudeLimits | null = null;
   private readonly simple = new SimpleView();
 
   constructor() {
     this.root = el('div', 'stats');
     this.root.dataset.view = this.view;
     this.root.dataset.codex = 'off';
+    this.root.dataset.plan = 'off';
     this.build();
     this.setTopPanel(this.topPanel);
   }
@@ -913,24 +918,34 @@ export class StatsView {
     velBody.appendChild(peak);
     vel.appendChild(velBody);
     /*
-     * Velocity shares the lower part of the stack with the Codex plan panel
-     * when Codex is shown. The wrapper is a one-child flex row otherwise, so
-     * velocity keeps exactly the box it had.
+     * Velocity shares the lower part of the stack with the plan panel when
+     * there is a plan reading to show. The wrapper is a one-child flex row
+     * otherwise, so velocity keeps exactly the box it had.
      */
     const low = el('div', 'stack-low');
+    low.dataset.plan = 'off';
     low.appendChild(vel);
 
     /*
-     * Codex's plan limits, from its own rate_limits reading. Measured, but a
-     * reading taken when Codex last ran, so the note always carries its age,
-     * and a window whose reset time has passed shows as reset, never the stale
-     * percentage. No reading at all: the panel is not shown.
+     * Plan limits: Claude's, from the reading Claude Code keeps in
+     * ~/.claude.json, then Codex's, from its own rate_limits reading
+     * (docs/design/codex-side-by-side.md, section 5). Measured, but each a
+     * reading taken at some moment, so each group carries its age, and a
+     * window whose reset time has passed shows as reset, never the stale
+     * percentage. A group with no reading is not shown; no reading at all
+     * and the panel is not shown.
      */
-    const plan = panel('Codex plan', 'measured', 'panel-plan cx');
+    const plan = panel('Plan limits', 'measured', 'panel-plan');
     plan.dataset.on = 'off';
     const planBody = el('div', 'plan-body');
-    planBody.appendChild(el('div', 'lim-rows'));
-    planBody.appendChild(el('div', 'plan-note', ''));
+    for (const kind of ['claude', 'codex'] as const) {
+      const group = el('div', `plan-group plan-${kind === 'claude' ? 'cl' : 'cx cx'}`);
+      group.dataset.on = 'off';
+      const head = el('div', 'plan-head');
+      head.append(who(kind, kind === 'claude' ? 'Claude' : 'Codex'), el('span', 'plan-age', ''));
+      group.append(head, el('div', `lim-rows ${kind === 'claude' ? 'lim-cl' : 'lim-cx'}`), el('div', 'plan-note', ''));
+      planBody.appendChild(group);
+    }
     plan.appendChild(planBody);
     low.appendChild(plan);
     stack.appendChild(low);
@@ -1062,7 +1077,7 @@ export class StatsView {
      * one hover away, and ARCHITECTURE.md carries the full version.
      */
     const version = el('span', 'status-item status-version', '');
-    version.title = 'No quota, plan limit or cost data exists locally, so none is shown.';
+    version.title = 'Plan limits are the reading Claude Code and Codex keep themselves; nothing else on this machine records quota.';
     strip.appendChild(version);
     this.root.appendChild(strip);
     this.root.appendChild(this.tip.node);
@@ -1179,11 +1194,10 @@ export class StatsView {
   private armResetTimer(): void {
     this.clearResetTimer();
     if (!this.visible) return;
-    const lim = this.cxOn() ? this.codex?.limits : null;
-    if (!lim) return;
     const now = Date.now();
     let next = Infinity;
-    for (const w of [lim.fiveHour, lim.weekly]) if (windowCurrent(w, now)) next = Math.min(next, w!.resetsAt);
+    // Claude's windows and Codex's alike: whichever resets first.
+    for (const w of this.planRows()) if (w.resetsAt > now) next = Math.min(next, w.resetsAt);
     if (!Number.isFinite(next)) return;
     // A timer's longest delay is about 24.8 days; a clamped one fires early and re-arms.
     const delay = Math.min(next - now + 50, 2_000_000_000);
@@ -1201,6 +1215,7 @@ export class StatsView {
     // Codex rides on the same push. Absent, or still on its first index: treated as not there.
     const cx = (idx as unknown as { codex?: CodexView | null }).codex;
     this.codex = cx && typeof cx === 'object' && cx.totals && !cx.indexing ? cx : null;
+    this.claudePlan = cleanClaudeLimits((idx as unknown as { claudeLimits?: unknown }).claudeLimits);
 
     /*
      * Only leave the loading state when the main process says the index is
@@ -1459,20 +1474,46 @@ export class StatsView {
     this.paintPlan();
   }
 
-  /** The Codex plan panel. Run on every push and on the clock, so a reset window flips on time. */
+  /** Every plan window on screen, Claude's and (when shown) Codex's, for the reset timer. */
+  private planRows(): PlanRow[] {
+    const lim = this.cxOn() ? this.codex?.limits : null;
+    return [...(this.claudePlan ? claudeRows(this.claudePlan) : []), ...(hasLimits(lim) ? codexRows(lim) : [])];
+  }
+
+  /**
+   * The plan panel: Claude's group, then Codex's. Run on every push and on the
+   * clock, so a reset window flips on time. With neither reading the panel is
+   * off and velocity keeps the whole lower stack, exactly as before.
+   */
   private paintPlan(): void {
     this.armResetTimer();
     const plan = this.root.querySelector<HTMLElement>('.panel-plan');
     if (!plan) return;
-    const lim = this.cxOn() ? this.codex?.limits : null;
-    if (!hasLimits(lim)) {
-      plan.dataset.on = 'off';
-      return;
-    }
-    plan.dataset.on = 'on';
     const now = Date.now();
-    paintLimitRows(plan.querySelector('.lim-rows') as HTMLElement, lim, now, false);
-    (plan.querySelector('.plan-note') as HTMLElement).textContent = planNote(lim, now, false);
+    const lim = this.cxOn() ? this.codex?.limits : null;
+    const groups: [string, PlanRow[] | null, string | null][] = [
+      ['.plan-cl', this.claudePlan ? claudeRows(this.claudePlan) : null, this.claudePlan?.at ?? null],
+      ['.plan-cx', hasLimits(lim) ? codexRows(lim) : null, hasLimits(lim) ? lim.at : null],
+    ];
+    let shown = 0;
+    for (const [sel, rows, at] of groups) {
+      const g = plan.querySelector<HTMLElement>(sel);
+      if (!g) continue;
+      g.dataset.on = rows && at ? 'on' : 'off';
+      if (!rows || !at) continue;
+      shown++;
+      paintLimitRows(g.querySelector('.lim-rows') as HTMLElement, rows, now, false);
+      (g.querySelector('.plan-age') as HTMLElement).textContent = readAgo(at, now);
+      const note = g.querySelector('.plan-note') as HTMLElement;
+      note.textContent = resetsText(rows, now);
+      note.dataset.on = note.textContent ? 'on' : 'off';
+    }
+    plan.dataset.on = shown ? 'on' : 'off';
+    plan.dataset.groups = String(shown);
+    const low = plan.parentElement;
+    if (low) low.dataset.plan = shown ? 'on' : 'off';
+    // The top row makes room for it (stats.css, "Detailed view, Codex on").
+    this.root.dataset.plan = shown ? 'on' : 'off';
   }
 
   private paintCharts(idx: UsageIndex): void {

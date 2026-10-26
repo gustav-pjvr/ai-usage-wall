@@ -6,8 +6,9 @@
  *
  *   - the SIMPLE view: one large card per engine and a full-width "Today, side
  *     by side" panel with a lane per provider on one 24-hour axis;
- *   - the small Codex helpers the detailed view shares with it (the plan rows,
- *     reset and reading times, model names, the provider label).
+ *   - the small helpers the detailed view shares with it (the plan rows for
+ *     Claude and Codex, reset and reading times, model names, the provider
+ *     label).
  *
  * Honesty rules carried over from the rest of the wall:
  *   - a number nothing measured is HIDDEN, never painted as 0;
@@ -15,7 +16,8 @@
  *     fraction of a percent of Claude and would be invisible on a shared one;
  *   - a plan window whose reset time has passed shows as reset, never the stale
  *     percentage it last read (windowCurrent, src/shared/codex-view.ts);
- *   - the plan reading always shows its age: it is from when Codex last ran.
+ *   - the plan reading always shows its age: it is from when Codex last ran,
+ *     or, for Claude, from when Claude Code last fetched it (section 5).
  *
  * Repaint cost: everything here is rebuilt only when its own inputs change
  * (a signature per card and per lane), and the clock only moves the now marker
@@ -26,6 +28,7 @@ import { formatCost } from '../shared/pricing';
 import { formatHours } from '../shared/active-time';
 import { localDayKey } from '../shared/day';
 import { windowCurrent, type CodexLimits, type CodexView } from '../shared/codex-view';
+import { cleanClaudeLimits, type ClaudeLimits } from '../shared/claude-limits';
 import { compact, compactPrecise } from './stats';
 
 // ── Shared helpers ─────────────────────────────────────────────────────────
@@ -116,8 +119,40 @@ export function shareText(part: number, whole: number): string {
   return `${pct >= 0.1 ? pct.toFixed(1) : pct.toFixed(2)}%`;
 }
 
-/** Ink for a used percentage: red at 90 and over, amber at 70, otherwise Codex's own violet. */
+/** Ink for a used percentage: red at 90 and over, amber at 70, otherwise the provider's own colour. */
 const toneOf = (pct: number): string => (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'ok');
+
+/**
+ * One plan window as the rows paint it, whichever provider it came from.
+ * `short` is the detailed panel's label, `long` the simple card's.
+ */
+export interface PlanRow {
+  short: string;
+  long: string;
+  usedPercent: number;
+  /** Epoch ms. Once in the past, the window has reset. */
+  resetsAt: number;
+}
+
+/** Codex's two windows as rows. */
+export function codexRows(limits: CodexLimits): PlanRow[] {
+  const rows: PlanRow[] = [];
+  if (limits.fiveHour) rows.push({ short: '5 h', long: '5-hour window', usedPercent: limits.fiveHour.usedPercent, resetsAt: limits.fiveHour.resetsAt });
+  if (limits.weekly) rows.push({ short: 'week', long: 'This week', usedPercent: limits.weekly.usedPercent, resetsAt: limits.weekly.resetsAt });
+  return rows;
+}
+
+/** Claude's rows: "5 h" (session), "week", and "week, <model>" per scoped limit, in the words Codex's rows use. */
+export function claudeRows(limits: ClaudeLimits): PlanRow[] {
+  return limits.rows.map((r) => ({
+    short: r.label,
+    long: r.label === '5 h' ? '5-hour window' : r.label === 'week' ? 'This week' : `This ${r.label}`,
+    usedPercent: r.usedPercent,
+    resetsAt: r.resetsAt,
+  }));
+}
+
+const rowCurrent = (r: PlanRow, now: number): boolean => windowCurrent({ usedPercent: r.usedPercent, windowMinutes: 0, resetsAt: r.resetsAt }, now);
 
 /**
  * The plan rows, into `box`. `long` is the simple view's wording, with a
@@ -125,17 +160,12 @@ const toneOf = (pct: number): string => (pct >= 90 ? 'bad' : pct >= 70 ? 'warn' 
  * resets once in its note instead. A window that has reset says so in place
  * of its bar and percent, so the stale reading can never be read as current.
  */
-export function paintLimitRows(box: HTMLElement, limits: CodexLimits, now: number, long: boolean): void {
+export function paintLimitRows(box: HTMLElement, rows: PlanRow[], now: number, long: boolean): void {
   box.replaceChildren();
-  const rows: [string, CodexLimits['fiveHour']][] = [
-    [long ? '5-hour window' : '5 h', limits.fiveHour],
-    [long ? 'This week' : 'week', limits.weekly],
-  ];
-  for (const [label, w] of rows) {
-    if (!w) continue;
+  for (const w of rows) {
     const row = el('div', 'lim-row');
-    row.append(el('span', 'lim-label', label));
-    if (windowCurrent(w, now)) {
+    row.append(el('span', 'lim-label', long ? w.long : w.short));
+    if (rowCurrent(w, now)) {
       const pct = Math.max(0, Math.min(100, Number(w.usedPercent) || 0));
       row.dataset.tone = toneOf(pct);
       const bar = el('span', 'lim-bar');
@@ -156,6 +186,14 @@ export function paintLimitRows(box: HTMLElement, limits: CodexLimits, now: numbe
   }
 }
 
+/** "resets 16:00 and Mon 2 Nov": the windows still current, each time once. Empty when every window has reset. */
+export function resetsText(rows: PlanRow[], now: number): string {
+  const times = [...new Set(rows.filter((w) => rowCurrent(w, now)).map((w) => whenAhead(w.resetsAt, now)))];
+  if (!times.length) return '';
+  const list = times.length === 1 ? times[0] : `${times.slice(0, -1).join(', ')} and ${times[times.length - 1]}`;
+  return `resets ${list}`;
+}
+
 /** The line under the plan rows: when the windows reset and how old the reading is. */
 export function planNote(limits: CodexLimits, now: number, long: boolean): string {
   const at = Date.parse(limits.at);
@@ -166,11 +204,21 @@ export function planNote(limits: CodexLimits, now: number, long: boolean): strin
       ? `${plan}Reading time unknown.`
       : `${plan}Read at ${whenPast(read, now)} (${ago(read, now)}), when Codex last ran.`;
   }
-  const resets = [limits.fiveHour, limits.weekly]
-    .filter((w) => windowCurrent(w, now))
-    .map((w) => whenAhead(w!.resetsAt, now));
-  const head = resets.length ? `resets ${resets.join(' and ')}. ` : '';
+  const resets = resetsText(codexRows(limits), now);
+  const head = resets ? `${resets}. ` : '';
   return `${head}Read ${read === null ? 'at an unknown time' : ago(read, now)}`;
+}
+
+/** The simple card's line under Claude's rows, worded like Codex's. */
+export function claudeNote(limits: ClaudeLimits, now: number): string {
+  const read = Date.parse(limits.at);
+  return Number.isFinite(read) ? `Read at ${whenPast(read, now)} (${ago(read, now)}), by Claude Code.` : 'Reading time unknown.';
+}
+
+/** A reading's age for the detailed panel's group heads: "read 3m ago". */
+export function readAgo(at: string, now: number): string {
+  const read = Date.parse(at);
+  return Number.isFinite(read) ? `read ${ago(read, now)}` : 'read at an unknown time';
 }
 
 /** Whether the reading has at least one window to show. */
@@ -236,6 +284,8 @@ export interface ClaudeUsage {
   activeDays?: Record<string, number>;
   activeTime?: { seconds?: number; since?: number | null };
   todaySlots?: number[];
+  /** Claude's plan reading (src/shared/claude-limits.ts). Re-validated here; absent or malformed hides the rows. */
+  claudeLimits?: unknown;
 }
 
 interface EngineNodes {
@@ -253,10 +303,12 @@ interface EngineNodes {
   todayStat: HTMLElement;
   spark: HTMLElement;
   first: HTMLElement;
-  /** Codex only: the plan rows and the reading line. Claude: the honest note. */
+  /** The plan rows and the reading line, for either provider. */
   limits: HTMLElement;
-  limitRows: HTMLElement | null;
-  limitNote: HTMLElement | null;
+  limitRows: HTMLElement;
+  limitNote: HTMLElement;
+  /** Claude only: which period the hours and the tokens count from, when they differ. */
+  since: HTMLElement | null;
 }
 
 /**
@@ -305,20 +357,17 @@ function engine(kind: 'claude' | 'codex'): EngineNodes {
   const first = el('span', undefined, '');
   foot.append(first, el('span', undefined, 'last 14 days, its own scale'), el('span', undefined, 'today'));
 
-  let limits: HTMLElement;
-  let limitRows: HTMLElement | null = null;
-  let limitNote: HTMLElement | null = null;
-  if (isCx) {
-    limits = el('div', 'eng-limits');
-    limitRows = el('div', 'lim-rows');
-    limitNote = el('div', 'eng-asof', '');
-    limits.append(limitRows, limitNote);
-  } else {
-    limits = el('div', 'eng-nolimits', '');
-  }
+  // Both cards show their plan the same way; Claude's rows in its teal, Codex's in violet.
+  const limits = el('div', 'eng-limits');
+  limits.dataset.on = 'off';
+  const limitRows = el('div', `lim-rows ${isCx ? 'lim-cx' : 'lim-cl'}`);
+  const limitNote = el('div', 'eng-asof', '');
+  limits.append(limitRows, limitNote);
+  const since = isCx ? null : el('div', 'eng-since', '');
 
   root.append(top, big, bigsub, row, gap, spark, foot, limits);
-  return { root, models, big, bigsub, cost, costStat, gap, hours, hoursStat, today, todayStat, spark, first, limits, limitRows, limitNote };
+  if (since) root.append(since);
+  return { root, models, big, bigsub, cost, costStat, gap, hours, hoursStat, today, todayStat, spark, first, limits, limitRows, limitNote, since };
 }
 
 export class SimpleView {
@@ -333,6 +382,7 @@ export class SimpleView {
   private sparkSig = { cl: '', cx: '' };
   private laneSig = { cl: '', cx: '' };
   private codex: CodexView | null = null;
+  private plan: ClaudeLimits | null = null;
 
   constructor() {
     this.root = el('div', 'simple');
@@ -364,6 +414,7 @@ export class SimpleView {
   /** New data. `codex` is null when it is absent or still being indexed for the first time. */
   update(u: ClaudeUsage, codex: CodexView | null, now = Date.now()): void {
     this.codex = codex;
+    this.plan = cleanClaudeLimits(u.claudeLimits);
     const today = localDayKey(now);
     const days = last14(now);
 
@@ -384,9 +435,11 @@ export class SimpleView {
     if (reqOn) this.cl.today.textContent = (u.activeDays![today] ?? 0).toLocaleString('en-US');
     this.paintSpark('cl', days.map((k) => (u.daily?.[k] ? totalOf(u.daily[k]) : 0)), days);
     const hoursSince = hoursOn ? dayMonth(at!.since as number, false) : null;
-    this.cl.limits.textContent = `Claude Code keeps no plan limits on disk, so none are shown.${
-      hoursSince && since ? ` Hours count since ${hoursSince}; tokens and cost since ${since}.` : ''
-    }`;
+    const sinceText = hoursSince && since ? `Hours count since ${hoursSince}; tokens and cost since ${since}.` : '';
+    if (this.cl.since) {
+      this.cl.since.textContent = sinceText;
+      this.cl.since.dataset.on = sinceText ? 'on' : 'off';
+    }
 
     // ── Codex ──
     if (codex) {
@@ -423,16 +476,21 @@ export class SimpleView {
     this.tick(now);
   }
 
-  /** The clock: the now marker, the plan windows (one may have just reset) and the reading's age. */
+  /** The clock: the now marker, the plan windows (one may have just reset) and the readings' age. */
   tick(now = Date.now()): void {
     const x = nowSlot(now).toFixed(2);
     for (const m of this.markers) m.setAttribute('x', x);
-    const cx = this.codex;
-    const lim = cx?.limits;
+    const lim = this.codex?.limits;
     this.cx.limits.dataset.on = hasLimits(lim) ? 'on' : 'off';
-    if (hasLimits(lim) && this.cx.limitRows && this.cx.limitNote) {
-      paintLimitRows(this.cx.limitRows, lim, now, true);
+    if (hasLimits(lim)) {
+      paintLimitRows(this.cx.limitRows, codexRows(lim), now, true);
       this.cx.limitNote.textContent = planNote(lim, now, true);
+    }
+    const plan = this.plan;
+    this.cl.limits.dataset.on = plan ? 'on' : 'off';
+    if (plan) {
+      paintLimitRows(this.cl.limitRows, claudeRows(plan), now, true);
+      this.cl.limitNote.textContent = claudeNote(plan, now);
     }
   }
 

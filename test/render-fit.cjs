@@ -194,6 +194,7 @@ function fixture(emptyIndex) {
   idx.totals = t(48_100_000, 62_400_000, 690_000_000, 25_300_000_000, 72_060, 48_479.2412);
   idx.unavailable = false;
   idx.lastScanMs = 118;
+  idx.sourceHealth = { checkedAt: new Date().toISOString(), t3: 'ready', fallbackSessions: 12, skippedTurns: 3 };
   idx.latest = {
     ts: new Date(now - 40_000).toISOString(),
     model: 'claude-opus-5',

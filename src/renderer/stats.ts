@@ -850,6 +850,7 @@ export class StatsView {
     strip.appendChild(proj);
     strip.appendChild(el('span', 'status-item status-source', ''));
     strip.appendChild(el('span', 'status-item status-scan', ''));
+    strip.appendChild(el('span', 'status-item status-t3', ''));
     strip.appendChild(el('span', 'status-item status-ver', ''));
     strip.appendChild(el('span', 'status-item status-last', ''));
     /*
@@ -1006,8 +1007,8 @@ export class StatsView {
      * their age.
      */
     const nothing = screen
-      ? screen.lastAt === null && idx.totals.requests === 0
-      : idx.unavailable && idx.totals.requests === 0;
+      ? screen.lastAt === null && (idx.totals.requests === 0 && totalOf(idx.totals) === 0)
+      : idx.unavailable && (idx.totals.requests === 0 && totalOf(idx.totals) === 0);
     this.root.classList.toggle('is-nodata', nothing);
     if (nothing) this.paintNoData(screen, idx);
 
@@ -1020,7 +1021,7 @@ export class StatsView {
      */
     const stale = screen
       ? screen.phase !== 'live' || idx.unavailable
-      : idx.unavailable && idx.totals.requests > 0;
+      : idx.unavailable && (idx.totals.requests > 0 || totalOf(idx.totals) > 0);
     this.root.classList.toggle('is-stale-data', stale);
 
     // "this machine" becomes a lie the moment the data is projected.
@@ -1361,7 +1362,12 @@ export class StatsView {
           ? `${full(fileCount)} transcripts on disk, ${full(archivedCount(idx))} archived`
           : `${full(fileCount)} transcripts indexed`,
     );
-    set('.status-scan', `scan ${idx.lastScanMs}ms`);
+    const health = (idx as UsageIndex & { sourceHealth?: { checkedAt: string; t3: string; fallbackSessions: number; skippedTurns: number } }).sourceHealth;
+    set('.status-scan', health ? `Claude checked ${relTime(health.checkedAt)}` : `scan ${idx.lastScanMs}ms`);
+    set('.status-t3', health ? `T3 Claude: ${health.t3 === 'ready' ? 'checked' : health.t3}${health.fallbackSessions ? `, ${health.fallbackSessions} fallback sessions` : ''}` : '');
+    const t3Status = this.root.querySelector<HTMLElement>('.status-t3');
+    if (t3Status) t3Status.title = health
+      ? `Claude transcripts take priority. T3 supplies only missing sessions with complete main-agent usage and no subagents. ${health.skippedTurns} turns lack eligible usage. Fallback tokens are unpriced; API request counts, active hours and live velocity remain transcript-only. Codex is not included.` : '';
     set('.status-ver', idx.latest.version ? `claude code ${idx.latest.version}` : '');
     set('.status-last', `last record ${relTime(idx.latest.ts)}`);
     this.root.classList.toggle('is-stale', idx.unavailable);

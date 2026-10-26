@@ -1,0 +1,84 @@
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import { createRequire } from 'node:module';
+import { promises as fs } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import * as esbuild from 'esbuild';
+
+const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'csw-t3-'));
+const bundle = async (entry, name) => {
+  const outfile = path.join(tmp, name);
+  await esbuild.build({ entryPoints: [entry], outfile, bundle: true, platform: 'node', format: 'cjs', logLevel: 'error' });
+  return createRequire(import.meta.url)(outfile);
+};
+const { readT3, refreshT3, withT3 } = await bundle('src/main/data/t3-usage.ts', 't3.cjs');
+const { emptyIndex, emptyContrib } = await bundle('src/main/data/usage.ts', 'usage.cjs');
+const database = path.join(tmp, 'state.sqlite');
+const db = new DatabaseSync(database);
+db.exec(`
+  CREATE TABLE orchestration_v2_projection_provider_turns (provider_turn_id TEXT, provider_thread_id TEXT, completed_at TEXT, payload_json TEXT, run_attempt_id TEXT);
+  CREATE TABLE orchestration_v2_projection_run_attempts (attempt_id TEXT, run_id TEXT, provider TEXT);
+  CREATE TABLE orchestration_v2_projection_runs (run_id TEXT, payload_json TEXT);
+`);
+const session = '12345678-1234-1234-1234-123456789abc';
+const ts = '2026-10-26T09:00:00.000Z';
+const usage = { usageStatus: 'complete', usageScope: 'main_agent', hasSubagents: false,
+  inputTokens: 1000, outputTokens: 100, cachedInputTokens: 800, cacheCreationTokens: 100, reasoningTokens: 20 };
+function insert(id, provider = 'claudeAgent', patch = {}) {
+  db.prepare('INSERT INTO orchestration_v2_projection_runs VALUES (?,?)').run(id, JSON.stringify({ modelSelection: { model: 'claude-opus-5-5' } }));
+  db.prepare('INSERT INTO orchestration_v2_projection_run_attempts VALUES (?,?,?)').run(id, id, provider);
+  db.prepare('INSERT INTO orchestration_v2_projection_provider_turns VALUES (?,?,?,?,?)').run(id,
+    `provider-thread:provider:${provider}:native-thread:${session}`, ts, JSON.stringify({ turnTokenUsage: { ...usage, ...patch } }), id);
+}
+insert('one');
+insert('two');
+insert('codex', 'codex');
+insert('partial', 'claudeAgent', { usageStatus: 'partial' });
+insert('subagents', 'claudeAgent', { hasSubagents: true });
+insert('bad-cache', 'claudeAgent', { cachedInputTokens: 2000 });
+const read = readT3(database);
+assert.equal(read.records.length, 2);
+assert.equal(read.skipped, 3);
+assert.equal(read.records[0].input, 100);
+console.log('PASS Claude-only read, inclusive cache conversion, partial/subagent/invalid exclusion');
+const snapshot = await refreshT3(tmp, undefined, database);
+const history = { v: 1, entries: {}, seed: null, prompts: { total: 0, daily: {} } };
+const base = emptyIndex();
+const merged = withT3(base, history, snapshot);
+assert.equal(merged.totals.input + merged.totals.output + merged.totals.cacheRead + merged.totals.cacheCreate, 2200);
+assert.equal(merged.totals.requests, 0);
+assert.equal(merged.sessions[session].requests, 0);
+assert.equal(merged.totals.unpricedTokens, 2200);
+assert.equal(merged.sourceHealth.fallbackSessions, 1);
+assert.equal(base.totals.output, 0);
+assert.equal(Object.keys(base.files).length, 0);
+assert.deepEqual(withT3(base, history, snapshot).totals, merged.totals);
+console.log('PASS fallback totals, no invented requests or prices, non-mutating repeatable merge');
+const file = path.join(tmp, session + '.jsonl');
+base.files[file] = { size: 0, offset: 0, contrib: emptyContrib() };
+assert.equal(withT3(base, history, snapshot).totals.output, 0);
+delete base.files[file];
+history.entries[file] = { contrib: emptyContrib() };
+assert.equal(withT3(base, history, snapshot).totals.output, 0);
+delete history.entries[file];
+assert.equal(withT3(base, history, snapshot, { [file]: emptyContrib() }).totals.output, 0);
+history.seed = { createdAt: '2026-10-27T00:00:00.000Z' };
+assert.equal(withT3(base, history, snapshot).totals.output, 0);
+history.seed = null;
+console.log('PASS late transcript replacement, archive, pending cache and reconstructed-history deduplication');
+db.close();
+const missing = await refreshT3(tmp, undefined, path.join(tmp, 'missing.sqlite'));
+assert.equal(missing.state, 'missing');
+assert.equal(missing.records.length, 2);
+assert.equal(withT3(base, history, missing).totals.output, 200);
+const repeated = await refreshT3(tmp, snapshot, database);
+assert.equal(repeated.records.length, 2);
+await fs.writeFile(path.join(tmp, 'broken.sqlite'), 'invalid sqlite');
+assert.equal((await refreshT3(tmp, snapshot, path.join(tmp, 'broken.sqlite'))).state, 'unavailable');
+await fs.writeFile(path.join(tmp, 't3-claude-usage.json'), 'broken cache');
+const corrupt = await refreshT3(tmp, undefined, database);
+assert.equal(corrupt.state, 'unavailable');
+await refreshT3(tmp, corrupt, database);
+assert.equal(await fs.readFile(path.join(tmp, 't3-claude-usage.json'), 'utf8'), 'broken cache');
+console.log('PASS restart preservation, unavailable database, idempotence and corrupt-cache protection');

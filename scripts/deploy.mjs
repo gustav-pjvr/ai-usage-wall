@@ -151,7 +151,7 @@ try {
   await stopApp();
   await install();
   await verify();
-  await pruneOldInstallers();
+  if (!process.argv.includes('--keep-installers')) await pruneOldInstallers();
   await relaunch();
   console.log(`\n[deploy] done. One installation, at ${INSTALL_DIR}\n`);
 } catch (err) {

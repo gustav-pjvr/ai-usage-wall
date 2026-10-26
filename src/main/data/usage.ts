@@ -280,7 +280,7 @@ type Aggregates = Pick<UsageIndex, 'totals' | 'daily' | 'models' | 'projects' | 
  * and the totals would move on deletion, which is the exact failure this
  * exists to prevent.
  */
-function fold(
+export function fold(
   into: Aggregates,
   rec: TokenTotals,
   m: { model: string; ts: string | null; tsMs: number; cwd: string | null; sid: string | null },
@@ -319,7 +319,7 @@ function fold(
     });
     if (m.ts < s.start) s.start = m.ts;
     if (m.ts > s.end) s.end = m.ts;
-    s.requests += 1;
+    s.requests += rec.requests;
     s.output += rec.output;
     s.total += rec.input + rec.output + rec.cacheCreate + rec.cacheRead;
     if (!s.models.includes(m.model)) s.models.push(m.model);

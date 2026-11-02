@@ -8,3 +8,7 @@ scripts/_patch*.py
 assets/logo/render.log
 
 release-stats/
+
+# Client records stay on this machine and out of git
+data/clients/
+archive/clients/

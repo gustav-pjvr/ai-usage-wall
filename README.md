@@ -1,10 +1,12 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/logo/lockup-on-dark.png">
-  <img src="assets/logo/lockup-on-light.png" alt="Client Wall" width="400">
+  <img src="assets/logo/lockup-on-light.png" alt="AI Usage Wall" width="400">
 </picture>
 
-An ambient Windows desktop application with two views, sitting below your normal
-windows. Go to the desktop and it is there.
+# AI Usage Wall
+
+An ambient Windows desktop dashboard for your AI coding usage, sitting below your
+normal windows. Go to the desktop and it is there.
 
 **Claude Stats** (the default) is a live command centre for your local Claude Code
 usage, with OpenAI Codex beside it when Codex is on the machine: tokens, cost at

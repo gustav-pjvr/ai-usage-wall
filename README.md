@@ -7,10 +7,13 @@ An ambient Windows desktop application with two views, sitting below your normal
 windows. Go to the desktop and it is there.
 
 **Claude Stats** (the default) is a live command centre for your local Claude Code
-usage: tokens, velocity, sessions, models, daily and hourly activity, all read
-from the transcripts on this machine. **MuchBetter Clients** is a living wall of
-the work, where MuchBetter provides the system and each client provides the
-visual identity.
+usage, with OpenAI Codex beside it when Codex is on the machine: tokens, cost at
+API list prices, hours, sessions, models, projects, plan limits, daily and hourly
+activity, all read from files on this machine. It has a Simple view (one card
+each for Claude and Codex) and a Detailed view (every panel, the default), and a
+switch that hides Codex. **MuchBetter Clients** is a living wall of the work,
+where MuchBetter provides the system and each client provides the visual
+identity.
 
 Switch with the control at the top, or press `Tab`.
 
@@ -28,7 +31,8 @@ Other scripts:
 ```bash
 npm run build      # bundle to dist/
 npm run dev        # rebuild on change
-npm test           # 216 checks: layout, colour, schema, velocity, projection, crypto, indexing, chat, pricing
+npm test           # 17 suites, about 680 checks: layout, schema, indexing, Codex, plan limits, projection, crypto, chat, pricing
+npm run test:render # about 750 layout checks in a real Electron window, every screen size and view
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
 npm run logo       # regenerate the mark, icons and wordmark
@@ -124,16 +128,23 @@ so deleting the file is safe.
 
 ## Claude Stats
 
-Everything on that view is read from `~/.claude/projects/**/*.jsonl` and
-`~/.claude/history.jsonl` on this machine. No API, no account, and no network to
-produce any of it. The app reaches the network for exactly two things, neither of
+Everything on that view is read from files on this machine: Claude Code's
+transcripts (`~/.claude/projects/**/*.jsonl`, `~/.claude/history.jsonl`), T3
+Code's local database as a fallback for Claude sessions missing from them,
+Codex's session rollouts (`~/.codex/sessions`, see
+[docs/codex-usage.md](docs/codex-usage.md)), and the one plan-limits reading
+Claude Code keeps under `cachedUsageUtilization` in `~/.claude.json` (nothing
+else in that file, which also holds account and login details, is read into the
+app). No API, no account, and no network to produce any of it. The app reaches the network for exactly two things, neither of
 which reads or sends a transcript: [projection](#projection), which is off until
 you turn it on, and the update check in the stats build.
 
-Panels are tagged **MEASURED** (straight from the transcripts) or **DERIVED**
-(computed, with the method printed on the panel). Three things are deliberately
-missing because they cannot be known locally: **remaining quota, plan limits and
-cost.** The status strip says so rather than showing a guess.
+Panels are tagged **MEASURED** (straight from the files) or **DERIVED**
+(computed, with the method printed on the panel). Cost is derived at API list
+prices and is not a bill. Plan limits are the last reading Claude Code and Codex
+saved, shown with its age and never fetched live; a window past its reset time
+shows as reset rather than its old percent. When a reading is missing the panel
+is hidden rather than showing a 0.
 
 The first index takes about five seconds and is cached; after that it only reads
 the bytes appended since last time, triggered by a filesystem watch rather than a
@@ -197,6 +208,11 @@ the index later cannot reach the wire by accident.
 - the last twenty minutes of throughput
 - prompt **counts** by day, and when the last one was
 - the Claude Code version, and a transcript file **count**
+- when Codex is on the source: Codex's own totals, daily and hourly activity,
+  models, session counts, active time and plan limits, with projects masked
+  exactly like Claude's
+- Claude's plan reading: when it was read, and per row a label, the percent
+  used and the reset time
 - a label for the source machine, which is its Windows computer name: it is set
   from `os.hostname()` and there is no UI to change it
 

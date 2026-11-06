@@ -67,11 +67,31 @@ cent** on 3.8 Flash paid, so $5 lasts on the order of a thousand questions.
 - Security-sensitive (a secret, outbound data): tests that the key never
   reaches the renderer, a log or the wire, and an independent Opus audit.
 
-## 4. Open decisions
+## 4. Decisions (Gustav, 2026-11-06)
 
-1. Paid tier with a $5 prepaid balance (recommended: private, Search
-   grounding included, about half a cent a question) or the free tier
-   (no cost, but Google may train on and read the questions, and no Search).
-2. What Gemini may read: wall usage numbers (proposed yes); mail and task
-   content once Work mode exists (proposed: subjects and task names yes, mail
-   bodies only when you open that mail and ask about it).
+1. **No paid API.** Ask Gemini runs through the **Gemini CLI** on Gustav's own
+   Google login: free, 1,000 requests a day on a personal account, with its
+   built-in Google web search. A few seconds slower per answer than the API.
+   Questions on this free tier may be used by Google to improve its products.
+2. **Context:** the wall's usage numbers now; with Work mode, task names and
+   mail subjects, and a mail body only when that mail is open and asked about.
+
+## 5. How it changes the design (CLI route)
+
+- The main process runs `gemini -p` headless with `--output-format json` (or
+  streamed JSON events) once per question, with no shell: the question and the
+  context the wall chose go in as one argument or on stdin, never through a
+  command string.
+- **The CLI's own tools are locked down.** It is a coding agent with shell and
+  file tools; the wall runs it in an empty temporary folder with a settings
+  file that allows only web search and nothing that runs commands or writes
+  files. Tests prove a question cannot make it run a command or touch a file.
+- Gemini cannot call back into the wall, so the wall puts the relevant numbers
+  into the prompt itself (no function calling on this route).
+- One-time setup: install the CLI (`npm install -g @google/gemini-cli`) and
+  sign in once with Google. Its sign-in lives in the CLI's own folder; the
+  wall never holds a Google token.
+- If the CLI is missing or signed out, the ASK panel says so and shows the one
+  command to fix it.
+- Security-sensitive (it starts a process with outside input): the independent
+  Opus audit applies.

@@ -4,6 +4,31 @@
  */
 
 import { contextBridge, ipcRenderer } from 'electron';
+import { isStatsOnly } from '../shared/edition';
+
+/** Subscribe to one push channel; returns the unsubscribe. */
+const on = (channel: string) => (cb: (v: unknown) => void) => {
+  const listener = (_e: unknown, v: unknown) => cb(v);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+};
+
+/*
+ * Ask Gemini (docs/ask-gemini.md). Full build only: in the stats build the
+ * wall has no `ask` member at all, so nothing in the renderer can reach it.
+ */
+const ask = isStatsOnly
+  ? undefined
+  : {
+      start: (question: string) => ipcRenderer.invoke('ask:start', question),
+      cancel: () => ipcRenderer.invoke('ask:cancel'),
+      /** Borrow or return keyboard focus for the ask bar, like `notesEdit`. */
+      focus: (active: boolean) => ipcRenderer.invoke('ask:focus', active),
+      onOpen: on('ask:open'),
+      onChunk: on('ask:chunk'),
+      onDone: on('ask:done'),
+      onError: on('ask:error'),
+    };
 
 const api = {
   getState: () => ipcRenderer.invoke('wall:getState'),
@@ -42,6 +67,7 @@ const api = {
     ipcRenderer.on('wall:state', listener);
     return () => ipcRenderer.removeListener('wall:state', listener);
   },
+  ...(ask ? { ask } : {}),
 };
 
 contextBridge.exposeInMainWorld('wall', api);

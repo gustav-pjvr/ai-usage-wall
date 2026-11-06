@@ -130,6 +130,7 @@ about the *runtime* distinguishes them beyond what was compiled in.
 | Views | Claude Stats only | Claude Stats only |
 | Updater | none, updated by `npm run deploy` | electron-updater against a generic feed |
 | Run registry value | `MuchBetterClientWall` | `ClaudeStatsWall` |
+| Ask Gemini ([ask-gemini.md](ask-gemini.md)) | ASK chip, Ctrl+Alt+G, tray items, `ask:*` IPC, `wall.ask` bridge | none of them: guarded by `isStatsOnly` in main, preload and renderer |
 
 ### Menus
 

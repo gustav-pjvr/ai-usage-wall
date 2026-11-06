@@ -20,8 +20,12 @@ export type Edition = 'full' | 'stats';
 
 export const EDITION: Edition = process.env.MBW_EDITION === 'stats' ? 'stats' : 'full';
 
-/** True in the shareable dashboard-only build. */
-export const isStatsOnly = EDITION === 'stats';
+/**
+ * True in the shareable dashboard-only build. Written against the define
+ * directly (same truth as EDITION) so esbuild folds it to a literal, which lets
+ * the stats preload drop full-only members such as `ask` entirely.
+ */
+export const isStatsOnly = process.env.MBW_EDITION === 'stats';
 
 /** Product name, used for the tray header and the window title. */
 export const PRODUCT_NAME = isStatsOnly ? 'Claude Stats Wall' : 'MuchBetter Client Wall';

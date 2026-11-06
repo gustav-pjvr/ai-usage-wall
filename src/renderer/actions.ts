@@ -155,6 +155,18 @@ export class WallActions {
     });
   }
 
+  /**
+   * Add a chip after Milestones, and a panel that hangs from this row (like the
+   * milestone list). Generic on purpose: the one caller is Ask Gemini, full
+   * build only (src/renderer/main.ts), and keeping its own code out of this
+   * file keeps it out of the stats bundle entirely.
+   */
+  addChip(chip: HTMLElement, panel?: HTMLElement): void {
+    if (chip.isConnected) return;
+    this.msBtn.after(chip);
+    if (panel) this.root.append(panel);
+  }
+
   /** Paint the saved choices. Idempotent: every state push repeats them. */
   setPrefs(view: 'detailed' | 'simple', showCodex: boolean): void {
     this.view = view;

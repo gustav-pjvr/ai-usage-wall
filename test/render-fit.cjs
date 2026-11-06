@@ -600,6 +600,208 @@ function CLAUDE_PLAN_BASELINE(key) {
 /** Enough for one IPC round trip to the main process and back. */
 const SETTLE = 150;
 
+/** A long answer with paragraphs, bullets and markup that must stay text. */
+const LONG_ANSWER = [
+  'You used about 1.2 million tokens today, most of it on **Opus**. <img src=x onerror="window.__pwned=1"> stays text.',
+  ...Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1}: ${'a fairly long sentence about usage and cost that wraps across the panel '.repeat(3)}`),
+  '- first bullet with a very_long_unbroken_token_' + 'x'.repeat(160),
+  '- second bullet',
+  '- third bullet',
+].join('\n\n').replace('\n\n- second', '\n- second').replace('\n\n- third', '\n- third');
+
+/**
+ * The Ask panel, open with a long answer, at every size: inside the window,
+ * its header and question bar never pushed out, the answer scrolling inside
+ * the panel rather than overflowing it, nothing wider than the panel, the
+ * pending state shown (aria-busy and a skeleton) before the first chunk, the
+ * answer inserted as text, the last five kept, and Escape closing it and
+ * giving keyboard focus back.
+ */
+async function askChecks(calls) {
+  console.log('\nAsk Gemini\n');
+  /*
+   * A window of its own, with the wall's options. In the shared window, after
+   * the rest of this file had run, the renderer stopped taking new sizes: the
+   * native window resized and innerWidth stayed where it was, so every size
+   * would have measured the same layout. A fresh window does not do that, and
+   * each size below checks innerWidth before it trusts a measurement.
+   */
+  const win = new BrowserWindow({
+    width: 1920, height: 1080, useContentSize: true, show: true, frame: false, focusable: false, type: 'toolbar', opacity: 0.02, skipTaskbar: true,
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+  });
+  await win.loadFile(RENDERER);
+  await wait(2600);
+  const clickEl = async (sel) => {
+    const p = await win.webContents.executeJavaScript(`(() => {
+      const e = document.querySelector(${JSON.stringify(sel)});
+      if (!e) return null;
+      const r = e.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    if (p) {
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    }
+    await wait(180);
+    return p;
+  };
+  await measure(win, { w: 1920, h: 1080 });
+  const chip = await win.webContents.executeJavaScript(`(() => {
+    const b = document.querySelector('#wall-actions .wall-action-ask');
+    return b ? { shown: getComputedStyle(b).display !== 'none' && b.getBoundingClientRect().width > 0, text: b.textContent } : null;
+  })()`);
+  ok('the ASK chip is in the action group (full build)', !!chip && chip.shown && chip.text === 'Ask', JSON.stringify(chip));
+
+  /*
+   * First with focus REFUSED. The field must stay read-only and say so,
+   * because a field that looks ready while every key goes to another
+   * application is the trap docs/notes-bar.md describes. The layout checks
+   * below also run in this state: while the test window HELD focus, its
+   * renderer kept the old viewport through every setContentSize, so the sizes
+   * are measured with the window unfocused, as the rest of this file does.
+   */
+  calls.refuse = true;
+  await clickEl('#wall-actions .wall-action-ask');
+  await wait(SETTLE * 2);
+  const refused = await win.webContents.executeJavaScript(`(() => {
+    const p = document.querySelector('#ask-panel');
+    return { open: p.dataset.open, focus: p.dataset.focus, ro: p.querySelector('.ask-input').readOnly, note: p.querySelector('.ask-note').textContent };
+  })()`);
+  ok('focus refused: the panel opens, the field stays read-only and says why', refused.open === 'on' && refused.focus === 'off' && refused.ro && /could not take keyboard focus/.test(refused.note) && calls.focus.at(-1) === true && !win.isFocusable(), JSON.stringify(refused));
+
+  const send = (q) => win.webContents.executeJavaScript(`(() => {
+    const i = document.querySelector('#ask-panel .ask-input');
+    i.value = ${JSON.stringify(q)};
+    i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  })()`);
+  await send('How many tokens today?');
+  await wait(200);
+  const pending = await win.webContents.executeJavaScript(`(() => {
+    const p = document.querySelector('#ask-panel');
+    return { busy: p.getAttribute('aria-busy'), text: (p.querySelector('.ask-pending') || {}).textContent || '', lines: p.querySelectorAll('.ask-skeleton .ask-sk-line').length, hidden: (p.querySelector('.ask-skeleton') || { getAttribute: () => null }).getAttribute('aria-hidden'), anim: p.querySelector('.ask-sk-line') ? getComputedStyle(p.querySelector('.ask-sk-line')).animationName : '' };
+  })()`);
+  ok('pending: "Asking Gemini...", aria-busy, an aria-hidden skeleton with a shimmer', pending.busy === 'true' && pending.text === 'Asking Gemini...' && pending.lines === 3 && pending.hidden === 'true' && pending.anim === 'ask-shimmer', JSON.stringify(pending));
+  ok('the question reached main as typed', calls.start.at(-1) === 'How many tokens today?');
+  await wait(900);
+
+  const text = await win.webContents.executeJavaScript(`(() => {
+    const p = document.querySelector('#ask-panel');
+    return { busy: p.getAttribute('aria-busy'), imgs: p.querySelectorAll('img').length, pwned: !!window.__pwned, literal: p.querySelector('.ask-current').textContent.includes('<img src=x'), bullets: p.querySelectorAll('.ask-current .ask-list li').length, paras: p.querySelectorAll('.ask-current .ask-p').length, label: (p.querySelector('.ask-by') || {}).textContent, model: (p.querySelector('.ask-by-model') || {}).textContent, bold: p.querySelector('.ask-current').textContent.includes('**') };
+  })()`);
+  ok('the answer is text: markup shows literally and nothing runs', text.imgs === 0 && !text.pwned && text.literal, JSON.stringify(text));
+  ok('paragraphs and "-" bullets become elements, bold markers dropped', text.paras >= 41 && text.bullets === 3 && !text.bold, JSON.stringify(text));
+  ok('labelled "Answer by Gemini" with the model, and no longer busy', text.label === 'Answer by Gemini' && text.model === 'gemini-3.8-flash-medium' && text.busy === 'false');
+
+  for (const size of SIZES) {
+    win.setContentSize(size.w, size.h);
+    await wait(700);
+    const g = await win.webContents.executeJavaScript(`(() => {
+      const p = document.querySelector('#ask-panel');
+      const r = p.getBoundingClientRect();
+      const within = (sel) => { const e = p.querySelector(sel); if (!e) return false; const b = e.getBoundingClientRect(); return b.width > 0 && b.left >= r.left - 0.5 && b.right <= r.right + 0.5 && b.top >= r.top - 0.5 && b.bottom <= r.bottom + 0.5; };
+      const body = p.querySelector('.ask-body');
+      const wide = [...p.querySelectorAll('.ask-body *')].filter((e) => { const b = e.getBoundingClientRect(); return b.width > 0 && (b.right > r.right + 0.5 || b.left < r.left - 0.5); }).length;
+      const px = Math.min(...[...p.querySelectorAll('*')].filter((e) => e.getClientRects().length && e.textContent.trim()).map((e) => parseFloat(getComputedStyle(e).fontSize)));
+      const actions = document.querySelector('#wall-actions').getBoundingClientRect();
+      return {
+        inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5,
+        chrome: within('.ask-head') && within('.ask-bar') && within('.ask-close') && within('.ask-input'),
+        scrolls: body.scrollHeight > body.clientHeight && getComputedStyle(body).overflowY === 'auto',
+        bodyInside: within('.ask-body'),
+        noHorizontal: body.scrollWidth <= body.clientWidth + 1 && wide === 0,
+        belowActions: r.top >= actions.bottom - 0.5,
+        px,
+        w: Math.round(r.width), h: Math.round(r.height), vw: innerWidth, vh: innerHeight,
+      };
+    })()`);
+    ok(`${size.label}   the window really is ${size.w}x${size.h} (${g.vw}x${g.vh})`, g.vw === size.w && g.vh === size.h);
+    ok(`${size.label}   Ask panel ${g.w}x${g.h}: inside the window, under the buttons, header and question bar inside it`, g.inside && g.chrome && g.belowActions && g.bodyInside, JSON.stringify(g));
+    ok(`${size.label}   the long answer scrolls inside the panel, nothing wider than it, text >= 8px (${g.px}px)`, g.scrolls && g.noHorizontal && g.px >= 8, JSON.stringify(g));
+  }
+  await measure(win, { w: 1920, h: 1080 });
+
+  // Focus allowed now: a REAL click on the field borrows it, and the field really has it.
+  calls.refuse = false;
+  await clickEl('#ask-panel .ask-input');
+  await wait(SETTLE * 2);
+  const borrowed = await win.webContents.executeJavaScript(`(() => {
+    const p = document.querySelector('#ask-panel');
+    return { focus: p.dataset.focus, active: document.activeElement === p.querySelector('.ask-input'), ro: p.querySelector('.ask-input').readOnly, note: p.querySelector('.ask-note').textContent };
+  })()`);
+  ok('clicking the field borrows keyboard focus: the window and the field really hold it', borrowed.focus === 'on' && borrowed.active && !borrowed.ro && borrowed.note === '' && win.isFocusable() && win.isFocused(), JSON.stringify(borrowed));
+
+  /*
+   * Another application takes focus: the loan goes back and the panel stays
+   * open to be read. The blur is dispatched in the page, because win.blur()
+   * on this test window did not reach the renderer once earlier checks had
+   * moved focus around.
+   */
+  const loansBefore = calls.focus.length;
+  await win.webContents.executeJavaScript(`window.dispatchEvent(new Event('blur'))`);
+  await wait(SETTLE * 2);
+  const afterBlur = await win.webContents.executeJavaScript(`(() => ({ open: document.querySelector('#ask-panel').dataset.open, focus: document.querySelector('#ask-panel').dataset.focus, ro: document.querySelector('#ask-panel .ask-input').readOnly }))()`);
+  ok('when the window loses focus, the loan goes back and the panel stays open to read', calls.focus.slice(loansBefore).includes(false) && !win.isFocusable() && afterBlur.open === 'on' && afterBlur.focus === 'off' && afterBlur.ro, JSON.stringify(afterBlur));
+  await clickEl('#ask-panel .ask-input');
+  await wait(SETTLE * 2);
+  ok('a click on the field borrows it again', calls.focus.at(-1) === true && win.isFocusable());
+
+  for (const q of ['two', 'three', 'four', 'five', 'six']) {
+    await send(q);
+    await wait(1000);
+  }
+  const hist = await win.webContents.executeJavaScript(`(() => ({
+    current: document.querySelector('#ask-panel .ask-q').textContent,
+    older: [...document.querySelectorAll('#ask-panel .ask-old-q')].map((e) => e.textContent),
+  }))()`);
+  ok('the last five questions stay: the newest shown, four earlier below it', hist.current === 'six' && JSON.stringify(hist.older) === JSON.stringify(['five', 'four', 'three', 'two']), JSON.stringify(hist));
+
+  const before = calls.focus.length;
+  await win.webContents.executeJavaScript(`document.querySelector('#ask-panel .ask-input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))`);
+  await wait(SETTLE * 2);
+  const closed = await win.webContents.executeJavaScript(`(() => ({ open: document.querySelector('#ask-panel').dataset.open, shown: getComputedStyle(document.querySelector('#ask-panel')).display }))()`);
+  ok('Escape closes the panel and gives keyboard focus back', closed.open === 'off' && closed.shown === 'none' && calls.focus.slice(before).includes(false) && !win.isFocusable(), JSON.stringify(closed));
+
+  win.webContents.send('ask:open');
+  await wait(SETTLE * 2);
+  const reopened = await win.webContents.executeJavaScript(`(() => ({ open: document.querySelector('#ask-panel').dataset.open, q: document.querySelector('#ask-panel .ask-q').textContent }))()`);
+  ok('the hotkey push (ask:open) opens it again, with the session kept', reopened.open === 'on' && reopened.q === 'six', JSON.stringify(reopened));
+  await win.webContents.executeJavaScript(`document.querySelector('#ask-panel .ask-close').click()`);
+  await wait(SETTLE);
+  win.destroy();
+}
+
+/**
+ * The stats edition: built here with its own edition constant, and loaded with
+ * its own preload. No ASK chip, no panel, and no `ask` on the bridge at all.
+ */
+async function statsEditionHasNoAsk() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'csw-stats-'));
+  const esb = require('esbuild');
+  const define = { 'process.env.MBW_EDITION': JSON.stringify('stats') };
+  await esb.build({ entryPoints: [path.join(ROOT, 'src/renderer/main.ts')], outfile: path.join(dir, 'renderer', 'main.js'), bundle: true, platform: 'browser', format: 'iife', target: 'chrome120', define, logLevel: 'error' });
+  await esb.build({ entryPoints: [path.join(ROOT, 'src/preload/index.ts')], outfile: path.join(dir, 'preload', 'index.js'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], define, logLevel: 'error' });
+  fs.cpSync(path.join(ROOT, 'dist', 'renderer', 'styles'), path.join(dir, 'renderer', 'styles'), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, 'src', 'renderer', 'index.html'), path.join(dir, 'renderer', 'index.html'));
+  const w = new BrowserWindow({
+    width: 1920, height: 1080, useContentSize: true, show: true, frame: false, focusable: false, type: 'toolbar', opacity: 0.02, skipTaskbar: true,
+    webPreferences: { preload: path.join(dir, 'preload', 'index.js'), contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+  });
+  await w.loadFile(path.join(dir, 'renderer', 'index.html'));
+  await wait(1500);
+  w.webContents.send('ask:open');
+  await wait(SETTLE);
+  const r = await w.webContents.executeJavaScript(`(() => ({
+    chip: !!document.querySelector('.wall-action-ask'),
+    panel: !!document.querySelector('#ask-panel'),
+    bridge: typeof window.wall.ask,
+    actions: !!document.querySelector('#wall-actions .wall-action-ms'),
+  }))()`);
+  ok('stats edition: no ASK chip, no panel, no ask bridge (the wall itself still renders)', !r.chip && !r.panel && r.bridge === 'undefined' && r.actions, JSON.stringify(r));
+  w.destroy();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 /*
  * One window for the whole run, resized between sizes.
  *
@@ -702,6 +904,40 @@ app.whenReady().then(async () => {
     win.setFocusable(false);
     return false;
   });
+  /*
+   * Ask Gemini, mirroring registerAskIpc in src/main/index.ts with a scripted
+   * answer instead of the Antigravity CLI. The focus loan is the same as the
+   * notes bar's. Each answer carries markup, to prove it is shown as text.
+   */
+  const askCalls = { focus: [], start: [], cancel: 0, refuse: false };
+  let askId = 0;
+  ipcMain.handle('ask:focus', (_e, active) => {
+    askCalls.focus.push(active);
+    // `refuse` stands in for a window Windows would not let take focus.
+    const w = BrowserWindow.fromWebContents(_e.sender);
+    if (active && askCalls.refuse) return false;
+    if (active) {
+      w.setFocusable(true);
+      w.focus();
+      return w.isFocused();
+    }
+    w.setFocusable(false);
+    return false;
+  });
+  ipcMain.handle('ask:cancel', () => {
+    askCalls.cancel++;
+    return true;
+  });
+  ipcMain.handle('ask:start', (e, question) => {
+    askCalls.start.push(question);
+    const id = ++askId;
+    const sender = e.sender;
+    // The skeleton must be visible before the first chunk, so the stream waits.
+    setTimeout(() => sender.send('ask:chunk', { id, text: 'Working through your numbers. ' }), 400);
+    setTimeout(() => sender.send('ask:done', { id, text: LONG_ANSWER, model: 'gemini-3.8-flash-medium' }), 700);
+    return { ok: true, id, model: 'gemini-3.8-flash-medium' };
+  });
+
   await win.loadFile(RENDERER);
   // Long enough for the panel entrance (0.62s plus stagger) and the odometers,
   // which count up and therefore change the STRING LENGTH of every headline
@@ -796,8 +1032,8 @@ app.whenReady().then(async () => {
         fontPx: Math.min(...[...a.querySelectorAll('.wall-action')].map((b) => parseFloat(getComputedStyle(b).fontSize))),
       };
     })()`);
-    ok(`${size.label}   Today, Any day and Milestones buttons shown, badge reads ${act.badge}`,
-       !act.missing && act.buttons === 3 && act.badge === '1');
+    ok(`${size.label}   Today, Any day, Milestones and Ask buttons shown, badge reads ${act.badge}`,
+       !act.missing && act.buttons === 4 && act.badge === '1');
     ok(`${size.label}   the buttons sit under the notes bar, above the panels, clear of the switch`,
        act.inside && act.belowBar && act.abovePanels && act.clearOfSwitch, JSON.stringify(act));
     ok(`${size.label}   button text is legible (${act.fontPx}px)`, act.fontPx >= 8);
@@ -1733,6 +1969,10 @@ app.whenReady().then(async () => {
   ok('a first payload with no todaySlots shows no empty Today panel', noLanes.view === 'simple' && noLanes.panel === false && noLanes.on === 'off' && noLanes.lanes === 0 && noLanes.cards === 2, JSON.stringify(noLanes));
   usageOverride = null;
 
+
+  // ── Ask Gemini ─────────────────────────────────────────────────────────
+  await askChecks(askCalls);
+  await statsEditionHasNoAsk();
 
   win.destroy();
   console.log(`\n${pass} passed, ${fail} failed\n`);

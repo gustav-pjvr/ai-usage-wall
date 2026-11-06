@@ -68,6 +68,7 @@ every state push (`src/main/index.ts:1081`).
 | `monitors` | number[] | `[]` | integers only; empty means all | `targetDisplays`, `src/main/index.ts:648-653` |
 | `debug` | boolean | `false` | strict `=== true` | diagnostics overlay, `src/renderer/main.ts:769` |
 | `notes` | string | `''` | string, truncated to 400 characters | the notes bar across the top of the wall, [notes-bar.md](notes-bar.md) |
+| `askModel` | string | `'gemini-3.8-flash-medium'` | must match `^gemini-[a-z0-9][a-z0-9.-]{0,56}$`, else default | Ask Gemini's model (full build), [ask-gemini.md](ask-gemini.md) |
 | `topPanel` | `'constellation'` or `'throughput'` | `'constellation'` | anything else becomes `'constellation'` | what the top row's big panel shows, [constellation.md](constellation.md) |
 
 Legacy client paths, vault settings, density and pagination settings are ignored
@@ -179,6 +180,8 @@ changes. Nothing in the menu is cached, so nothing can be stale.
 ---
 Show wall / Hide wall                      label follows state
 Focus mode / Leave focus mode              label follows state
+Ask Gemini...  (Ctrl+Alt+G)                full build only
+Gemini model                               full build only: radio per agy Flash model
 ---
 Desktop layer
   Behind apps, interactive  (recommended)  radio, layerMode 'desktop'
@@ -301,6 +304,7 @@ Two, both global, both configurable in `settings.json` only.
 |---|---|---|
 | `Control+Alt+W` | toggle focus mode | `toggleFocusMode`, `src/main/index.ts:1244` |
 | `Control+Alt+Shift+W` | show / hide the wall | `toggleHidden`, `src/main/index.ts:1253` |
+| `Control+Alt+G` | open Ask Gemini (full build only, fixed, not a setting) | `openAsk`, [ask-gemini.md](ask-gemini.md) |
 
 `registerHotkeys()` (`src/main/index.ts:1263-1275`) unregisters everything first,
 skips empty accelerators, and treats both failure modes as warnings rather than

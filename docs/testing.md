@@ -205,6 +205,23 @@ characters, an all-invisible label falling back to a name, and ordinary accented
 text surviving. It matters because the label is typed on a different machine and
 is rendered inside a sentence.
 
+### `test/ask.test.mjs` (122, plus one opt-in live check): Ask Gemini's process boundary
+
+Security-sensitive: it starts the Antigravity CLI with a question someone typed.
+A fake CLI (`test/fixtures/fake-agy.cjs`) records what actually reached it, so the
+checks are on the boundary, not on what the code meant to send: the question is
+on stdin and in no argument, shell metacharacters are inert, argv is exactly the
+fixed list, the deny-all session settings, an empty working folder that is gone
+afterwards, timeout and cancel killing the process and its child, one run at a
+time, fixed error messages with no stderr in the payload or the log, ANSI and
+control characters stripped, answers capped, the tool watchdog, and a context
+with no path, user name or home folder name in it, the allowlist watchdog,
+run-folder clean-up on every outcome, and the startup sweep. Revert checks:
+putting the prompt into argv fails two checks; letting unknown lines through
+fails twelve.
+`npm run test:ask-live` adds one real agy run (it spends quota, so it is not in
+`npm test`). Details in [ask-gemini.md](ask-gemini.md#tests).
+
 ### `test/projection-e2e.cjs`: against live deployed infrastructure
 
 **This is the one suite that is not isolated.** Run with `npm run test:e2e`

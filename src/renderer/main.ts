@@ -4,6 +4,8 @@ import type { UsageIndex } from '../main/data/usage';
 import { StatsView } from './stats';
 import { NotesBar } from './notes';
 import { WallActions } from './actions';
+import { AskPanel, type AskBridge } from './ask';
+import { isStatsOnly } from '../shared/edition';
 import type { DayRaw, TimelapseDays } from '../shared/intraday';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
@@ -47,6 +49,8 @@ declare global {
       milestonesSeen(): Promise<void>;
       timelapseDays(): Promise<TimelapseDays | null>;
       timelapseDay(day: string): Promise<DayRaw | null>;
+      /** Ask Gemini. Present in the full build only. */
+      ask?: AskBridge;
     };
   }
 }
@@ -81,6 +85,17 @@ document.body.appendChild(notesBar.root);
  */
 const wallActions = new WallActions();
 document.body.appendChild(wallActions.root);
+
+/*
+ * Ask Gemini (docs/ask-gemini.md), full build only. Both conditions on
+ * purpose: the edition constant keeps the panel out of the stats bundle's
+ * behaviour, and the preload is the authority on whether the calls exist.
+ */
+if (!isStatsOnly && window.wall.ask) {
+  const askPanel = new AskPanel(window.wall.ask);
+  // The panel goes inside the action row, so it hangs from the row's real bottom (ask.css).
+  wallActions.addChip(askPanel.chip, askPanel.root);
+}
 
 // The top panel's Constellation / Live toggle is saved like any other setting,
 // so the choice survives a restart and a second monitor follows it.

@@ -1,0 +1,239 @@
+/*
+ * Ask Gemini: the question bar and answer panel over the wall (full build
+ * only, docs/ask-gemini.md). The same dark surface as the milestone list, so
+ * it reads as part of the wall rather than a dialog from somewhere else.
+ *
+ * Every size is a multiple of --u (rule 34). The panel is never taller than
+ * the room under the action row; its body scrolls instead, so a long answer
+ * can never push the question bar or the Close button off screen.
+ *
+ * Visibility is driven by data attributes, never `hidden` on something that
+ * also sets `display` (this project has shipped that bug four times).
+ */
+
+/*
+ * The panel lives INSIDE #wall-actions, like the milestone list, and hangs
+ * from the row's real bottom: the row's height is not a multiple of --u at
+ * small sizes (its text has a pixel floor), so a fixed offset overlapped it.
+ * `100%` in max-height is the row's height (the containing block), which
+ * makes the panel end 24u above the bottom of the window:
+ * 38u (row top) + 100% + 10u (gap) + (100vh - 72u - 100%) = 100vh - 24u.
+ */
+#ask-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + var(--u) * 10);
+  right: 0;
+  z-index: 5;
+  width: min(calc(var(--u) * 720), calc(100vw - var(--u) * 52));
+  max-height: calc(100vh - var(--u) * 72 - 100%);
+  flex-direction: column;
+  border-radius: calc(var(--u) * 12);
+  border: 1px solid oklch(1 0 0 / 0.12);
+  background: oklch(0.17 0.015 246);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.5);
+  color: oklch(0.88 0.015 222);
+  overflow: hidden;
+}
+
+#ask-panel[data-open='on'] { display: flex; }
+
+.ask-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  padding: calc(var(--u) * 12) calc(var(--u) * 16) calc(var(--u) * 8);
+  border-bottom: 1px solid oklch(1 0 0 / 0.07);
+}
+
+.ask-title {
+  font-size: max(9px, calc(var(--u) * 11.5));
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: oklch(0.8 0.02 220);
+}
+
+.ask-model {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 10));
+  color: oklch(0.55 0.015 240);
+}
+
+.ask-close {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: oklch(0.6 0.015 235);
+  font: inherit;
+  font-size: max(8px, calc(var(--u) * 10));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ask-close:hover { color: oklch(0.92 0.01 220); }
+
+.ask-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 12);
+  margin: calc(var(--u) * 12) calc(var(--u) * 16) 0;
+  padding: calc(var(--u) * 8) calc(var(--u) * 12);
+  border-radius: calc(var(--u) * 8);
+  border: 1px solid oklch(1 0 0 / 0.1);
+  background: oklch(0.13 0.014 250);
+}
+
+#ask-panel[data-focus='on'] .ask-bar { border-color: oklch(0.7 0.1 200 / 0.6); }
+
+.ask-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font-family: inherit;
+  font-size: max(10px, calc(var(--u) * 14));
+  color: oklch(0.94 0.01 220);
+}
+
+.ask-input:focus { outline: none; }
+.ask-input::placeholder { color: oklch(0.5 0.015 240); }
+.ask-input[readonly] { cursor: pointer; }
+
+.ask-hint {
+  flex: 0 0 auto;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 9));
+  letter-spacing: 0.12em;
+  color: oklch(0.5 0.015 240);
+  white-space: nowrap;
+}
+
+.ask-note {
+  flex: 0 0 auto;
+  margin: calc(var(--u) * 6) calc(var(--u) * 16) 0;
+  font-size: max(8px, calc(var(--u) * 10.5));
+  color: oklch(0.78 0.12 70);
+}
+
+.ask-note:empty { display: none; }
+
+.ask-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--u) * 10) calc(var(--u) * 16) calc(var(--u) * 16);
+}
+
+.ask-empty {
+  font-size: max(9px, calc(var(--u) * 11.5));
+  line-height: 1.5;
+  color: oklch(0.6 0.015 238);
+}
+
+.ask-q {
+  font-size: max(10px, calc(var(--u) * 13.5));
+  font-weight: 600;
+  line-height: 1.4;
+  color: oklch(0.95 0.01 220);
+  overflow-wrap: anywhere;
+}
+
+.ask-meta {
+  display: flex;
+  gap: calc(var(--u) * 10);
+  margin: calc(var(--u) * 6) 0 calc(var(--u) * 8);
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 9.5));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.015 240);
+}
+
+.ask-by-model { text-transform: none; letter-spacing: 0.02em; }
+
+.ask-a {
+  font-size: max(10px, calc(var(--u) * 13));
+  line-height: 1.55;
+  color: oklch(0.86 0.015 222);
+  overflow-wrap: anywhere;
+}
+
+.ask-p { margin: 0 0 calc(var(--u) * 8); white-space: pre-wrap; }
+.ask-list { margin: 0 0 calc(var(--u) * 8); padding-left: calc(var(--u) * 20); }
+.ask-list li { margin-bottom: calc(var(--u) * 3); }
+.ask-stream { white-space: pre-wrap; }
+.ask-error { color: oklch(0.78 0.12 50); }
+
+.ask-pending {
+  margin-bottom: calc(var(--u) * 8);
+  font-size: max(9px, calc(var(--u) * 11.5));
+  color: oklch(0.65 0.015 235);
+}
+
+/* The skeleton: three lines the shape of an answer, with a shimmer. */
+.ask-skeleton { display: flex; flex-direction: column; gap: calc(var(--u) * 8); }
+
+.ask-sk-line {
+  display: block;
+  height: calc(var(--u) * 11);
+  border-radius: calc(var(--u) * 4);
+  background: linear-gradient(90deg, oklch(1 0 0 / 0.05) 0%, oklch(1 0 0 / 0.11) 50%, oklch(1 0 0 / 0.05) 100%);
+  background-size: 200% 100%;
+  animation: ask-shimmer 1.4s linear infinite;
+}
+
+.ask-sk-line:nth-child(2) { width: 86%; }
+.ask-sk-line:nth-child(3) { width: 58%; }
+
+@keyframes ask-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.ask-history { margin-top: calc(var(--u) * 14); }
+
+.ask-section {
+  margin: calc(var(--u) * 6) 0;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: max(8px, calc(var(--u) * 9.5));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: oklch(0.55 0.015 240);
+}
+
+.ask-old {
+  padding: calc(var(--u) * 7) 0;
+  border-top: 1px solid oklch(1 0 0 / 0.05);
+}
+
+.ask-old-q {
+  cursor: pointer;
+  font-size: max(9px, calc(var(--u) * 12));
+  color: oklch(0.8 0.015 222);
+  overflow-wrap: anywhere;
+}
+
+.ask-old-a {
+  margin-top: calc(var(--u) * 6);
+  font-size: max(9px, calc(var(--u) * 12));
+  line-height: 1.5;
+  color: oklch(0.72 0.015 228);
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ask-sk-line { animation: none; }
+}

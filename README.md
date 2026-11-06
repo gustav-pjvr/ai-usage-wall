@@ -29,8 +29,9 @@ Other scripts:
 ```bash
 npm run build      # bundle to dist/
 npm run dev        # rebuild on change
-npm test           # stats, indexing, Codex, plan limits, projection, crypto, chat, pricing
-npm run test:render # about 750 layout checks in a real Electron window, every screen size and view
+npm test           # stats, indexing, Codex, plan limits, projection, crypto, chat, pricing, Ask Gemini
+npm run test:ask-live # Ask Gemini lock-down against the real agy (spends one prompt of quota)
+npm run test:render # about 790 layout checks in a real Electron window, every screen size and view
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
 npm run logo       # regenerate the mark, icons and wordmark
@@ -73,6 +74,7 @@ so deleting the file is safe.
 | `monitors` | `[]` | Empty means all displays |
 | `mode` | `"stats"` | Always stats; legacy values are ignored |
 | `debug` | `false` | Diagnostics overlay |
+| `askModel` | `"gemini-3.8-flash-medium"` | Full build: the Gemini model Ask Gemini uses, chosen in the tray |
 
 ---
 
@@ -87,7 +89,10 @@ Claude Code keeps under `cachedUsageUtilization` in `~/.claude.json` (nothing
 else in that file, which also holds account and login details, is read into the
 app). No API, no account, and no network to produce any of it. The app reaches the network for exactly two things, neither of
 which reads or sends a transcript: [projection](#projection), which is off until
-you turn it on, and the update check in the stats build.
+you turn it on, and the update check in the stats build. In the full build,
+[Ask Gemini](#ask-gemini) also sends a summary of these numbers to Google, but
+only when you ask a question, and through the Antigravity CLI rather than the
+wall itself.
 
 Panels are tagged **MEASURED** (straight from the files) or **DERIVED**
 (computed, with the method printed on the panel). Cost is derived at API list
@@ -99,6 +104,23 @@ is hidden rather than showing a 0.
 The first index takes about five seconds and is cached; after that it only reads
 the bytes appended since last time, triggered by a filesystem watch rather than a
 timer. Full reasoning in [ARCHITECTURE.md](ARCHITECTURE.md#claude-stats).
+
+## Ask Gemini
+
+Full build only. Click **ASK** top right, press **Ctrl+Alt+G**, or use the tray,
+type a question and press Enter: Gemini answers in a panel over the wall, with
+the wall's own numbers in front of it. Escape cancels or closes. The last five
+questions stay for the session, in memory only.
+
+It runs the Antigravity CLI (`agy`, signed in with Google) once per question,
+because Google refused the Gemini CLI on Gustav's account on 2026-11-06. Each run
+is locked down: the question goes in on stdin, never on a command line; agy runs
+in an empty temporary folder with session rules that deny every command, file
+read and write, URL fetch and MCP tool (web search still works); and any other
+tool kills the run. What is sent is the question and a plain-text summary of the
+numbers by project label, never a path. Quota on an AI Plus account is small and
+the panel says when it has run out. Details, and what was and was not proven:
+[docs/ask-gemini.md](docs/ask-gemini.md).
 
 ## Projection
 

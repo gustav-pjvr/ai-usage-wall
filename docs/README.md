@@ -13,6 +13,8 @@ reversed; these are the depth behind it.
 | [editions.md](editions.md) | The full and stats builds, what differs, and how the edition is injected at build time |
 | [responsive-layout.md](responsive-layout.md) | How the dashboard adapts to the screen, the one unit everything is a multiple of, and why the original `vw` clamps made it worse |
 | [notes-bar.md](notes-bar.md) | The one line note across the top, why it locks, and why it stays on this machine |
+| [ask-gemini.md](ask-gemini.md) | Ask Gemini (full build): the question panel, the Antigravity CLI backend, its lock-down, and exactly what is sent to Google |
+| [design/gemini-ask.md](design/gemini-ask.md) | The design it was built from, and why the Gemini CLI was dropped for the Antigravity CLI |
 | [constellation.md](constellation.md) | The project sky in the top panel: what size, brightness and a link mean, and how it stays cheap |
 | [milestones.md](milestones.md) | The badge and the list: what counts, why the first run is silent, and why there is no duration record |
 | [work-timelapse.md](work-timelapse.md) | The time-lapse of today or any day: three lines, what they measure, which days can be replayed, and why it always ends |

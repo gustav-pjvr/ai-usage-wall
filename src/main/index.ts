@@ -70,6 +70,8 @@ import {
 } from './win32/desktop-layer';
 import { assessPlacement, placeAboveDesktop } from './win32/desktop-watch';
 import { hwndFromBuffer, isAvailable as win32Available, readHkcuDword, unavailableReason } from './win32/ffi';
+import { createAgyRunner, defaultAgyExe, DEFAULT_MODEL, FALLBACK_MODELS, listModels, quoteQuestion, sweepStaleRuns, type AskEvent } from './ask/agy';
+import { buildPrompt, usageContext, type AskUsage } from './ask/context';
 
 const isDev = !app.isPackaged;
 
@@ -99,6 +101,11 @@ interface WallWindow {
    * WS_EX_NOACTIVATE mid-edit would take the caret away without telling anyone.
    */
   notesEditing: boolean;
+  /**
+   * True while the Ask Gemini bar in this window holds keyboard focus. The same
+   * loan as `notesEditing`, kept separate so closing one never ends the other.
+   */
+  askEditing: boolean;
 }
 
 let windows: WallWindow[] = [];
@@ -783,6 +790,12 @@ function refreshTrayMenu(): void {
       { type: 'separator' },
       { label: hidden ? 'Show wall' : 'Hide wall', click: () => toggleHidden() },
       { label: focusMode ? 'Leave focus mode' : 'Focus mode', click: () => toggleFocusMode() },
+      ...(isStatsOnly
+        ? []
+        : [
+            { label: 'Ask Gemini...  (Ctrl+Alt+G)', click: () => openAsk() },
+            { label: 'Gemini model', submenu: askModelMenu() },
+          ]),
       { type: 'separator' },
       {
         label: 'Desktop layer',
@@ -860,6 +873,52 @@ function refreshTrayMenu(): void {
   );
 }
 
+// ── Ask Gemini (full build only) ───────────────────────────────────────────
+
+/*
+ * One question at a time to Gemini through the Antigravity CLI
+ * (src/main/ask/agy.ts, docs/ask-gemini.md). Never in the stats build: no IPC
+ * handler, no hotkey, no tray item and no preload call exist there. Never on
+ * the projection wire: nothing here touches toWire().
+ */
+const askRunner = isStatsOnly ? null : createAgyRunner({ exe: defaultAgyExe(), log: (line) => console.log(line) });
+/** The Flash models agy offers, read once at startup; the known list until then. */
+let askModels: string[] = [...FALLBACK_MODELS];
+let askModelsFromCli = false;
+
+/** The window an Ask hotkey or tray click opens on: the one under the cursor, else the primary's. */
+function askTargetWindow(): WallWindow | undefined {
+  const live = windows.filter((w) => !w.win.isDestroyed());
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  return (
+    live.find((w) => w.displayId === display.id) ??
+    live.find((w) => w.displayId === screen.getPrimaryDisplay().id) ??
+    live[0]
+  );
+}
+
+/** Open the ask bar. The renderer borrows focus itself (`ask:focus`), as the notes bar does. */
+function openAsk(): void {
+  if (isStatsOnly) return;
+  if (hidden) toggleHidden();
+  const wall = askTargetWindow();
+  if (wall) wall.win.webContents.send('ask:open');
+}
+
+function askModelMenu(): Electron.MenuItemConstructorOptions[] {
+  const list = askModels.includes(settings.askModel) ? askModels : [...askModels, settings.askModel];
+  return [
+    ...list.map((m) => ({
+      label: `${m}${m === DEFAULT_MODEL ? '  (default)' : ''}${askModelsFromCli && !askModels.includes(m) ? '  (not offered)' : ''}`,
+      type: 'radio' as const,
+      checked: settings.askModel === m,
+      click: () => void updateSettings({ askModel: m }),
+    })),
+    { type: 'separator' as const },
+    { label: askModelsFromCli ? 'Listed by the Antigravity CLI' : 'Antigravity CLI not read, known list', enabled: false },
+  ];
+}
+
 // ── Windows ────────────────────────────────────────────────────────────────
 
 function targetDisplays(): Electron.Display[] {
@@ -919,6 +978,7 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     effectiveMode: settings.layerMode,
     inputReachable: false,
     notesEditing: false,
+    askEditing: false,
   };
 
   win.once('ready-to-show', () => {
@@ -956,8 +1016,19 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
   });
 
   win.webContents.on('did-finish-load', () => {
+    // A reload starts a renderer with no open edit, so any loan it held is over.
+    releaseLoans(wall);
     win.webContents.send('wall:update', updateState());
   });
+
+  /*
+   * Focus loans are also ended here, in main, not only by the renderer handing
+   * them back: a blur that lands while a borrow is still opening, or a renderer
+   * that crashed, would otherwise leave the window focusable with applyLayer
+   * switched off. The notes bar locks itself on the same blur.
+   */
+  win.on('blur', () => releaseLoans(wall));
+  win.webContents.on('render-process-gone', () => releaseLoans(wall));
 
   win.on('closed', () => {
     windows = windows.filter((w) => w.win !== win);
@@ -1008,7 +1079,7 @@ function applyLayer(wall: WallWindow): { ok: boolean; reason?: string } {
   // An open notes edit holds focus on purpose. Re-asserting WS_EX_NOACTIVATE
   // here would silently end it, and saving the note calls updateSettings, which
   // calls this for every window, so the edit would kill itself on the way out.
-  if (wall.notesEditing) return { ok: true };
+  if (wall.notesEditing || wall.askEditing) return { ok: true };
   const mode: LayerMode = focusMode ? 'top' : settings.layerMode;
   const display = screen.getAllDisplays().find((d) => d.id === wall.displayId);
 
@@ -1611,6 +1682,8 @@ function registerHotkeys(): void {
   };
   bind(settings.hotkeyFocus, toggleFocusMode, 'focus');
   bind(settings.hotkeyToggle, toggleHidden, 'toggle');
+  // Fixed, as the design asked. Full build only.
+  if (!isStatsOnly) bind('Control+Alt+G', openAsk, 'ask');
 }
 
 /**
@@ -1677,7 +1750,19 @@ function applyStartup(): void {
   });
 }
 
+/** End any focus loan on this window and put it back to never stealing focus. */
+function releaseLoans(wall: WallWindow): void {
+  if (!wall.notesEditing && !wall.askEditing) return;
+  wall.notesEditing = false;
+  wall.askEditing = false;
+  if (wall.win.isDestroyed()) return;
+  wall.win.setFocusable(false);
+  applyLayer(wall);
+}
+
 function quit(): void {
+  // Cancelled first; the app waits for its clean-up before quitting (below).
+  askRunner?.cancel();
   stopUpdater();
   stopDesktopWatch();
   if (toastLinger) clearTimeout(toastLinger);
@@ -1697,12 +1782,96 @@ function quit(): void {
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
   globalShortcut.unregisterAll();
   tray?.destroy();
-  app.quit();
+  /*
+   * Let a cancelled Ask run delete its temporary folder (session settings and
+   * agy's log) before the process goes, for at most three seconds. Anything
+   * left behind is swept at the next start (sweepStaleRuns).
+   */
+  if (askRunner?.busy()) {
+    void Promise.race([askRunner.idle(), new Promise((r) => setTimeout(r, 3000))]).finally(() => app.quit());
+  } else {
+    app.quit();
+  }
 }
 
 // ── IPC ────────────────────────────────────────────────────────────────────
 
+/**
+ * Names that must never reach Google in a project label: the Windows user name
+ * and the home folder's name (a session started in the home folder itself is
+ * labelled with it). os.userInfo can throw on an unusual account, so each is
+ * read on its own.
+ */
+function privateNames(): string[] {
+  const out: string[] = [];
+  try {
+    out.push(require('node:os').userInfo().username);
+  } catch {
+    /* no user name available */
+  }
+  out.push(path.basename(app.getPath('home')));
+  return out.filter((n) => typeof n === 'string' && n.trim().length > 0);
+}
+
+/**
+ * Lend a wall window keyboard focus, or take it back (docs/notes-bar.md).
+ * Two loans can be open at once, the notes bar's and the ask bar's, and the
+ * window only goes back to unfocusable when neither is.
+ */
+function lendFocus(event: Electron.IpcMainInvokeEvent, which: 'notesEditing' | 'askEditing', active: boolean): boolean {
+  const wall = windows.find((w) => w.win.webContents.id === event.sender.id);
+  if (!wall || wall.win.isDestroyed()) return false;
+  if (active) {
+    wall[which] = true;
+    wall.win.setFocusable(true);
+    wall.win.focus();
+    if (wall.win.isFocused()) return true;
+    // Refused. The renderer will not open the field, so it will never hand the
+    // loan back: take it back here, or the window stays focusable with
+    // applyLayer switched off until the next edit.
+  }
+  wall[which] = false;
+  if (!wall.notesEditing && !wall.askEditing) {
+    wall.win.setFocusable(false);
+    applyLayer(wall);
+  }
+  return false;
+}
+
+/**
+ * Ask Gemini's IPC. Full build only: the stats build registers none of it.
+ * Only a wall window may ask, and each event goes back to the window that
+ * asked. Answer text is untrusted model output; agy.ts has already stripped
+ * escapes and controls, and the renderer only ever sets it as textContent.
+ */
+function registerAskIpc(): void {
+  if (isStatsOnly || !askRunner) return;
+  const runner = askRunner;
+  const fromWall = (e: Electron.IpcMainInvokeEvent) => windows.find((w) => w.win.webContents.id === e.sender.id);
+
+  ipcMain.handle('ask:focus', (event, active: unknown) => lendFocus(event, 'askEditing', active === true));
+  ipcMain.handle('ask:cancel', (event) => (fromWall(event) ? runner.cancel() : false));
+  ipcMain.handle('ask:start', (event, question: unknown) => {
+    if (!fromWall(event)) return { ok: false, code: 'failed', message: 'Not available here.' };
+    const sender = event.sender;
+    const model = settings.askModel;
+    const send = (e: AskEvent): void => {
+      if (sender.isDestroyed()) return;
+      if (e.type === 'chunk') sender.send('ask:chunk', { id: e.id, text: e.text });
+      else if (e.type === 'done') sender.send('ask:done', { id: e.id, text: e.text, model: e.model });
+      else sender.send('ask:error', { id: e.id, code: e.code, message: e.message });
+    };
+    // Built when the question is asked, from the payload the wall is showing,
+    // so the answer is about the numbers on screen.
+    const data = usageContext(usageForRenderer() as AskUsage, Date.now(), undefined, privateNames());
+    const r = runner.start(question, (q) => buildPrompt(quoteQuestion(q), data), model, send);
+    return r.ok ? { ok: true, id: r.id, model } : { ok: false, code: r.code, message: r.message };
+  });
+}
+
 function registerIpc(): void {
+  // Guarded here as well as inside, so the stats bundle drops the handlers entirely.
+  if (!isStatsOnly) registerAskIpc();
   ipcMain.handle('wall:getState', (event) => {
     const wall = windows.find((w) => w.win.webContents.id === event.sender.id);
     return wall ? wallState(wall) : null;
@@ -1718,20 +1887,7 @@ function registerIpc(): void {
    * applyLayer again, which re-asserts the ex-styles and the z-order anchor, so
    * the window returns to being the thing that never steals focus.
    */
-  ipcMain.handle('wall:notesEdit', (event, active: boolean) => {
-    const wall = windows.find((w) => w.win.webContents.id === event.sender.id);
-    if (!wall || wall.win.isDestroyed()) return false;
-    if (active) {
-      wall.notesEditing = true;
-      wall.win.setFocusable(true);
-      wall.win.focus();
-      return wall.win.isFocused();
-    }
-    wall.notesEditing = false;
-    wall.win.setFocusable(false);
-    applyLayer(wall);
-    return false;
-  });
+  ipcMain.handle('wall:notesEdit', (event, active: boolean) => lendFocus(event, 'notesEditing', active === true));
   ipcMain.handle('wall:getUsage', () => usageForRenderer());
   /*
    * Opening the milestone list clears the badge. The ledger is the authority,
@@ -1987,6 +2143,20 @@ if (!app.requestSingleInstanceLock()) {
     );
     registerHotkeys();
     applyStartup();
+    if (!isStatsOnly) {
+      // Run folders a crash or a forced quit left behind (agy.ts, sweepStaleRuns).
+      void sweepStaleRuns().then((n) => {
+        if (n) console.log(`[ask] removed ${n} leftover run folder${n === 1 ? '' : 's'}`);
+      });
+      // `agy models` spends no quota and takes a few seconds; the tray shows
+      // the known list until it answers.
+      void listModels().then(({ models, fromCli }) => {
+        askModels = models;
+        askModelsFromCli = fromCli;
+        console.log(`[ask] ${fromCli ? `${models.length} Gemini Flash models from agy` : 'agy models unreadable, using the known list'}`);
+        refreshTrayMenu();
+      });
+    }
 
     // Displays changing is one of the few things that genuinely disturbs both
     // window geometry and z-order, so rebuild rather than patch.

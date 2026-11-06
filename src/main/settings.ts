@@ -69,6 +69,13 @@ export interface Settings {
    * data; one without behaves as if this were off and shows no toggle.
    */
   showCodex: boolean;
+  /**
+   * The model Ask Gemini uses (full build only, docs/ask-gemini.md): a slug as
+   * `agy models` prints it, chosen in the tray. Validated by shape here; a slug
+   * agy does not know fails that one question with a plain message, nothing
+   * worse, because it is passed as one argument and can never be a flag.
+   */
+  askModel: string;
 }
 
 const DEFAULTS: Settings = {
@@ -88,7 +95,11 @@ const DEFAULTS: Settings = {
   topPanel: 'constellation',
   statsView: 'detailed',
   showCodex: true,
+  askModel: 'gemini-3.8-flash-medium',
 };
+
+/** Matches MODEL_SLUG in src/main/ask/agy.ts: a Gemini slug that can never start with `-`. */
+const ASK_MODEL = /^gemini-[a-z0-9][a-z0-9.-]{0,56}$/;
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -134,6 +145,7 @@ export function normaliseSettings(raw: unknown): Settings {
     topPanel: r.topPanel === 'throughput' ? 'throughput' : DEFAULTS.topPanel,
     statsView: r.statsView === 'simple' ? 'simple' : DEFAULTS.statsView,
     showCodex: r.showCodex !== false,
+    askModel: typeof r.askModel === 'string' && ASK_MODEL.test(r.askModel) ? r.askModel : DEFAULTS.askModel,
   };
 }
 

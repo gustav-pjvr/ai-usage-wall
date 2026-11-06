@@ -1,8 +1,12 @@
-# Ask Gemini on the wall | design (draft for Gustav, 2026-11-06)
+# Ask Gemini on the wall | design (2026-11-06)
 
 A question box on Gustav's wall that sends a question to Gemini and shows the
 answer, with the wall's own numbers (and later Work mode's mail and tasks)
-available to Gemini as context. Nothing here is built.
+available to Gemini as context.
+
+**Status: implemented 2026-11-06, on the Antigravity CLI, not the Gemini CLI.**
+How it works, the lock-down and what is sent: [../ask-gemini.md](../ask-gemini.md).
+Section 6 records why the backend changed after sections 4 and 5 were decided.
 
 ## 1. What Google AI Plus does and does not give
 
@@ -95,3 +99,31 @@ cent** on 3.8 Flash paid, so $5 lasts on the order of a thousand questions.
   command to fix it.
 - Security-sensitive (it starts a process with outside input): the independent
   Opus audit applies.
+
+## 6. The Gemini CLI was refused; Antigravity CLI is the backend (2026-11-06)
+
+When Gustav signed in to the Gemini CLI (0.67.0) on 2026-11-06, Google refused
+it: "Failed to sign in. Message: This client is no longer supported for Gemini
+Code Assist for individuals. To continue using Gemini, please migrate to the
+Antigravity suite of products". A headless run returned the same
+`IneligibleTierError`. Section 1 had already found that the CLI does not support
+AI Plus; this confirmed it on his account.
+
+So the route in section 5 is built on the **Antigravity CLI** (`agy` 1.4.11),
+which is signed in on his AI Plus account and runs Gemini 3.8 Flash. Everything
+else in sections 3 to 5 stands: the panel, the hotkey, the focus loan, the
+context the wall chooses, full build only, never projected, no shell, the
+question on stdin, an empty temporary folder, tools locked down, tested.
+
+What changed with the backend:
+
+- The lock-down uses agy's own controls: a session-only `--settings` file whose
+  deny rules replace the user's for the run (commands, file reads and writes,
+  URL fetches, MCP), `toolPermission: strict`, `--mode plan`, and a watchdog on
+  agy's event stream that kills any run using a tool other than web search.
+- Quota is AI Plus's Antigravity baseline plus 200 monthly AI credits. It ran
+  out after three short prompts while this was being built, so the panel names
+  quota plainly, with the reset time agy gives.
+- The model list comes from `agy models`; the tray offers its Gemini Flash
+  models, default `gemini-3.8-flash-medium`.
+- Gemini CLI code was not kept: one backend, in `src/main/ask/agy.ts`.

@@ -1,7 +1,7 @@
 {
   "name": "ai-usage-wall",
   "productName": "MuchBetter Client Wall",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Ambient desktop client wall for MuchBetter. A living, branded showcase of client work.",
   "author": "Gustav (MuchBetter)",
   "license": "UNLICENSED",
@@ -52,12 +52,9 @@
     ],
     "extraResources": [
       {
-        "from": "data",
-        "to": "data"
-      },
-      {
         "from": "assets",
-        "to": "assets"
+        "to": "assets",
+        "filter": ["**/*", "!clients/**"]
       }
     ],
     "asarUnpack": [

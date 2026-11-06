@@ -8,16 +8,12 @@
 An ambient Windows desktop dashboard for your AI coding usage, sitting below your
 normal windows. Go to the desktop and it is there.
 
-**Claude Stats** (the default) is a live command centre for your local Claude Code
+**Claude Stats** is a live command centre for your local Claude Code
 usage, with OpenAI Codex beside it when Codex is on the machine: tokens, cost at
 API list prices, hours, sessions, models, projects, plan limits, daily and hourly
 activity, all read from files on this machine. It has a Simple view (one card
 each for Claude and Codex) and a Detailed view (every panel, the default), and a
-switch that hides Codex. **MuchBetter Clients** is a living wall of the work,
-where MuchBetter provides the system and each client provides the visual
-identity.
-
-Switch with the control at the top, or press `Tab`.
+switch that hides Codex. Claude Stats is the only app view in both editions.
 
 ---
 
@@ -33,7 +29,7 @@ Other scripts:
 ```bash
 npm run build      # bundle to dist/
 npm run dev        # rebuild on change
-npm test           # 17 suites, about 680 checks: layout, schema, indexing, Codex, plan limits, projection, crypto, chat, pricing
+npm test           # stats, indexing, Codex, plan limits, projection, crypto, chat, pricing
 npm run test:render # about 750 layout checks in a real Electron window, every screen size and view
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
@@ -51,59 +47,15 @@ believing it is current.
 (about 107 MB, installs per-user with no admin prompt). Prefer `npm run deploy`,
 which also installs it.
 
-**In a packaged build your client files live in
-`%APPDATA%\MuchBetter Client Wall\data\clients`**, not next to the executable,
-because Program Files is not writable. The demonstration clients are copied there
-on first run and are never overwritten afterwards. The tray menu's
-"Open client data folder" always opens the right one.
-
 The wall has no taskbar button and never steals focus, so **the tray icon is the
 control surface**. Right-click it for layer mode, click-through, start-with-Windows,
-reload, and the diagnostics overlay.
+and the diagnostics overlay.
 
 | Hotkey | Action |
 |---|---|
 | `Ctrl+Alt+W` | Focus mode: brings the wall above other windows and enables interaction |
 | `Ctrl+Alt+Shift+W` | Show / hide the wall |
-| `Tab` | Switch between Claude Stats and Clients |
-
-Hover a card to lift it. Click a card for the full client view. `Esc` closes it.
-
----
-
-## Adding a client
-
-Create one file, `data/clients/<slug>.json`:
-
-```json
-{
-  "id": "acme-corp",
-  "name": "Acme Corp",
-  "company": "Industrial supplies",
-  "state": "active",
-  "project": "Website rebuild",
-  "revenue": 50000,
-  "progress": 35,
-  "startDate": "2026-08-15",
-  "lastInteraction": "2026-09-01",
-  "branding": { "primary": "#0F766E" }
-}
-```
-
-The wall picks it up within about a third of a second. No restart.
-
-`id` and `name` are the only required fields; everything else degrades gracefully.
-Full field reference is in [ARCHITECTURE.md](ARCHITECTURE.md).
-
-Or just ask Claude: *"Add Acme Corp as a new client, website project worth R50,000,
-started 15 August, 35% done."*
-
-**Logos and images** go in `assets/clients/<slug>/` and are referenced relative to
-that folder, e.g. `"logo": "acme-corp/logo.png"`.
-
-**Client colours are a starting point, not the final palette.** The brand hue drives
-a derived token set that is contrast-solved per card, so every card stays readable
-whatever the client's brand does.
+| `Esc` | Leave focus mode |
 
 ---
 
@@ -116,14 +68,10 @@ so deleting the file is safe.
 |---|---|---|
 | `layerMode` | `"desktop"` | `desktop` (below apps, interactive), `top` (always on top). For a wall that ignores the mouse, set `clickThrough` |
 | `performance` | `"auto"` | `auto` inspects the machine. Force with `low`/`balanced`/`high` |
-| `clickThrough` | `false` | Cards ignore the mouse entirely |
+| `clickThrough` | `false` | The wall ignores the mouse entirely |
 | `opacity` | `1` | Wall opacity in ambient mode |
-| `densityScale` | `1` | Lower packs more cards in |
-| `pageRotateSeconds` | `45` | Only used when the wall paginates |
 | `monitors` | `[]` | Empty means all displays |
-| `vaultPath` | `null` | Obsidian vault, read-only |
-| `useVault` | `true` | |
-| `mode` | `"stats"` | Which view opens on launch: `stats` or `clients` |
+| `mode` | `"stats"` | Always stats; legacy values are ignored |
 | `debug` | `false` | Diagnostics overlay |
 
 ---
@@ -284,15 +232,16 @@ There are two editions from one codebase, chosen at build time.
 | Build | `npm run build` | `npm run build:stats` |
 | Installer | `npm run package` to `release/` | `npm run package:stats` to `release-stats/` |
 | Installed as | MuchBetter Client Wall | Claude Stats Wall |
-| Views | Claude Stats and Clients, with a switch | Claude Stats only, no switch |
-| Client records | shipped, seeded, watched | **none, and none in the installer** |
-| Obsidian vault | read when configured | never read |
+| Views | Claude Stats only | Claude Stats only |
+| Client records and assets | not read or shipped | not read or shipped |
 
 **Claude Stats Wall is the one you can hand to someone else.** It reads only the
 recipient's own `~/.claude`, needs no account and no API key, and carries no
 MuchBetter client data: `data/` is not in its `extraResources`, so there is
 nothing to leak even in principle. It installs alongside the full build under its
-own appId rather than upgrading over it.
+own appId rather than upgrading over it. The full build keeps its existing appId
+and product name so installed copies upgrade in place. A Work view is planned
+for that edition later.
 
 Four things to say when you hand it over:
 
@@ -317,42 +266,10 @@ Four things to say when you hand it over:
 
 `npm run deploy` only ever touches the FULL build, on this machine.
 
-## Obsidian
-
-If `vaultPath` is set, the wall reads `<vault>/02-Clients/*.md` and uses it to fill
-gaps in client records. It is **strictly read-only** and **only reads frontmatter,
-never note bodies**, because the vault contains information that should not be on a
-screen visible to passers-by.
-
-Opt a note in with namespaced frontmatter keys:
-
-```yaml
----
-title: Acme Corp
-type: client
-status: active
-client: acme-corp        # must match the wall's client id
-wall_revenue: 50000
-wall_progress: 35
-wall_project: Website rebuild
-wall_primary: "#0F766E"
----
-```
-
-Local JSON always wins; the vault only fills blanks. The wall works fine with no
-vault at all.
-
----
-
 ## If something looks wrong
 
 Turn on the diagnostics overlay from the tray. It reports the display, viewport,
-performance tier, layer mode, whether the Win32 layer is available, vault match
-count, and any clients that failed to load.
-
-**A client that fails to load still gets a card** showing the parse error, rather
-than silently disappearing. So if you mistype something in a client file you will
-see exactly which file and which line, instead of that client quietly vanishing.
+performance tier, layer mode, and whether the Win32 layer is available.
 
 Known limitations on the current machine are listed in
 [ARCHITECTURE.md](ARCHITECTURE.md#known-issues).

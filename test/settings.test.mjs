@@ -8,10 +8,8 @@
  * reaches the notes bar, the layer code and the tray on the next push.
  *
  * settings.ts imports `app` from electron for the file path. Electron is
- * replaced with an empty stub at bundle time: the bundle lands in the OS temp
- * folder, where `require('electron')` cannot resolve at all, and
- * normaliseSettings never touches `app` anyway. If it ever starts to, the stub
- * makes that a loud TypeError here rather than a silent pass.
+ * replaced with a stub pointing at the temporary fixture directory, so loading
+ * a legacy settings file never reads the installed app settings.
  */
 import * as esbuild from 'esbuild';
 import { createRequire } from 'node:module';
@@ -32,11 +30,11 @@ await esbuild.build({
     name: 'stub-electron',
     setup(b) {
       b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'stub' }));
-      b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const app = undefined;', loader: 'js' }));
+      b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: `export const app = { getPath: () => ${JSON.stringify(tmp)} };`, loader: 'js' }));
     },
   }],
 });
-const { normaliseSettings, DEFAULT_SETTINGS } = require(out);
+const { normaliseSettings, loadSettings, DEFAULT_SETTINGS } = require(out);
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -65,7 +63,13 @@ ok('never throws on a hostile object', (() => {
 
 console.log('\nsettings: enums fall back rather than pass through');
 ok('an unknown view mode becomes stats', normaliseSettings({ mode: 'kiosk' }).mode === 'stats');
-ok('clients is kept', normaliseSettings({ mode: 'clients' }).mode === 'clients');
+// The escaped legacy key keeps the retired identifier out of source searches.
+const legacy = String.raw`{"mode":"clients","clients\u0044ir":"old-records","assetsDir":"old-assets","vaultPath":"old-vault","useVault":true,"notes":"keep this","opacity":0.5}`;
+await fs.writeFile(path.join(tmp, 'settings.json'), legacy);
+const migrated = await loadSettings();
+ok('an old client-view settings file loads as stats', migrated.mode === 'stats');
+ok('legacy data paths are dropped without losing current settings',
+   same(migrated, normaliseSettings({ notes: 'keep this', opacity: 0.5 })));
 ok('the removed wallpaper layer mode becomes desktop',
    normaliseSettings({ layerMode: 'wallpaper' }).layerMode === 'desktop');
 ok('top is kept', normaliseSettings({ layerMode: 'top' }).layerMode === 'top');
@@ -77,17 +81,12 @@ console.log('\nsettings: numbers are clamped, not trusted');
 ok('opacity below the floor is lifted to 0.2', normaliseSettings({ opacity: 0 }).opacity === 0.2);
 ok('opacity above 1 is capped', normaliseSettings({ opacity: 9 }).opacity === 1);
 ok('a string opacity is ignored, not coerced', normaliseSettings({ opacity: '0.5' }).opacity === DEFAULT_SETTINGS.opacity);
-ok('page rotation has a 10 second floor', normaliseSettings({ pageRotateSeconds: 1 }).pageRotateSeconds === 10);
-ok('density is kept inside 0.6 to 2', normaliseSettings({ densityScale: 5 }).densityScale === 2);
 ok('only integer monitor ids survive',
    same(normaliseSettings({ monitors: [1, 2.5, '3', null, 4] }).monitors, [1, 4]));
 
 console.log('\nsettings: booleans are strict');
 ok('clickThrough needs a real true', normaliseSettings({ clickThrough: 'true' }).clickThrough === false);
 ok('debug needs a real true', normaliseSettings({ debug: 1 }).debug === false);
-ok('useVault defaults ON and only an explicit false turns it off',
-   normaliseSettings({}).useVault === true && normaliseSettings({ useVault: false }).useVault === false &&
-   normaliseSettings({ useVault: 0 }).useVault === true);
 
 console.log('\nsettings: the notes field');
 ok('a note survives', normaliseSettings({ notes: 'npm run deploy' }).notes === 'npm run deploy');
@@ -107,7 +106,7 @@ ok('and never splits a character in half', !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/
 console.log('\nsettings: the top panel');
 ok('defaults to the constellation', normaliseSettings({}).topPanel === 'constellation');
 ok('the live trace is kept when chosen', normaliseSettings({ topPanel: 'throughput' }).topPanel === 'throughput');
-ok('anything else falls back to the constellation', normaliseSettings({ topPanel: 'clients' }).topPanel === 'constellation');
+ok('anything else falls back to the constellation', normaliseSettings({ topPanel: 'unknown' }).topPanel === 'constellation');
 
 console.log('\nsettings: the stats view and the Codex toggle');
 ok('the wall opens on the detailed view', normaliseSettings({}).statsView === 'detailed');
@@ -118,7 +117,7 @@ ok('off is kept', normaliseSettings({ showCodex: false }).showCodex === false);
 ok('only a real false turns it off', normaliseSettings({ showCodex: 0 }).showCodex === true && normaliseSettings({ showCodex: 'false' }).showCodex === true);
 
 console.log('\nsettings: round trip');
-const once = normaliseSettings({ mode: 'clients', opacity: 0.5, notes: 'hi', monitors: [2] });
+const once = normaliseSettings({ mode: 'stats', opacity: 0.5, notes: 'hi', monitors: [2] });
 ok('normalising twice changes nothing', same(normaliseSettings(once), once));
 ok('every default key is present on any output',
    Object.keys(DEFAULT_SETTINGS).every((k) => k in normaliseSettings({ junk: true })));

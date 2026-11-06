@@ -5,11 +5,11 @@
     <!--
       Strict CSP. The renderer loads no remote content and evaluates no strings,
       so everything except our own bundle, inline styles we set from JS, and
-      images from the vetted mbw-asset protocol is denied.
+      local images is denied.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' mbw-asset: data:; font-src 'self' mbw-asset:; connect-src 'none'; form-action 'none'; base-uri 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'"
     />
     <title>MuchBetter Client Wall</title>
     <link rel="stylesheet" href="styles/wall.css" />
@@ -20,11 +20,9 @@
   </head>
   <body>
     <div id="stage">
-      <div id="view-stats" class="view"></div>
-      <div id="view-clients" class="view"><div id="wall"></div></div>
+      <div id="view-stats" class="view is-active"></div>
     </div>
-    <nav id="mode-switch" aria-label="View"></nav>
-    <div id="detail" aria-hidden="true"></div>
+    <nav id="mode-switch" aria-label="Focus mode" hidden></nav>
     <pre id="diagnostics"></pre>
     <script src="main.js"></script>
   </body>

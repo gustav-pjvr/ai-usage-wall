@@ -29,21 +29,15 @@ export const isStatsOnly = EDITION === 'stats';
 export const PRODUCT_NAME = isStatsOnly ? 'Claude Stats Wall' : 'MuchBetter Client Wall';
 ```
 
-**`full`, MuchBetter Client Wall.** Both views with a switch between them, the
-client store, the Obsidian bridge. This is Gustav's own install, and it is
-updated by `npm run deploy` rather than by any update feed.
+**`full`, MuchBetter Client Wall.** Claude Stats only, with the existing appId
+and product name retained so installed copies upgrade in place. A Work view is
+planned later. This edition is updated by `npm run deploy`.
 
-**`stats`, Claude Stats Wall.** The Claude usage dashboard only. No client data
-is shipped, seeded, read or watched, and there is no second view to switch to.
-This is the build that can be handed to someone else: it reads only the
-recipient's own `~/.claude`, needs no account, no API key and no network to
-produce a single number on screen.
+**`stats`, Claude Stats Wall.** The same dashboard, with a separate installed
+identity and the automatic updater.
 
-Note the direction of the default. Anything that is not exactly the string
-`'stats'` produces the **full** build. Getting the flag wrong therefore yields a
-build that carries client data, not one that lacks it, which is the wrong way
-round for a mistake to fall. It is worth knowing when you are checking an
-artefact you did not build yourself.
+Neither edition reads, seeds, watches or ships client records or assets.
+The default remains `full` unless the build flag is exactly `stats`.
 
 ### Why a build constant and not a git branch
 
@@ -52,9 +46,6 @@ and it is the wrong shape: the two would diverge, and every fix to the stats
 dashboard, the desktop layer or the usage indexer would have to be landed twice.
 A build-time constant costs a handful of guards and keeps one place to fix
 anything.
-
-The cost is real but bounded. As of this writing, `isStatsOnly` appears in six
-files and about twenty places, all listed further down.
 
 ---
 
@@ -133,57 +124,25 @@ about the *runtime* distinguishes them beyond what was compiled in.
 | appId | `world.muchbetter.clientwall` (`package.json:38`) | `world.muchbetter.claudestatswall` (`electron-builder.stats.js:19`) |
 | Installer output | `release/` | `release-stats/` |
 | Artefact name | `MuchBetter Client Wall Setup <version>.exe` (builder default) | `ClaudeStatsWall-Setup-<version>.exe` (`electron-builder.stats.js:31`) |
-| Client records in the installer | shipped via `extraResources` | **absent entirely** |
-| `assets/` in the installer | all of it | filtered, `!clients/**` |
+| Client records in the installer | absent | absent |
+| `assets/` in the installer | filtered, `!clients/**` | filtered, `!clients/**` |
 | Desktop shortcut | not created | created |
-| Views | Claude Stats and Clients, with a switch | Claude Stats only, switch removed from the DOM |
-| Client store and Obsidian bridge | started | never started |
-| Seeding of user data | yes, on first packaged run | returns early |
+| Views | Claude Stats only | Claude Stats only |
 | Updater | none, updated by `npm run deploy` | electron-updater against a generic feed |
 | Run registry value | `MuchBetterClientWall` | `ClaudeStatsWall` |
 
 ### Menus
 
-All the tray differences are conditional spreads inside `refreshTrayMenu()`,
-`src/main/index.ts:525-644`. In the stats build:
-
-- the "N records loaded" line is absent (`:540-542`);
-- the **View** submenu, which switches between Claude Stats and Clients, is
-  absent (`:544-560`);
-- **Reload clients** and **Open client data folder** are absent (`:602-607`);
-- the **update** item is present, and it is present *only* here (`:624-633`).
-  The comment says why it is absent rather than disabled in the full build: an
-  item that can never do anything is worse than no item.
-
-Everything else, including Projection, is identical. Projection ships in both
-editions on purpose.
+The stats edition has an update item. The full edition is updated through
+`npm run deploy`. Both retain Projection and all other shared controls.
+Neither has a View submenu, records count, client reload or client folder item.
 
 ### Data sources
 
-This is the part that has a rule attached (rule 23 in `ARCHITECTURE.md`): the
-stats edition must never ship, seed, read or watch client data. It is not a
-hidden view, it is an absent one. Five separate guards, in order of how early
-they fire:
-
-| Guard | Location | Effect |
-|---|---|---|
-| `seedUserData` early return | `src/main/index.ts:151` | never creates the client folder on someone else's machine |
-| `reloadData` skipped | `src/main/index.ts:1501` | the client store is never read |
-| `startWatching` skipped | `src/main/index.ts:1555` | no filesystem watch on client data or the vault |
-| `settings.mode` coerced to `stats` at boot | `src/main/index.ts:1488` | a settings file carrying `"mode": "clients"` cannot strand the wall on an empty view |
-| `wall:setMode` coerced | `src/main/index.ts:1394` | a stray renderer message cannot either |
-| clients view removed from the DOM | `src/renderer/main.ts:91` | `remove()`, not `hidden` |
-
-The comment at `src/main/index.ts:146-150` states the motivation for the first
-one in the bluntest available terms: seeding someone else's machine with
-MuchBetter's clients is the single most embarrassing thing this app could do.
-
-The DOM removal matters for its own reason, given at
-`src/renderer/main.ts:86-90`: a hidden view is still a live DOM tree that can
-take input, and this project has already been bitten by a hidden client wall
-intercepting input meant for the stats view (rule 14 in `ARCHITECTURE.md`). Since
-there is nothing to put in the clients view in this edition anyway, `remove()` is
-both simpler and unbeatable by a stylesheet.
+Both editions show stats without a mode switch or Tab toggle. Settings always
+normalise `mode` to `stats`; old client paths and vault settings are dropped.
+The client store, vault bridge, seeding, watcher and asset protocol are removed.
+The app leaves existing local records untouched.
 
 ### Updater
 
@@ -339,19 +298,20 @@ single registry value. Details of how the value is written are in
 
 ## Verifying an edition build
 
-The stats build's central claim is a negative one, so verify it the way it was
-verified the first time: by looking for something that should not be there.
+Both builds exclude client data. Verify that claim by looking for resources
+that should not be there.
 
 After `npm run package:stats`, the unpacked application is at
 `release-stats/win-unpacked`. Search it for a client name and expect nothing.
 Search `release-stats/win-unpacked/resources` for a `data` directory and expect
 it to be absent, and for `resources/assets/clients` likewise.
 
-Things worth checking beyond that, each tied to a guard above:
+Check the same resource exclusions in `release/win-unpacked` for the full build.
 
-1. Launch it and read the first log lines. `src/main/index.ts:1489-1490` prints
-   the resolved userData and clients directory. The userData must say
-   `Claude Stats Wall`.
+Things worth checking beyond that:
+
+1. Launch it and read the userData path in the first log lines. In the stats
+   edition, it must say `Claude Stats Wall`.
 2. Open the tray menu. There must be no View submenu, no records-loaded line, no
    client folder items, and there must be an update item.
 3. Confirm the tray icon is actually there, per the near-miss above.
@@ -359,6 +319,5 @@ Things worth checking beyond that, each tied to a guard above:
    already running".
 
 A note on what "verified" means here, in keeping with the rest of this
-repository's documentation: checking that the clients view is not visible proves
-nothing useful, because the whole point of the rule is that the data must be
-absent rather than hidden. Check the files on disk.
+repository's documentation: check the packaged resources as well as the UI.
+Neither edition may ship client data.

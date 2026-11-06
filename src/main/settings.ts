@@ -1,5 +1,5 @@
 /**
- * Settings: a single JSON file next to the client data, loaded once and written
+ * Settings: a single JSON file in userData, loaded once and written
  * atomically. Deliberately small. Every key has a working default, so a deleted
  * or corrupt settings file costs nothing.
  */
@@ -11,10 +11,10 @@ import { app } from 'electron';
 import type { LayerMode } from './win32/desktop-layer';
 import type { PerfTier } from './capability';
 
-export type WallMode = 'stats' | 'clients';
+export type WallMode = 'stats';
 
 export interface Settings {
-  /** Which view the wall shows. Claude Stats is the default experience. */
+  /** Retained for settings compatibility. Both editions always show stats. */
   mode: WallMode;
   /** Desktop layering. 'desktop' is the interactive-but-behind-apps hybrid. */
   layerMode: LayerMode;
@@ -39,16 +39,8 @@ export interface Settings {
   background: 'none' | 'plain' | 'gradient';
   /** Backdrop opacity, 0 to 1. Below 1 the wallpaper shows through faintly. */
   backgroundOpacity: number;
-  /** Layout density multiplier. Lower packs more cards in. */
-  densityScale: number;
-  /** Seconds between ambient page changes when the wall paginates. */
-  pageRotateSeconds: number;
   /** Which monitors to render on. Empty means all. */
   monitors: number[];
-  clientsDir: string | null;
-  assetsDir: string | null;
-  vaultPath: string | null;
-  useVault: boolean;
   /** Show the diagnostics overlay. */
   debug: boolean;
   /**
@@ -90,13 +82,7 @@ const DEFAULTS: Settings = {
   opacity: 1,
   background: 'gradient',
   backgroundOpacity: 1,
-  densityScale: 1,
-  pageRotateSeconds: 45,
   monitors: [],
-  clientsDir: null,
-  assetsDir: null,
-  vaultPath: null,
-  useVault: true,
   debug: false,
   notes: '',
   topPanel: 'constellation',
@@ -128,7 +114,7 @@ export function normaliseSettings(raw: unknown): Settings {
   const tiers = ['auto', 'low', 'balanced', 'high'];
 
   return {
-    mode: r.mode === 'clients' ? 'clients' : DEFAULTS.mode,
+    mode: DEFAULTS.mode,
     layerMode: layerModes.includes(r.layerMode as LayerMode) ? (r.layerMode as LayerMode) : DEFAULTS.layerMode,
     performance: tiers.includes(r.performance as string) ? (r.performance as Settings['performance']) : 'auto',
     clickThrough: r.clickThrough === true,
@@ -141,14 +127,7 @@ export function normaliseSettings(raw: unknown): Settings {
       : DEFAULTS.background,
     backgroundOpacity:
       typeof r.backgroundOpacity === 'number' ? clamp(r.backgroundOpacity, 0, 1) : DEFAULTS.backgroundOpacity,
-    densityScale: typeof r.densityScale === 'number' ? clamp(r.densityScale, 0.6, 2) : DEFAULTS.densityScale,
-    pageRotateSeconds:
-      typeof r.pageRotateSeconds === 'number' ? clamp(r.pageRotateSeconds, 10, 600) : DEFAULTS.pageRotateSeconds,
     monitors: Array.isArray(r.monitors) ? r.monitors.filter((m) => Number.isInteger(m)) : [],
-    clientsDir: typeof r.clientsDir === 'string' ? r.clientsDir : null,
-    assetsDir: typeof r.assetsDir === 'string' ? r.assetsDir : null,
-    vaultPath: typeof r.vaultPath === 'string' ? r.vaultPath : null,
-    useVault: r.useVault !== false,
     debug: r.debug === true,
     notes:
       typeof r.notes === 'string' ? Array.from(r.notes).slice(0, NOTES_MAX).join('') : DEFAULTS.notes,
@@ -164,7 +143,6 @@ export async function loadSettings(): Promise<Settings> {
     // Strip a UTF-8 BOM. Notepad and PowerShell's Set-Content -Encoding utf8
     // both write one, JSON.parse rejects it, and the failure is invisible: the
     // file looks perfect and every setting silently reverts to its default.
-    // The client store does the same for exactly the same reason.
     const raw = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text) as Partial<Settings>;
     const settings = normaliseSettings(raw);
 

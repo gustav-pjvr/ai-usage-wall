@@ -36,16 +36,13 @@ before anything asks for a path (`src/main/index.ts:1464`). See
 
 **Two things surprise people in development:**
 
-1. `settingsPath()` uses `app.getPath('userData')` unconditionally, while client
-   data uses `userRoot()`, which collapses to the repo when not packaged
-   (`src/main/index.ts:130`). So in a dev run, `data/clients/` is read from the
-   repo but `settings.json` is still in `%APPDATA%`. Editing a file in the repo
-   expecting it to be the dev settings will do nothing.
+1. `settingsPath()` uses `app.getPath('userData')` unconditionally. A dev run
+   reads `settings.json` from `%APPDATA%`, not from the repository.
 2. That also means a dev run and a packaged install of the same edition share
    one settings file, and one single instance lock. The lock collision is logged
    explicitly rather than exiting silently (`src/main/index.ts:1472-1477`).
 
-The resolved paths are printed at startup (`src/main/index.ts:1489-1490`), which
+The resolved userData path is printed at startup (`src/main/index.ts:1489-1490`), which
 is the fastest way to settle any question about which file is in play.
 
 ---
@@ -58,7 +55,7 @@ every state push (`src/main/index.ts:1081`).
 
 | Key | Type | Default | Validation | Consumed by |
 |---|---|---|---|---|
-| `mode` | `'stats' \| 'clients'` | `'stats'` | anything but `'clients'` becomes `'stats'` | the view switcher; forced to `'stats'` in the stats edition at `src/main/index.ts:1488` |
+| `mode` | `'stats'` | `'stats'` | always normalised to `'stats'` | the only app view in both editions |
 | `layerMode` | `'desktop' \| 'top'` | `'desktop'` | must be one of the two, else default | `applyLayer`, `src/main/index.ts:791` |
 | `performance` | `'auto' \| 'low' \| 'balanced' \| 'high'` | `'auto'` | must be in the list, else `'auto'` | `detectCapability`, `src/main/capability.ts:80-83` |
 | `clickThrough` | boolean | `false` | strict `=== true` | `setIgnoreMouseEvents`, `src/main/index.ts:835` |
@@ -68,26 +65,17 @@ every state push (`src/main/index.ts:1081`).
 | `opacity` | number | `1` | clamped to 0.2 to 1 | `win.setOpacity`, `src/main/index.ts:836` |
 | `background` | `'none' \| 'plain' \| 'gradient'` | `'gradient'` | must be in the list | `document.body.dataset.background`, `src/renderer/main.ts:597` |
 | `backgroundOpacity` | number | `1` | clamped to 0 to 1 | `--backdrop-opacity`, `src/renderer/main.ts:598` |
-| `densityScale` | number | `1` | clamped to 0.6 to 2 | the layout engine, `src/renderer/main.ts:615` |
-| `pageRotateSeconds` | number | `45` | clamped to 10 to 600 | ambient pagination, `src/renderer/main.ts:570` |
 | `monitors` | number[] | `[]` | integers only; empty means all | `targetDisplays`, `src/main/index.ts:648-653` |
-| `clientsDir` | string or null | `null` | string else null | `resolveClientsDir`, `src/main/index.ts:132` |
-| `assetsDir` | string or null | `null` | string else null | `resolveAssetsDir`, `src/main/index.ts:135` |
-| `vaultPath` | string or null | `null` | string else null | the Obsidian bridge, `src/main/index.ts:1168` |
-| `useVault` | boolean | `true` | strict `!== false`, so it defaults on | `src/main/index.ts:1169` |
 | `debug` | boolean | `false` | strict `=== true` | diagnostics overlay, `src/renderer/main.ts:769` |
 | `notes` | string | `''` | string, truncated to 400 characters | the notes bar across the top of the wall, [notes-bar.md](notes-bar.md) |
 | `topPanel` | `'constellation'` or `'throughput'` | `'constellation'` | anything else becomes `'constellation'` | what the top row's big panel shows, [constellation.md](constellation.md) |
 
-Note the two different boolean idioms. Everything defaults off with
-`r.x === true`, except `useVault`, which defaults on with `r.useVault !== false`.
-That is deliberate rather than an inconsistency: it makes the default the value
-you get from an absent key, in both directions.
+Legacy client paths, vault settings, density and pagination settings are ignored
+and dropped. A settings file with `mode: "clients"` loads as stats.
 
-Several keys have no UI at all. `opacity`, `backgroundOpacity`, `densityScale`,
-`pageRotateSeconds`, `monitors`, the three path settings and both hotkeys are
-edit-the-file settings. The tray exposes `mode`, `layerMode`, `background`,
-`clickThrough`, `startWithWindows` and `debug`.
+`opacity`, `backgroundOpacity`, `monitors` and both hotkeys are edit-the-file
+settings. The tray exposes `layerMode`, `background`, `clickThrough`,
+`startWithWindows` and `debug`.
 
 `monitors` deserves one note: `targetDisplays()` falls back to **all** displays
 when the configured ids match nothing (`src/main/index.ts:651-652`). A stale
@@ -112,8 +100,7 @@ and produces a fully populated `Settings` with every key present. There is no
   (`src/main/settings.ts:121-125`). Notepad and PowerShell's
   `Set-Content -Encoding utf8` both write one, `JSON.parse` rejects it, and the
   failure is invisible: the file looks perfect and every setting silently reverts
-  to its default. The client store strips it for the same reason, and it is rule
-  11 in `ARCHITECTURE.md`. If you add another hand-editable JSON file, strip the
+  to its default. This is rule 11 in `ARCHITECTURE.md`. If you add another hand-editable JSON file, strip the
   BOM there too.
 - **File missing.** Normal on first run, so `ENOENT` is silent
   (`src/main/settings.ts:142-147`).
@@ -160,18 +147,14 @@ on a blanket refresh (`src/main/index.ts:1199-1234`):
 |---|---|
 | `startWithWindows` | `applyStartup()` |
 | `performance` | `detectCapability()` re-run |
-| `clientsDir`, `vaultPath`, `useVault` | stop and restart the watcher, then reload data |
 | `monitors` | `rebuildWindows()` |
 | anything else | `applyLayer()` on every window |
 | `hotkeyFocus`, `hotkeyToggle` | `registerHotkeys()` |
 
 ### Testing status
 
-`normaliseSettings` is not covered by the automated suite. `test/run.mjs` covers
-brand token derivation, the layout engine and client schema validation; the other
-three suites cover projection. Given that this function is the only thing
-standing between a hand-edited file and the running app, it is the most obvious
-candidate if you are adding tests: it is pure, synchronous, and takes `unknown`.
+`test/settings.test.mjs` covers normalisation and loading a legacy client-view
+settings file as stats, with retired paths dropped and current settings kept.
 
 ---
 
@@ -193,11 +176,7 @@ changes. Nothing in the menu is cached, so nothing can be stale.
 
 ```
 <PRODUCT_NAME>  v<version>  [(dev)]        disabled header
-N records loaded                           disabled, full edition only
 ---
-View                                       full edition only
-  Claude Stats                             radio
-  MuchBetter Clients                       radio
 Show wall / Hide wall                      label follows state
 Focus mode / Leave focus mode              label follows state
 ---
@@ -214,8 +193,6 @@ Background
 Click-through                              checkbox
 Start with Windows                         checkbox
 ---
-Reload clients                             full edition only
-Open client data folder                    full edition only
 Projection                                 submenu, shape follows role
 ---
 <update label>                             stats edition only
@@ -243,8 +220,7 @@ Three details worth knowing:
 
 `quit()` (`src/main/index.ts:1364-1379`) stops the updater and the desktop
 watchdog, destroys the toast, stops projection, closes the usage watcher, flushes
-the usage index cache to disk, **detaches every wall HWND**, stops the client
-watcher, unregisters hotkeys and destroys the tray before `app.quit()`.
+the usage index cache to disk, **detaches every wall HWND**, unregisters hotkeys and destroys the tray before `app.quit()`.
 
 The HWND detach matters: it guarantees each window owns itself before it is
 destroyed, so nothing is left parented into a shell window
@@ -347,7 +323,7 @@ requires that it always be escapable. Three independent routes exist:
 3. Escape in the renderer, which sends `wall:exitFocus`
    (`src/renderer/main.ts:917-921`). That IPC handler only ever **exits**
    (`src/main/index.ts:1407-1409`), so a stray message cannot enter focus mode.
-   An "Exit focus · Esc" button is added to the switcher bar as the visible
+   An "Exit focus · Esc" button is shown in the focus-control bar as the visible
    affordance, in both editions (`src/renderer/main.ts:843-856`, `:900-906`).
 
 Routes 1 and 2 do not depend on the wall receiving keyboard input, which matters
@@ -463,9 +439,8 @@ The main process only decides. Everything downstream is presentation:
 - `document.body.dataset.perf = state.capability.tier`
   (`src/renderer/main.ts:585`), which CSS gates hang off. Examples: a single
   linear gradient pass instead of a mesh at low
-  (`src/renderer/styles/wall.css:145-147`), card and edge-glow effects reduced
-  (`:249`, `:336`), the active-status pulse suppressed (`:507`), and the stats
-  backdrop dimmed (`src/renderer/styles/stats.css:608`).
+  (`src/renderer/styles/wall.css`) and the stats backdrop dimmed
+  (`src/renderer/styles/stats.css`).
 - The live trace canvas caps its frame rate: 12 fps at low, 24 at balanced, 30 at
   high (`src/renderer/stats.ts:405-408`). Software rendering repaints the whole
   surface, so it is capped hardest.
@@ -486,7 +461,7 @@ the code admits to.
 ### The diagnostics overlay
 
 `settings.debug` turns on an overlay (`src/renderer/main.ts:767-806`) that prints
-the display index, size and scale factor, the viewport and page count, the tier
+the display index, size and scale factor, the viewport, the tier
 with its cores, memory and GPU state, the layer mode with a `[FOCUS]` marker and
 the click-through state, and whether the Win32 layer loaded at all, colour coded.
 

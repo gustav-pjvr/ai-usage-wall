@@ -7,15 +7,9 @@
  * twice. A build-time constant costs a handful of guards and keeps a single
  * place to fix anything.
  *
- *  - 'full'   MuchBetter Client Wall. Both views, the mode switch, the client
- *             store, the Obsidian bridge. Gustav's own install.
- *
- *  - 'stats'  Claude Stats Wall. The dashboard only. No client data is shipped,
- *             seeded, read or watched, and there is no second view to switch
- *             to. This is the build that can be handed to someone else: it
- *             reads only the recipient's own ~/.claude, needs no account, no
- *             API key and no network, and carries none of MuchBetter's client
- *             records.
+ * Both editions show Claude Stats only. Neither reads or ships client records.
+ * The full build keeps its installed identity for upgrades and a future Work view.
+ * The stats build remains the shareable edition with its own updater.
  *
  * The value is substituted at build time by esbuild's `define`, so `process` is
  * never evaluated at runtime and this works identically in the main process and

@@ -21,7 +21,6 @@
 }
 
 /* The client wall has nothing to replay and no milestones of its own. */
-body[data-mode='clients'] #wall-actions { display: none; }
 
 #wall-actions[data-replay='off'] .wall-action-today,
 #wall-actions[data-replay='off'] .wall-action-days,

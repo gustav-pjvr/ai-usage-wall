@@ -31,7 +31,6 @@ import {
   type UpdateState,
 } from './updater';
 import * as projection from './projection';
-import { loadClients, watchClients, type StoreSnapshot } from './data/store';
 import {
   PROJECTS_DIR,
   emptyIndex,
@@ -109,8 +108,6 @@ let trayIsDark = false;
 let themeTimer: NodeJS.Timeout | null = null;
 let settings: Settings;
 let capability: Capability;
-let snapshot: StoreSnapshot | null = null;
-let stopWatching: (() => void) | null = null;
 let focusMode = false;
 let hidden = false;
 let usage: UsageIndex = emptyIndex();
@@ -188,68 +185,8 @@ const USAGE_MIN_INTERVAL_MS = 4000;
 
 // ── Paths ──────────────────────────────────────────────────────────────────
 
-/**
- * Two roots, and the distinction matters once packaged.
- *
- *  - bundledRoot is read-only shipped content (the tray icon, the seed data).
- *    In a packaged app that is `resources/`, which lives under Program Files
- *    and is NOT writable.
- *  - userRoot is where client JSON actually lives, because the whole point is
- *    that these files get hand-edited. In a packaged app that is userData.
- *
- * In development both collapse to the repo, so editing `data/clients/` works
- * exactly as it does now.
- */
+// Shipped content, including the tray icon, is read-only when packaged.
 const bundledRoot = () => (app.isPackaged ? process.resourcesPath : path.join(__dirname, '..', '..'));
-const userRoot = () => (app.isPackaged ? app.getPath('userData') : path.join(__dirname, '..', '..'));
-
-function resolveClientsDir(): string {
-  return settings.clientsDir ?? path.join(userRoot(), 'data', 'clients');
-}
-function resolveAssetsDir(): string {
-  return settings.assetsDir ?? path.join(userRoot(), 'assets', 'clients');
-}
-
-/**
- * First run of a packaged build: copy the shipped demonstration data into the
- * writable location. Never overwrites, so an upgrade cannot clobber real client
- * files, and deleting a client stays deleted.
- */
-async function seedUserData(): Promise<void> {
-  if (!app.isPackaged) return;
-  /*
-   * The shareable build ships no client records and must never create the
-   * folder either. Seeding someone else's machine with MuchBetter's clients is
-   * the single most embarrassing thing this app could do.
-   */
-  if (isStatsOnly) return;
-  for (const [from, to] of [
-    [path.join(bundledRoot(), 'data', 'clients'), resolveClientsDir()],
-    [path.join(bundledRoot(), 'assets', 'clients'), resolveAssetsDir()],
-  ]) {
-    try {
-      await fs.access(to);
-      continue; // already seeded, leave it alone
-    } catch {
-      /* not present, seed it */
-    }
-    try {
-      await fs.mkdir(to, { recursive: true });
-      // The assets folder is legitimately optional: a wall with no logos on
-      // file is a normal state, so an absent source is not a problem worth
-      // reporting. Create the empty target and move on.
-      const hasSource = await fs
-        .access(from)
-        .then(() => true)
-        .catch(() => false);
-      if (!hasSource) continue;
-      await fs.cp(from, to, { recursive: true, force: false, errorOnExist: false });
-      console.log(`[main] seeded ${to}`);
-    } catch (err) {
-      console.warn(`[main] could not seed ${to}: ${(err as Error).message}`);
-    }
-  }
-}
 
 // ── Claude usage ───────────────────────────────────────────────────────────
 
@@ -553,37 +490,6 @@ function startCodexWatch(): void {
   }
 }
 
-// ── Asset protocol ─────────────────────────────────────────────────────────
-
-/**
- * Serve client assets over a custom protocol instead of file://.
- *
- * The renderer never gets filesystem access, and every request is resolved
- * against the assets root and rejected if it escapes. A crafted logo path like
- * '../../../../Users/x/.ssh/id_rsa' therefore cannot read anything, which
- * matters because client JSON is hand-edited and its paths are not trusted.
- */
-function registerAssetProtocol(): void {
-  const { protocol, net } = require('electron') as typeof import('electron');
-  protocol.handle('mbw-asset', async (request) => {
-    try {
-      const url = new URL(request.url);
-      const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '');
-      const root = path.resolve(resolveAssetsDir());
-      const target = path.resolve(root, rel);
-      const relative = path.relative(root, target);
-      if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        console.warn('[assets] blocked traversal attempt:', rel);
-        return new Response('forbidden', { status: 403 });
-      }
-      await fs.access(target);
-      return net.fetch(`file://${target.replace(/\\/g, '/')}`);
-    } catch {
-      return new Response('not found', { status: 404 });
-    }
-  });
-}
-
 // ── Tray icon ──────────────────────────────────────────────────────────────
 
 /**
@@ -874,27 +780,7 @@ function refreshTrayMenu(): void {
         label: `${PRODUCT_NAME}  v${app.getVersion()}${isDev ? '  (dev)' : ''}`,
         enabled: false,
       },
-      ...(isStatsOnly
-        ? []
-        : [{ label: `${snapshot?.clients.length ?? 0} records loaded`, enabled: false } as const]),
       { type: 'separator' },
-      ...(isStatsOnly ? [] : [{
-        label: 'View',
-        submenu: [
-          {
-            label: 'Claude Stats',
-            type: 'radio' as const,
-            checked: settings.mode === 'stats',
-            click: () => void updateSettings({ mode: 'stats' }),
-          },
-          {
-            label: 'MuchBetter Clients',
-            type: 'radio' as const,
-            checked: settings.mode === 'clients',
-            click: () => void updateSettings({ mode: 'clients' }),
-          },
-        ],
-      }]),
       { label: hidden ? 'Show wall' : 'Hide wall', click: () => toggleHidden() },
       { label: focusMode ? 'Leave focus mode' : 'Focus mode', click: () => toggleFocusMode() },
       { type: 'separator' },
@@ -936,12 +822,6 @@ function refreshTrayMenu(): void {
         click: () => void updateSettings({ startWithWindows: !settings.startWithWindows }),
       },
       { type: 'separator' },
-      ...(isStatsOnly
-        ? []
-        : [
-            { label: 'Reload clients', click: () => void reloadData() },
-            { label: 'Open client data folder', click: () => void shell.openPath(resolveClientsDir()) },
-          ]),
       /*
        * Projection. The submenu shape follows the role, so an off machine is
        * offered two choices and a running one is offered what it can actually
@@ -1098,13 +978,6 @@ function maybeCapture(wall: WallWindow): void {
   const target = process.env.MBW_CAPTURE;
   if (!target) return;
   const delay = Number(process.env.MBW_CAPTURE_DELAY ?? 2600);
-  // Lets the capture exercise the detail overlay, which cannot otherwise be
-  // reached without a real click.
-  if (process.env.MBW_CAPTURE_DETAIL) {
-    setTimeout(() => {
-      wall.win.webContents.send('wall:debugOpenDetail', process.env.MBW_CAPTURE_DETAIL);
-    }, Math.max(400, delay - 1200));
-  }
   setTimeout(() => {
     wall.win.webContents
       .capturePage()
@@ -1472,9 +1345,6 @@ function stopDesktopWatch(): void {
 function wallState(wall: WallWindow) {
   const display = screen.getAllDisplays().find((d) => d.id === wall.displayId);
   return {
-    clients: snapshot?.clients ?? [],
-    problems: snapshot?.problems ?? [],
-    vault: snapshot?.vault ?? { available: false, scanned: 0, matched: 0 },
     settings,
     capability,
     focusMode,
@@ -1650,27 +1520,6 @@ function pushState(wall?: WallWindow): void {
   }
 }
 
-async function reloadData(): Promise<void> {
-  snapshot = await loadClients({
-    clientsDir: resolveClientsDir(),
-    vaultPath: settings.vaultPath,
-    useVault: settings.useVault,
-  });
-  const errs = snapshot.problems.filter((p) => p.issues.some((i) => i.severity === 'error'));
-  console.log(
-    `[main] loaded ${snapshot.clients.length} clients in ${snapshot.durationMs}ms` +
-      (errs.length ? `, ${errs.length} failed` : '') +
-      (snapshot.vault.available ? `, vault matched ${snapshot.vault.matched}/${snapshot.vault.scanned}` : ''),
-  );
-  for (const p of snapshot.problems) {
-    for (const i of p.issues) {
-      console[i.severity === 'error' ? 'error' : 'warn'](`[data] ${p.id}: ${i.field}: ${i.message}`);
-    }
-  }
-  refreshTrayMenu();
-  pushState();
-}
-
 async function updateSettings(patch: Partial<Settings>): Promise<void> {
   const before = settings;
   /*
@@ -1696,14 +1545,6 @@ async function updateSettings(patch: Partial<Settings>): Promise<void> {
 
   if (patch.startWithWindows !== undefined) applyStartup();
   if (patch.performance !== undefined) capability = detectCapability(settings.performance);
-
-  const needsRewatch =
-    patch.clientsDir !== undefined || patch.vaultPath !== undefined || patch.useVault !== undefined;
-  if (needsRewatch) {
-    stopWatching?.();
-    startWatching();
-    await reloadData();
-  }
 
   let failure: string | undefined;
   if (patch.monitors !== undefined) rebuildWindows();
@@ -1836,29 +1677,6 @@ function applyStartup(): void {
   });
 }
 
-function startWatching(): void {
-  stopWatching = watchClients(
-    { clientsDir: resolveClientsDir(), vaultPath: settings.vaultPath, useVault: settings.useVault },
-    (snap) => {
-      snapshot = snap;
-      const failed = snap.problems.filter((p) => p.issues.some((i) => i.severity === 'error'));
-      console.log(
-        `[main] data changed, ${snap.clients.length} clients` +
-          (failed.length ? `, ${failed.length} failed` : ''),
-      );
-      // Log problems on reload too. Without this, a client that breaks after a
-      // hot edit disappears from the count with no explanation in the log.
-      for (const p of failed) {
-        for (const i of p.issues.filter((x) => x.severity === 'error')) {
-          console.error(`[data] ${p.id}: ${i.field}: ${i.message}`);
-        }
-      }
-      refreshTrayMenu();
-      pushState();
-    },
-  );
-}
-
 function quit(): void {
   stopUpdater();
   stopDesktopWatch();
@@ -1877,7 +1695,6 @@ function quit(): void {
   // Only once something was read: an empty index must not overwrite a good cache.
   if (codexLastRun) void saveCodexIndex(codexCacheFile(), withCodexPending(codexUsage)).catch(() => undefined);
   for (const w of windows) if (w.hwnd) detach(w.hwnd);
-  stopWatching?.();
   globalShortcut.unregisterAll();
   tray?.destroy();
   app.quit();
@@ -1915,13 +1732,7 @@ function registerIpc(): void {
     applyLayer(wall);
     return false;
   });
-  ipcMain.handle('wall:reload', () => reloadData());
   ipcMain.handle('wall:getUsage', () => usageForRenderer());
-  ipcMain.handle('wall:setMode', (_e, mode: 'stats' | 'clients') =>
-    // There is only one view in the shareable build, so a stale settings file
-    // or a stray renderer message can never strand it on an empty client wall.
-    updateSettings({ mode: !isStatsOnly && mode === 'clients' ? 'clients' : 'stats' }),
-  );
   /*
    * Opening the milestone list clears the badge. The ledger is the authority,
    * so the renderer only learns it is cleared from the next push.
@@ -2055,7 +1866,7 @@ if (isStatsOnly) app.setName(PRODUCT_NAME);
 
 app.commandLine.appendSwitch('no-pings');
 app.commandLine.appendSwitch('disable-features', 'Translate,MediaRouter,OptimizationHints,DialMediaRouteProvider');
-// We load only local files over our own protocol, never remote origins, so
+// We load only local files, never remote origins, so
 // per-site renderer processes buy nothing and cost a process each.
 app.commandLine.appendSwitch('disable-site-isolation-trials');
 
@@ -2075,21 +1886,12 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     settings = await loadSettings();
-    if (isStatsOnly && settings.mode !== 'stats') settings = { ...settings, mode: 'stats' };
     console.log(`[main] userData: ${app.getPath('userData')}`);
-    console.log(`[main] clients dir: ${resolveClientsDir()}`);
     capability = detectCapability(settings.performance);
     console.log(`[main] capability tier '${capability.tier}': ${capability.reasons.join('; ')}`);
     if (!win32Available()) console.warn(`[main] Win32 layer unavailable: ${unavailableReason()}`);
 
-    registerAssetProtocol();
     registerIpc();
-    await seedUserData();
-    // No client store and no Obsidian bridge in the shareable build. This is
-    // not just a hidden view: nothing is read from disk, so the app cannot
-    // touch a vault or a client folder it has no business touching.
-    if (!isStatsOnly) await reloadData();
-
     /*
      * Load the cached usage index first so the dashboard has real numbers on
      * screen immediately, then refresh in the background. A cold index is
@@ -2166,7 +1968,6 @@ if (!app.requestSingleInstanceLock()) {
       void refreshCodex('startup').then(startCodexWatch);
       startClaudeLimits();
     }
-    if (!isStatsOnly) startWatching();
 
     windows = targetDisplays().map(createWindowForDisplay);
     startDesktopWatch();

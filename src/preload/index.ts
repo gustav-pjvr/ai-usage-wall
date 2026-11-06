@@ -8,9 +8,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 const api = {
   getState: () => ipcRenderer.invoke('wall:getState'),
   updateSettings: (patch: unknown) => ipcRenderer.invoke('wall:updateSettings', patch),
-  reload: () => ipcRenderer.invoke('wall:reload'),
   getUsage: () => ipcRenderer.invoke('wall:getUsage'),
-  setMode: (mode: string) => ipcRenderer.invoke('wall:setMode', mode),
   onUsageProgress: (cb: (p: unknown) => void) => {
     const listener = (_e: unknown, p: unknown) => cb(p);
     ipcRenderer.on('wall:usageProgress', listener);
@@ -24,9 +22,6 @@ const api = {
   toggleFocus: () => ipcRenderer.invoke('wall:toggleFocus'),
   exitFocus: () => ipcRenderer.invoke('wall:exitFocus'),
   openExternal: (url: string) => ipcRenderer.invoke('wall:openExternal', url),
-  onDebugOpenDetail: (cb: (id: string) => void) => {
-    ipcRenderer.on('wall:debugOpenDetail', (_e, id: string) => cb(id));
-  },
   /** Update state, pushed whenever it changes, for the Install pill. */
   onUpdate: (cb: (s: unknown) => void) => {
     const listener = (_e: unknown, s: unknown) => cb(s);

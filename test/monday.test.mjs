@@ -111,8 +111,11 @@ function item(itemId = '1', options = {}) {
   };
 }
 const column = (row, key) => row.column_values.find((c) => c.id === key);
+/** Activity ids are UUID strings on the real account (2026-11-06); '100' becomes a stable UUID. */
+const uuid = (n) => `5610e651-0915-407e-8382-${String(n).padStart(12, '0')}`;
+// created_at as monday sends it: 17 digits of 1e-7 s since the epoch.
 const activity = (activityId, itemId, actor = J, columnId = S, event = 'update_column_value', at = CHANGE) => ({
-  id: activityId, user_id: actor, event,
+  id: uuid(activityId), user_id: actor, event,
   created_at: String(BigInt(Date.parse(at)) * 10_000n),
   data: JSON.stringify({ pulse_id: itemId, ...(columnId ? { column_id: columnId } : {}) }),
 });
@@ -121,7 +124,7 @@ const comment = (commentId, actor = J, text = 'Hello', at = CHANGE) => ({
 });
 
 function fake(rows = [], activities = []) {
-  const state = { rows: structuredClone(rows), activities, log: [], ignore: null, cursor: null, pages: [], graphql: null, transport: null };
+  const state = { rows: structuredClone(rows), activities, log: [], ignore: null, cursor: null, pages: [], graphql: null, transport: null, froms: [] };
   state.fetch = async (url, init) => {
     const entry = { url, ...init, payload: JSON.parse(init.body) };
     requests.push(entry);
@@ -136,14 +139,28 @@ function fake(rows = [], activities = []) {
     if (state.graphql) return { ok: true, json: async () => ({ errors: [{ message: state.graphql }] }) };
     const { query, variables: v } = entry.payload;
     let data;
+    const page = () => (state.pages.length ? state.pages.shift() : { items: state.rows, cursor: state.cursor });
     if (query.includes('query Tasks')) {
-      assert.match(query, /items_page\(limit: 200, cursor: \$cursor\)/);
-      assert.match(query, /activity_logs/);
+      // The tick: the log since the last poll, the board's latest comments, items only on a full read.
+      assert.match(query, /activity_logs\(limit: 200, page: 1, from: \$from\)/);
+      state.froms.push(v.from);
+      assert.match(query, /updates\(limit: 25\) \{ id created_at item_id creator \{ id \} \}/);
+      assert.match(query, /items_page\(limit: 200\) @include\(if: \$items\)/);
       assert.match(query, /BoardRelationValue/);
-      const page = state.pages.length ? state.pages.shift() : { items: state.rows, cursor: state.cursor };
-      data = { boards: [{ id: B, items_page: page, activity_logs: state.activities }] };
+      assert.ok(!/updates\(limit: 100\)|text_body/.test(query), 'no per-item updates and no comment bodies');
+      assert.match(v.from, /^\d{4}-\d{2}-\d{2}T/);
+      const updates = state.rows.filter((r) => r && Array.isArray(r.updates)).flatMap((r) => r.updates.map((u) => ({ id: u.id, created_at: u.created_at, item_id: r.id, creator: u.creator })));
+      data = { complexity: { before: 19_999_000, query: 1000 }, boards: [{ id: B, activity_logs: state.activities.slice(0, 200), updates, ...(v.items ? { items_page: page() } : {}) }] };
+    } else if (query.includes('query Logs')) {
+      assert.match(query, /activity_logs\(limit: 200, page: \$page, from: \$from\)/);
+      data = { boards: [{ id: B, activity_logs: state.activities.slice((v.page - 1) * 200, v.page * 200) }] };
+    } else if (query.includes('query Items')) {
+      data = { boards: [{ id: B, items_page: page() }] };
+    } else if (query.includes('query Page')) {
+      data = { next_items_page: page() };
     } else if (query.includes('query Task(')) {
-      data = { items: state.rows.filter((r) => v.ids.includes(r.id)) };
+      assert.ok(!/text_body/.test(query), 'a read-back never asks for comment bodies');
+      data = { items: state.rows.filter((r) => v.ids.includes(r.id)).map((r) => ({ ...r, updates: r.updates.map((u) => ({ id: u.id })) })) };
     } else if (query.includes('change_multiple_column_values')) {
       const row = state.rows.find((r) => r.id === v.item);
       assert.ok(row);
@@ -180,6 +197,7 @@ function fake(rows = [], activities = []) {
 }
 
 try {
+  await load('src/shared/work-view.ts');
   const { saveMondayToken, loadMondayToken, createMondayToken } = await load('src/main/work/monday-token.ts');
   const { createMondayClient, diffTasks } = await load('src/main/work/monday.ts');
   const client = (state, at = AT, token = TOKEN) => createMondayClient({ fetch: state.fetch, token, now: () => Date.parse(at) });
@@ -268,7 +286,8 @@ try {
     const result = await client(state).fetchBoard();
     assert.equal(result.columns.backlog.length, 2);
     assert.equal(state.log.length, 2);
-    assert.deepEqual(state.log[1].payload.variables, { cursor: 'next-page', logs: false });
+    assert.match(state.log[1].payload.query, /query Page/);
+    assert.deepEqual(state.log[1].payload.variables, { cursor: 'next-page' });
   });
   await test('repeated cursors fail instead of looping', async () => {
     const state = fake([item()]); state.cursor = 'repeat';
@@ -319,13 +338,20 @@ try {
     assert.equal(result.status, 'Dropped');
     assert.equal(state.log.length, 3);
   });
-  for (const failure of ['columns', 'move']) {
-    await test(`status success with unapplied ${failure} fails verification`, async () => {
+  for (const [failure, pattern] of [['columns', /verification failed/], ['move', /status changed but the task was not moved/]]) {
+    await test(`status success with unapplied ${failure} fails as "${pattern.source}"`, async () => {
       const state = fake([item()]); state.ignore = failure;
-      await rejects(() => client(state).setStatus('1', 'Done'), /verification failed/);
+      await rejects(() => client(state).setStatus('1', 'Done'), pattern);
       assert.match(state.log.at(-1).payload.query, /query Task\(/);
     });
   }
+  await test('a group move that fails outright after the label changed says "not moved"', async () => {
+    const state = fake([item()]);
+    const inner = state.fetch;
+    state.fetch = async (url, init) => (init.body.includes('move_item_to_group') ? { ok: false, status: 500, json: async () => ({}) } : inner(url, init));
+    await rejects(() => client(state).setStatus('1', 'Done'), /not moved/);
+    assert.equal(column(state.rows[0], S).text, 'Done');
+  });
   await test('priority and due changes, including clearing due, read back', async () => {
     const state = fake([item()]); const c = client(state);
     assert.equal((await c.setPriority('1', 'High')).priority, 'High');
@@ -338,11 +364,24 @@ try {
     await rejects(() => c.setPriority('1', 'Low'), /verification failed/);
     await rejects(() => c.setDue('1', '2026-11-09'), /verification failed/);
   });
-  await test('comments escape HTML and verify the returned ID and plain text', async () => {
+  await test('comments are trimmed, escape HTML, keep line breaks as <br>, and succeed when the new id reads back', async () => {
     const state = fake([item()]);
-    await client(state).addComment('1', 'Use <draft> & review');
-    assert.equal(state.log[1].payload.variables.body, 'Use &lt;draft&gt; &amp; review');
+    await client(state).addComment('1', '  Use <draft> & review\nthen send  ');
+    assert.equal(state.log[1].payload.variables.body, 'Use &lt;draft&gt; &amp; review<br>then send');
     assert.match(state.log[2].payload.query, /query Task\(/);
+  });
+  await test('a task name is trimmed, and its read-back is compared with whitespace collapsed', async () => {
+    const state = fake();
+    const inner = state.fetch;
+    // monday tidies whitespace in names: "New  task" can come back as "New task".
+    state.fetch = async (url, init) => {
+      const r = await inner(url, init);
+      if (init.body.includes('create_item')) state.rows.at(-1).name = 'New task';
+      return r;
+    };
+    const card = await client(state).createTask({ name: '  New   task ' });
+    assert.equal(state.log[0].payload.variables.name, 'New   task');
+    assert.equal(card.name, 'New task');
   });
   await test('comment success without the new comment fails', async () => {
     const state = fake([item('1', { comments: [comment('899', G, 'Hello')] })]); state.ignore = 'comment';
@@ -426,6 +465,121 @@ try {
     assert.equal(Object.values(next.columns).flat().length, 0);
     assert.deepEqual(kinds(diffTasks(first, next, G)), ['leftWaiting', 'moved']);
   });
+  await test('activity ids are UUIDs and times 17-digit 1e-7 s strings; ISO also parses; bad ids are dropped', async () => {
+    const first = await view([item('1', { owners: [J], assigned: [J] })]);
+    const iso = { ...activity('100', '1', J, O), created_at: CHANGE };
+    const next = await view([item('1', { assigned: [J] })], [iso, { ...activity('101', '1', J, O), id: 'bad id!' }], LATER);
+    const events = diffTasks(first, next, G);
+    assert.deepEqual(events.map((e) => [e.kind, e.id, e.at]), [['assigned', `assigned:${uuid('100')}`, CHANGE]]);
+    assert.equal(new Date(Number(BigInt('17939553412686034') / 10_000n)).toISOString().slice(0, 10), '2026-11-06');
+  });
+  await test('no upper time bound: a change stamped after this poll\'s clock still notifies', async () => {
+    const first = await view([item('1', { owners: [J], assigned: [J] })]);
+    const ahead = '2026-11-06T12:03:00.000Z'; // the poll's own clock says 12:01
+    const next = await view([item('1', { assigned: [J] })], [activity('100', '1', J, O, 'update_column_value', ahead)], LATER);
+    assert.deepEqual(kinds(diffTasks(first, next, G)), ['assigned']);
+  });
+  await test('a change up to 120 s before the previous poll still counts; older does not', async () => {
+    const first = await view([item('1', { owners: [J], assigned: [J] }), item('2', { owners: [J], assigned: [J] })]);
+    const next = await view([item('1', { assigned: [J] }), item('2', { assigned: [J] })], [
+      activity('100', '1', J, O, 'update_column_value', '2026-11-06T11:58:30.000Z'),
+      activity('101', '2', J, O, 'update_column_value', '2026-11-06T11:57:30.000Z'),
+    ], LATER);
+    assert.deepEqual(diffTasks(first, next, G).map((e) => e.taskId), ['1']);
+  });
+  await test('a quiet log reuses the items: one request, no item read', async () => {
+    const state = fake([item('1')]);
+    const c = client(state);
+    const first = await c.fetchBoard();
+    const r = await c.poll(first);
+    assert.equal(r.refetched, false);
+    assert.equal(state.log.length, 2);
+    assert.equal(state.log[1].payload.variables.items, false);
+    state.activities = [activity('100', '1', '555')];
+    const r2 = await c.poll(r.view);
+    assert.equal(r2.refetched, true);
+    assert.match(state.log.at(-1).payload.query, /query Items/);
+    assert.deepEqual([r2.received, r2.parsed], [1, 1]);
+  });
+  /*
+   * Log lag: the items are read AFTER Jaco's change but BEFORE its log entry
+   * shows up. Snapshot comparison alone then never notifies (the next poll
+   * sees the entry and an unchanged card). The entry's own values decide.
+   */
+  const label = (text) => ({ label: { index: 1, text, style: { color: '#fdab3d' } }, post_id: null });
+  const persons = (ids) => ({ personsAndTeams: ids.map((v) => ({ id: Number(v), kind: 'person' })), changed_at: CHANGE });
+  const described = (activityId, itemId, actor, columnId, value, previous, at = CHANGE, event = 'update_column_value', extra = {}) => ({
+    id: uuid(activityId), user_id: actor, event, created_at: String(BigInt(Date.parse(at)) * 10_000n),
+    data: JSON.stringify({ pulse_id: Number(itemId), ...(columnId ? { column_id: columnId } : {}),
+      ...(value !== undefined ? { value } : {}), ...(previous !== undefined ? { previous_value: previous } : {}), ...extra }),
+  });
+  /** Three polls: v0 before the change; v1 reads the changed items with the log still empty; v2 sees the entry; v3 again. */
+  async function lag(rowsBefore, rowsAfter, entries) {
+    const state = fake(rowsBefore);
+    const clock = { t: Date.parse(AT) };
+    const c = createMondayClient({ fetch: state.fetch, token: TOKEN, now: () => clock.t });
+    const v0 = await c.fetchBoard();
+    state.rows = structuredClone(rowsAfter);
+    clock.t += 60_000;
+    const v1 = (await c.poll(v0, { full: true })).view;
+    state.activities = entries;
+    clock.t += 60_000;
+    const v2 = (await c.poll(v1)).view;
+    clock.t += 60_000;
+    const v3 = (await c.poll(v2)).view;
+    return [diffTasks(v0, v1, G), diffTasks(v1, v2, G), diffTasks(v2, v3, G)].map(kinds);
+  }
+  await test('log lag: Jaco moving a task out of Waiting still notifies, exactly once, from the log entry', async () => {
+    const lagAt = '2026-11-06T12:00:50.000Z';
+    const got = await lag([item('1', { status: 'Waiting', assigned: [J] })], [item('1', { status: 'In progress', assigned: [J] })],
+      [described('100', '1', J, S, label('In progress'), label('Waiting'), lagAt)]);
+    assert.deepEqual(got, [[], ['leftWaiting', 'moved'], []]);
+  });
+  await test('log lag: Jaco assigning a task still notifies, exactly once', async () => {
+    const got = await lag([item('1', { owners: [J], assigned: [J] })], [item('1', { owners: [G], assigned: [J] })],
+      [described('100', '1', J, O, persons([G]), persons([J]), '2026-11-06T12:00:50.000Z')]);
+    assert.deepEqual(got, [[], ['assigned'], []]);
+  });
+  await test('log lag: a group move that says source and destination leaves Waiting, exactly once', async () => {
+    const got = await lag([item('1', { status: 'Waiting' })], [item('1', { status: 'Waiting', group: groups['In progress'] })],
+      [described('100', '1', J, null, undefined, undefined, '2026-11-06T12:00:50.000Z', 'move_pulse_from_group',
+        { source_group: { id: groups.Waiting, title: 'Waiting' }, dest_group: { id: groups['In progress'], title: 'In progress' } })]);
+    assert.deepEqual(got, [[], ['leftWaiting', 'moved'], []]);
+  });
+  await test('described entries: Gustav\'s own move never notifies, and the latest change decides the actor', async () => {
+    const own = await lag([item('1', { status: 'Waiting' })], [item('1', { status: 'Done' })],
+      [described('100', '1', G, S, label('Done'), label('Waiting'))]);
+    assert.deepEqual(own, [[], [], []]);
+    const both = await lag([item('1', { status: 'Waiting' })], [item('1', { status: 'Done' })], [
+      described('100', '1', J, S, label('In progress'), label('Waiting'), '2026-11-06T12:00:10.000Z'),
+      described('101', '1', G, S, label('Done'), label('In progress'), '2026-11-06T12:00:40.000Z'),
+    ]);
+    assert.deepEqual(both, [[], [], []]);
+    const unrelated = await lag([item('1', { status: 'Waiting', owners: [J], assigned: [J] })], [item('1', { status: 'Done', owners: [J], assigned: [J] })],
+      [described('100', '1', J, S, label('Done'), label('Waiting'))]);
+    assert.deepEqual(unrelated, [[], [], []]);
+  });
+  await test('a full log page reads the next one, up to 5 pages; past that it says so and reads the items again', async () => {
+    const many = (n) => Array.from({ length: n }, (_, i) => activity(String(1000 + i), '1', '555', P));
+    const state = fake([item('1')], many(450));
+    const c = client(state);
+    const v0 = await c.fetchBoard();
+    assert.deepEqual(state.log.map((x) => x.payload.query.match(/query (\w+)/)[1]), ['Tasks', 'Logs', 'Logs']);
+    assert.deepEqual(state.log.slice(1).map((x) => x.payload.variables.page), [2, 3]);
+    state.log.length = 0;
+    state.activities = many(1200);
+    const r = await c.poll(v0);
+    assert.deepEqual(state.log.map((x) => x.payload.query.match(/query (\w+)/)[1]), ['Tasks', 'Logs', 'Logs', 'Logs', 'Logs', 'Items']);
+    assert.deepEqual([r.received, r.truncated, r.refetched], [1000, true, true]);
+  });
+  await test('from is sent in whole seconds: exactly "2026-11-06T11:59:00Z"', async () => {
+    const state = fake([item('1')]);
+    const clock = { t: Date.parse(LATER) + 456 };
+    const c = createMondayClient({ fetch: state.fetch, token: TOKEN, now: () => clock.t });
+    const v0 = await c.fetchBoard(); // its at is 12:01:00.456
+    await c.poll(v0);
+    assert.deepEqual(state.froms, ['2026-11-06T11:59:00Z', '2026-11-06T11:59:00Z']);
+  });
   await test('Gustav assigning, moving, leaving Waiting and commenting never notifies', async () => {
     const first = await view([item('1', { status: 'Waiting', owners: [J] })]);
     const next = await view([item('1', { status: 'Done', assigned: [J], comments: [comment('200', G)] })], [
@@ -467,7 +621,9 @@ try {
     assert.ok(errors.length >= 20);
     for (const error of errors) assert.ok(!`${error.stack}${JSON.stringify(error)}`.includes(TOKEN));
     for (const entry of requests) {
-      const safe = structuredClone(entry); delete safe.headers.Authorization;
+      assert.ok(entry.signal instanceof AbortSignal, 'every request carries a timeout signal');
+      const safe = structuredClone({ url: entry.url, method: entry.method, body: entry.body, headers: entry.headers, payload: entry.payload });
+      delete safe.headers.Authorization;
       assert.ok(!JSON.stringify(safe).includes(TOKEN));
     }
     assert.ok(!output.join('\n').includes(TOKEN));

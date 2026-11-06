@@ -55,7 +55,8 @@ every state push (`src/main/index.ts:1081`).
 
 | Key | Type | Default | Validation | Consumed by |
 |---|---|---|---|---|
-| `mode` | `'stats'` | `'stats'` | always normalised to `'stats'` | the only app view in both editions |
+| `mode` | `'stats' \| 'work'` | `'stats'` | `'work'` kept in the full build only; anything else, the old `'clients'` included, is `'stats'`. A paired screen shows stats whatever it says (`effectiveMode`) | the view on the wall, [work-mode.md](work-mode.md) |
+| `workFilter` | `'mine' \| 'everyone'` | `'mine'` | anything else becomes `'mine'` | Work mode's Mine or Everyone (full build) |
 | `layerMode` | `'desktop' \| 'top'` | `'desktop'` | must be one of the two, else default | `applyLayer`, `src/main/index.ts:791` |
 | `performance` | `'auto' \| 'low' \| 'balanced' \| 'high'` | `'auto'` | must be in the list, else `'auto'` | `detectCapability`, `src/main/capability.ts:80-83` |
 | `clickThrough` | boolean | `false` | strict `=== true` | `setIgnoreMouseEvents`, `src/main/index.ts:835` |
@@ -180,6 +181,11 @@ changes. Nothing in the menu is cached, so nothing can be stale.
 ---
 Show wall / Hide wall                      label follows state
 Focus mode / Leave focus mode              label follows state
+View                                       full build only
+  Claude Stats                             radio, mode 'stats'
+  Work                                     radio, mode 'work' (disabled on a paired screen)
+Connect monday... / Disconnect monday      full build only; Disconnect deletes the token
+Reconnect monday...                        full build, only after monday refused the token
 Ask Gemini...  (Ctrl+Alt+G)                full build only
 Gemini model                               full build only: radio per agy Flash model
 ---

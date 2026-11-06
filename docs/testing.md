@@ -222,6 +222,27 @@ fails twelve.
 `npm run test:ask-live` adds one real agy run (it spends quota, so it is not in
 `npm test`). Details in [ask-gemini.md](ask-gemini.md#tests).
 
+### `test/monday.test.mjs` (55) and `test/work.test.mjs` (56): Work mode
+
+Security-sensitive: a secret, and writes to an external service. `monday.test`
+covers the data layer (the encrypted token store, board parsing, each write and
+its read-back, `diffTasks`). `work.test` plants a fake token and searches every
+serialised form for it: each Work IPC reply, every push to a wall, Connect or
+toast window, every log line, every file written, and a projection frame built
+from an index carrying work data; only the request's Authorization header may
+hold it. It also checks the notice rules on an injected clock, the sync
+schedule, every failure kind, and that the stats bundles contain no Work code
+(and the full ones do). Revert checks: echoing the token in the Connect reply
+fails two checks; guarding the wall's Work require with the imported
+`isStatsOnly` instead of the build define fails the stats bundle check; day
+math in UTC fails the Johannesburg 00:30 check; an upper time bound on changes
+fails the "stamped after this poll" check; deciding notices by snapshot
+comparison alone fails the three log-lag checks; and relying on the abort signal
+alone leaves the never-answering request hanging. It also counts 24 hours of
+ticks (684 requests on a weekday with no changes). The
+render checks live in `test/render-work.cjs`, called from `render-fit.cjs`.
+Details in [work-mode.md](work-mode.md#tests).
+
 ### `test/projection-e2e.cjs`: against live deployed infrastructure
 
 **This is the one suite that is not isolated.** Run with `npm run test:e2e`

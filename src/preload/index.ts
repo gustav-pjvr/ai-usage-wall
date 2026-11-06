@@ -30,6 +30,27 @@ const ask = isStatsOnly
       onError: on('ask:error'),
     };
 
+/*
+ * Work mode (docs/work-mode.md). Full build only, like `ask`: the stats build
+ * has no `work` member and none of these channels. Nothing here can carry the
+ * monday token: it is typed into the Connect window, which has its own bridge.
+ */
+const work = isStatsOnly
+  ? undefined
+  : {
+      get: () => ipcRenderer.invoke('work:get'),
+      action: (taskId: string, action: unknown) => ipcRenderer.invoke('work:action', taskId, action),
+      create: (input: unknown) => ipcRenderer.invoke('work:create', input),
+      open: (taskId: string) => ipcRenderer.invoke('work:open', taskId),
+      /** Borrow or return keyboard focus for a Work text box, like `notesEdit`. */
+      focus: (active: boolean) => ipcRenderer.invoke('work:focus', active),
+      /** Open the Connect monday dialog. */
+      connect: () => ipcRenderer.invoke('work:connect'),
+      onUpdate: on('work:update'),
+      onHighlight: on('work:highlight'),
+      onCard: on('work:card'),
+    };
+
 const api = {
   getState: () => ipcRenderer.invoke('wall:getState'),
   updateSettings: (patch: unknown) => ipcRenderer.invoke('wall:updateSettings', patch),
@@ -68,6 +89,7 @@ const api = {
     return () => ipcRenderer.removeListener('wall:state', listener);
   },
   ...(ask ? { ask } : {}),
+  ...(work ? { work } : {}),
 };
 
 contextBridge.exposeInMainWorld('wall', api);
@@ -107,7 +129,33 @@ contextBridge.exposeInMainWorld('updateToast', {
   onNotice: (cb: (n: unknown) => void) => {
     ipcRenderer.on('wall:notice', (_e, n) => cb(n));
   },
+  /*
+   * Work notices, full build only: the one toast with buttons. The toast only
+   * ever sends back the notice id and which button; main holds the task.
+   */
+  ...(isStatsOnly
+    ? {}
+    : {
+        onWork: (cb: (n: unknown) => void) => {
+          ipcRenderer.on('toast:work', (_e, n) => cb(n));
+        },
+        onWorkEnd: (cb: () => void) => {
+          ipcRenderer.on('toast:workEnd', () => cb());
+        },
+        workAction: (id: number, action: 'show' | 'done' | 'later') => ipcRenderer.invoke('toast:workAction', id, action),
+      }),
 });
+
+/*
+ * The Connect monday window's bridge (full build only). The one place the token
+ * crosses from a renderer to main, once, on submit; nothing ever sends it back.
+ */
+if (!isStatsOnly) {
+  contextBridge.exposeInMainWorld('mondayConnect', {
+    submit: (token: string) => ipcRenderer.invoke('connect:submit', token),
+    close: () => ipcRenderer.invoke('connect:close'),
+  });
+}
 
 /*
  * The messages window's bridge. Separate from `pair` for the same reason `pair`

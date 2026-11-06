@@ -10,12 +10,20 @@ import { app } from 'electron';
 
 import type { LayerMode } from './win32/desktop-layer';
 import type { PerfTier } from './capability';
+import { isStatsOnly } from '../shared/edition';
 
-export type WallMode = 'stats';
+/**
+ * The view on the wall. 'work' (monday Tasks, docs/work-mode.md) exists in the
+ * full build only; the stats edition always shows stats. The retired
+ * 'clients' value, and anything else, loads as stats.
+ */
+export type WallMode = 'stats' | 'work';
 
 export interface Settings {
-  /** Retained for settings compatibility. Both editions always show stats. */
+  /** Which view the wall shows. 'work' only ever survives in the full build. */
   mode: WallMode;
+  /** Work mode's task filter: Mine (Owner includes Gustav) or Everyone. */
+  workFilter: 'mine' | 'everyone';
   /** Desktop layering. 'desktop' is the interactive-but-behind-apps hybrid. */
   layerMode: LayerMode;
   /** 'auto' inspects the machine. */
@@ -80,6 +88,7 @@ export interface Settings {
 
 const DEFAULTS: Settings = {
   mode: 'stats',
+  workFilter: 'mine',
   layerMode: 'desktop',
   performance: 'auto',
   clickThrough: false,
@@ -125,7 +134,8 @@ export function normaliseSettings(raw: unknown): Settings {
   const tiers = ['auto', 'low', 'balanced', 'high'];
 
   return {
-    mode: DEFAULTS.mode,
+    mode: !isStatsOnly && r.mode === 'work' ? 'work' : DEFAULTS.mode,
+    workFilter: r.workFilter === 'everyone' ? 'everyone' : DEFAULTS.workFilter,
     layerMode: layerModes.includes(r.layerMode as LayerMode) ? (r.layerMode as LayerMode) : DEFAULTS.layerMode,
     performance: tiers.includes(r.performance as string) ? (r.performance as Settings['performance']) : 'auto',
     clickThrough: r.clickThrough === true,
@@ -147,6 +157,15 @@ export function normaliseSettings(raw: unknown): Settings {
     showCodex: r.showCodex !== false,
     askModel: typeof r.askModel === 'string' && ASK_MODEL.test(r.askModel) ? r.askModel : DEFAULTS.askModel,
   };
+}
+
+/**
+ * The view the wall may actually show. A paired projection SCREEN never shows
+ * Work, whatever the setting says: Work data stays on the machine it belongs to
+ * and a screen is showing another machine's wall (docs/work-mode.md).
+ */
+export function effectiveMode(settings: Pick<Settings, 'mode'>, opts: { screen: boolean }): WallMode {
+  return !isStatsOnly && !opts.screen && settings.mode === 'work' ? 'work' : 'stats';
 }
 
 export async function loadSettings(): Promise<Settings> {

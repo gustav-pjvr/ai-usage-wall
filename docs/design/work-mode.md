@@ -5,7 +5,9 @@ mail from every inbox in one scrolling panel, and the monday Tasks board as
 four scrolling columns, with actions on both and notices through the wall's
 existing toast. Mock: `docs/design/mock-work/work-1920x1080.png` (sample data).
 
-Nothing here is built. Gustav's decisions (2026-11-06) are in section 6.
+**Phase 1 (Tasks) is implemented**: [../work-mode.md](../work-mode.md). Mail
+(phases 2 to 4) is not built yet. Gustav's decisions (2026-11-06) are in
+section 6.
 
 ## 1. Recon: what exists
 
@@ -156,6 +158,13 @@ and opens that mail or task. Bursts collapse into one notice with a count.
 ## 5. Phases
 
 1. **Tasks**: monday panel, actions, task notices. Needs only a monday token.
+   **Implemented** ([../work-mode.md](../work-mode.md)). Built as designed, with
+   these choices: Stats and Work are the two views (Clients was removed in
+   0.10.2); the four task columns take the full width and the status strip says
+   "Mail arrives in phase 2"; "new from Jaco" is a Jaco assignment Gustav has
+   not started; changes held by quiet hours are counted into the morning
+   summary; a pasted token must belong to Gustav; the full-screen and screen
+   share check is not in phase 1 (focus mode is).
 2. **IMAP mail**: Gmail (app password) and GoDaddy, read and actions, mail
    notices.
 3. **Microsoft 365** through Graph, after the Entra app registration.

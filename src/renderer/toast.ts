@@ -19,11 +19,25 @@ interface NoticeLike {
   count: number;
 }
 
+/** A work notice (full build): words only. Main keeps the task it is about. */
+interface WorkNoticeLike {
+  id: number;
+  label: string;
+  from: string;
+  title: string;
+  count: number;
+  canDone: boolean;
+}
+
 declare global {
   interface Window {
     updateToast: {
       onUpdate(cb: (s: UpdateStateLike) => void): void;
       onNotice(cb: (n: NoticeLike) => void): void;
+      /** Full build only. */
+      onWork?(cb: (n: WorkNoticeLike) => void): void;
+      onWorkEnd?(cb: () => void): void;
+      workAction?(id: number, action: 'show' | 'done' | 'later'): Promise<{ ok: boolean; message: string }>;
     };
   }
 }
@@ -67,5 +81,89 @@ window.updateToast.onUpdate((s) => {
   }
   toast.hidden = true;
 });
+
+/*
+ * Work notices (full build only, docs/work-mode.md): the one toast that takes
+ * clicks. Main makes the window larger and clickable for it and gives it back
+ * afterwards. Sender and task name only, set with textContent; Done shows a
+ * pending state and then what monday said.
+ */
+// The build define itself, so the stats bundle drops this block (see main.ts).
+if (process.env.MBW_EDITION !== 'stats' && window.updateToast.onWork && window.updateToast.workAction) {
+  const act = window.updateToast.workAction;
+  const mk = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text = ''): HTMLElementTagNameMap[K] => {
+    const n = document.createElement(tag);
+    n.className = cls;
+    n.textContent = text;
+    return n;
+  };
+  const box = mk('div', 'work');
+  box.hidden = true;
+  box.setAttribute('role', 'alert');
+  const k = mk('div', 'work-k');
+  const label = mk('span', 'work-label');
+  k.append(mk('span', 'work-dot'), label);
+  const from = mk('div', 'work-from');
+  const title = mk('div', 'work-title');
+  const acts = mk('div', 'work-acts');
+  const show = mk('button', 'work-btn work-btn-pri', 'Show');
+  const done = mk('button', 'work-btn', 'Done');
+  const later = mk('button', 'work-btn', 'Later');
+  const msg = mk('span', 'work-msg');
+  msg.setAttribute('role', 'status');
+  msg.setAttribute('aria-live', 'polite');
+  for (const b of [show, done, later]) b.type = 'button';
+  acts.append(show, done, later, msg);
+  box.append(k, from, title, acts);
+  document.body.append(box);
+
+  let current: WorkNoticeLike | null = null;
+  const setBusy = (on: boolean): void => {
+    box.setAttribute('aria-busy', String(on));
+    for (const b of [show, done, later]) b.disabled = on;
+  };
+
+  window.updateToast.onWork((n) => {
+    current = n;
+    toast.hidden = true;
+    box.hidden = false;
+    label.textContent = n.label;
+    from.textContent = n.from;
+    title.textContent = n.title;
+    done.hidden = !n.canDone;
+    done.textContent = 'Done';
+    msg.textContent = '';
+    msg.className = 'work-msg';
+    setBusy(false);
+  });
+  window.updateToast.onWorkEnd?.(() => {
+    current = null;
+    box.hidden = true;
+  });
+
+  const send = (action: 'show' | 'done' | 'later'): void => {
+    const n = current;
+    if (!n) return;
+    if (action !== 'done') {
+      void act(n.id, action).catch(() => undefined);
+      return;
+    }
+    setBusy(true);
+    done.textContent = 'Marking done...';
+    void act(n.id, 'done')
+      .catch(() => ({ ok: false, message: 'The wall could not send that.' }))
+      .then((r) => {
+        if (current !== n) return;
+        setBusy(false);
+        done.hidden = r.ok;
+        done.textContent = 'Done';
+        msg.className = `work-msg ${r.ok ? 'is-ok' : 'is-bad'}`;
+        msg.textContent = r.ok ? 'Marked done on monday' : r.message;
+      });
+  };
+  show.addEventListener('click', () => send('show'));
+  done.addEventListener('click', () => send('done'));
+  later.addEventListener('click', () => send('later'));
+}
 
 export {};

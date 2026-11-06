@@ -13,7 +13,11 @@ usage, with OpenAI Codex beside it when Codex is on the machine: tokens, cost at
 API list prices, hours, sessions, models, projects, plan limits, daily and hourly
 activity, all read from files on this machine. It has a Simple view (one card
 each for Claude and Codex) and a Detailed view (every panel, the default), and a
-switch that hides Codex. Claude Stats is the only app view in both editions.
+switch that hides Codex. It is the only view in the shareable stats edition.
+
+**Work** (full build only) is the monday Tasks board on the wall: four scrolling
+columns, a summary strip, actions that write back to monday, and notices. See
+[Work mode](#work-mode).
 
 ---
 
@@ -29,9 +33,9 @@ Other scripts:
 ```bash
 npm run build      # bundle to dist/
 npm run dev        # rebuild on change
-npm test           # stats, indexing, Codex, plan limits, projection, crypto, chat, pricing, Ask Gemini
+npm test           # stats, indexing, Codex, plan limits, projection, crypto, chat, pricing, Ask Gemini, Work mode
 npm run test:ask-live # Ask Gemini lock-down against the real agy (spends one prompt of quota)
-npm run test:render # about 790 layout checks in a real Electron window, every screen size and view
+npm run test:render # about 830 layout checks in a real Electron window, every screen size and view
 npm run typecheck  # tsc --noEmit
 npm run package    # per-user Windows installer into release/
 npm run logo       # regenerate the mark, icons and wordmark
@@ -57,6 +61,7 @@ and the diagnostics overlay.
 | `Ctrl+Alt+W` | Focus mode: brings the wall above other windows and enables interaction |
 | `Ctrl+Alt+Shift+W` | Show / hide the wall |
 | `Esc` | Leave focus mode |
+| `Tab` | Full build: switch between Claude Stats and Work (when the wall has the pointer) |
 
 ---
 
@@ -72,7 +77,8 @@ so deleting the file is safe.
 | `clickThrough` | `false` | The wall ignores the mouse entirely |
 | `opacity` | `1` | Wall opacity in ambient mode |
 | `monitors` | `[]` | Empty means all displays |
-| `mode` | `"stats"` | Always stats; legacy values are ignored |
+| `mode` | `"stats"` | `stats` or, in the full build, `work`. The stats build always loads `stats`; the old `clients` loads as `stats` |
+| `workFilter` | `"mine"` | Full build: Work mode's Mine (Owner includes Gustav) or `everyone` |
 | `debug` | `false` | Diagnostics overlay |
 | `askModel` | `"gemini-3.8-flash-medium"` | Full build: the Gemini model Ask Gemini uses, chosen in the tray |
 
@@ -121,6 +127,30 @@ tool kills the run. What is sent is the question and a plain-text summary of the
 numbers by project label, never a path. Quota on an AI Plus account is small and
 the panel says when it has run out. Details, and what was and was not proven:
 [docs/ask-gemini.md](docs/ask-gemini.md).
+
+## Work mode
+
+Full build only. The monday Tasks board, switched to from the top control, with
+`Tab` or from the tray (**View**). Connect it once from the tray
+(**Connect monday...**) with your monday personal API token (avatar,
+Developers, My access tokens); it is checked with monday, stored encrypted on
+this PC, and never shown again. **Disconnect monday** deletes it.
+
+A summary strip, then In progress, Waiting on someone else, Backlog and Done in
+the last 7 days, Mine (the default) or Everyone. Click a card to move it, set
+its priority or due date, comment, or open it in monday; **+ Task** adds one to
+Backlog. Every action shows a pending state and then monday's own read-back or
+a plain failure. The board is polled from the main process with one light
+request a minute in working hours (07:30 to 18:00 on weekdays) and every 15
+minutes otherwise: 684 requests on a weekday with no changes, inside
+monday's daily cap.
+
+Notices come through the toast with Show, Done and Later: Jaco assigning a task,
+Jaco moving or commenting on one of Gustav's, a task leaving Waiting, and one
+morning summary at 08:00. Quiet hours are 18:00 to 07:30 and weekends (only
+Jaco's assignments get through), none in focus mode, never for Gustav's own
+changes, never twice. Work data stays on this PC and is never projected. Mail
+is phase 2. Details: [docs/work-mode.md](docs/work-mode.md).
 
 ## Projection
 

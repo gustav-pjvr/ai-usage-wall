@@ -8,8 +8,10 @@ Written 2026-09-02. Keep it current, it is the contract between sessions.
 ## Purpose
 
 An ambient Windows desktop stats wall for local Claude Code usage, with Codex
-beside it when available. Claude Stats is the only app view in both editions.
-The full build keeps its installed identity for upgrades and a future Work view.
+beside it when available. Claude Stats is the only view in the stats edition.
+The full build keeps its installed identity for upgrades and adds Work mode, the
+monday Tasks board ([docs/work-mode.md](docs/work-mode.md)), whose code never
+reaches the stats bundles.
 
 ---
 
@@ -904,5 +906,6 @@ placeholder there on every build, which silently clobbered the real logo.
 
 ## Future ideas
 
-A Work view is planned for the full edition. Per-monitor content assignment
+Work mode's mail phases (2 to 4 in docs/design/work-mode.md) are planned for the
+full edition. Per-monitor content assignment
 (the settings key `monitors` exists) and a light-theme wall remain future ideas.

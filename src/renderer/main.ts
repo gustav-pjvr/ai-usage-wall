@@ -1,4 +1,4 @@
-/** Renderer entry for the stats wall and its shell controls. */
+/** Renderer entry for the wall: Claude Stats, Work (full build only) and the shell controls. */
 
 import type { UsageIndex } from '../main/data/usage';
 import { StatsView } from './stats';
@@ -7,6 +7,8 @@ import { WallActions } from './actions';
 import { AskPanel, type AskBridge } from './ask';
 import { isStatsOnly } from '../shared/edition';
 import type { DayRaw, TimelapseDays } from '../shared/intraday';
+// Type only, erased at build: the module is required below inside `if (!isStatsOnly)`.
+import type { WorkBridge, WorkView } from './work';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
 
@@ -23,7 +25,13 @@ interface WallState {
     /** Claude and Codex side by side (src/shared/codex-view.ts). Optional: an older main omits them. */
     statsView?: 'detailed' | 'simple';
     showCodex?: boolean;
+    /** Work mode's Mine | Everyone (full build). */
+    workFilter?: 'mine' | 'everyone';
   };
+  /** The view to show. Main already resolved it: never 'work' in the stats build or on a paired screen. */
+  mode?: 'stats' | 'work';
+  /** Whether this wall offers Work at all. */
+  work?: boolean;
   capability: { tier: 'low' | 'balanced' | 'high'; cores: number; memoryGb: number; gpuAccelerated: boolean; reasons: string[] };
   focusMode: boolean;
   appVersion: string;
@@ -51,6 +59,8 @@ declare global {
       timelapseDay(day: string): Promise<DayRaw | null>;
       /** Ask Gemini. Present in the full build only. */
       ask?: AskBridge;
+      /** Work mode (monday Tasks). Present in the full build only. */
+      work?: WorkBridge;
     };
   }
 }
@@ -95,6 +105,37 @@ if (!isStatsOnly && window.wall.ask) {
   const askPanel = new AskPanel(window.wall.ask);
   // The panel goes inside the action row, so it hangs from the row's real bottom (ask.css).
   wallActions.addChip(askPanel.chip, askPanel.root);
+}
+
+/*
+ * Work mode (docs/work-mode.md), full build only. The require is inside a test
+ * of the build define itself (not the imported isStatsOnly, which esbuild only
+ * inlines after it has chosen the files), so the stats bundle leaves out the
+ * whole module and every monday string; the preload is the authority on
+ * whether the calls exist. Its stylesheet is linked here for the same reason.
+ */
+let workView: WorkView | null = null;
+let workMount: HTMLDivElement | null = null;
+if (process.env.MBW_EDITION !== 'stats' && window.wall.work) {
+  const { WorkView: View } = require('./work') as typeof import('./work');
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = 'styles/work.css';
+  document.head.append(link);
+  workMount = document.createElement('div');
+  workMount.id = 'view-work';
+  workMount.className = 'view';
+  document.getElementById('stage')!.append(workMount);
+  workView = new View(window.wall.work);
+  workMount.append(workView.root);
+  // Mine | Everyone and + Task live in the action row, shown only in Work (actions.css).
+  wallActions.addChip(workView.newChip, workView.newPanel);
+  wallActions.addChip(workView.filterChip);
+  workView.onFilter = (f) => {
+    void window.wall.updateSettings({ workFilter: f }).catch((err: unknown) =>
+      console.error('[renderer] could not save the task filter:', err),
+    );
+  };
 }
 
 // The top panel's Constellation / Live toggle is saved like any other setting,
@@ -148,6 +189,8 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+let lastSavedFilter: 'mine' | 'everyone' | null = null;
+
 function render(): void {
   if (!state) return;
 
@@ -168,6 +211,10 @@ function render(): void {
     viewPref = savedView;
     codexPref = savedCodex;
     applyViewPrefs();
+  }
+  if (workView && state.settings.workFilter && state.settings.workFilter !== lastSavedFilter) {
+    lastSavedFilter = state.settings.workFilter;
+    workView.setFilter(state.settings.workFilter);
   }
   document.body.dataset.background = state.settings.background ?? 'gradient';
   document.body.style.setProperty('--backdrop-opacity', String(state.settings.backgroundOpacity ?? 1));
@@ -214,10 +261,87 @@ function renderDiagnostics(): void {
   );
 }
 
+// ── Modes ──────────────────────────────────────────────────────────────────
+
+let mode: 'stats' | 'work' = 'stats';
+/** Work is offered: full build, the Work view exists, and main says this wall may show it. */
+const workOffered = (): boolean => !isStatsOnly && !!workView && state?.work === true;
+
+/**
+ * Cross-fade between the two views. Both stay mounted; only the stats canvas
+ * is stopped while hidden, because it is the one thing that costs CPU.
+ */
+function applyMode(next: 'stats' | 'work', animate = true): void {
+  if (!workOffered()) next = 'stats';
+  mode = next;
+  document.body.dataset.mode = next;
+  statsMount.classList.toggle('is-active', next === 'stats');
+  workMount?.classList.toggle('is-active', next === 'work');
+  if (!animate) {
+    for (const m of [statsMount, workMount]) {
+      if (!m) continue;
+      m.style.transition = 'none';
+      requestAnimationFrame(() => {
+        m.style.transition = '';
+      });
+    }
+  }
+  statsView.setVisible(next === 'stats');
+  workView?.setVisible(next === 'work');
+  renderFocusExit();
+}
+
+function setMode(next: 'stats' | 'work'): void {
+  if (mode === next || !workOffered()) return;
+  applyMode(next);
+  void window.wall.updateSettings({ mode: next }).catch((err: unknown) =>
+    console.error('[renderer] could not save the view:', err),
+  );
+}
+
+/**
+ * The top-centre bar: Claude Stats | Work when Work is offered, and the focus
+ * mode exit when focus mode is on. With neither, it is hidden.
+ */
 function renderFocusExit(): void {
   const focused = state?.focusMode === true;
+  const offered = workOffered();
   document.body.classList.toggle('is-focus', focused);
-  switchEl.hidden = !focused;
+  switchEl.hidden = !focused && !offered;
+  switchEl.setAttribute('aria-label', offered ? 'View' : 'Focus mode');
+  let buttons = [...switchEl.querySelectorAll<HTMLButtonElement>('.mode-btn')];
+  if (offered && !buttons.length) {
+    for (const [id, label] of [['stats', 'Claude Stats'], ['work', 'Work']] as const) {
+      const b = el('button', 'mode-btn', label);
+      b.type = 'button';
+      b.dataset.mode = id;
+      b.addEventListener('click', () => setMode(id));
+      switchEl.prepend(b);
+    }
+    // Prepended in reverse, so put them in reading order.
+    const work = switchEl.querySelector('.mode-btn[data-mode="work"]');
+    if (work) switchEl.querySelector('.mode-btn[data-mode="stats"]')?.after(work);
+    switchEl.prepend(el('span', 'mode-thumb'));
+    buttons = [...switchEl.querySelectorAll<HTMLButtonElement>('.mode-btn')];
+  } else if (!offered && buttons.length) {
+    for (const b of buttons) b.remove();
+    switchEl.querySelector('.mode-thumb')?.remove();
+    buttons = [];
+  }
+  for (const b of buttons) {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('is-on', on);
+    b.setAttribute('aria-pressed', String(on));
+  }
+  switchEl.dataset.mode = mode;
+  // The pill is sized from the ACTIVE button's real geometry: the labels differ in width.
+  requestAnimationFrame(() => {
+    const active = switchEl.querySelector<HTMLElement>('.mode-btn.is-on');
+    const thumb = switchEl.querySelector<HTMLElement>('.mode-thumb');
+    if (!active || !thumb) return;
+    thumb.style.width = `${active.offsetWidth}px`;
+    thumb.style.transform = `translateX(${active.offsetLeft - 3}px)`;
+  });
   let exit = switchEl.querySelector<HTMLElement>('.focus-exit');
   if (focused && !exit) {
     exit = el('button', 'focus-exit', 'Exit focus  ·  Esc');
@@ -240,6 +364,13 @@ document.addEventListener('keydown', (e) => {
     // there must always be an obvious way out of it.
     void window.wall.exitFocus?.();
   }
+  // Tab flips views without reaching for the mouse (full build, Work offered).
+  // Text boxes stop their own keys, so typing never gets here.
+  // A form (a Work box or the new-task form) keeps Tab for moving between its fields.
+  if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && workOffered() && !(e.target as Element | null)?.closest?.('form')) {
+    e.preventDefault();
+    setMode(mode === 'stats' ? 'work' : 'stats');
+  }
 });
 
 let resizeTimer = 0;
@@ -250,8 +381,11 @@ window.addEventListener('resize', () => {
 
 window.wall.onState((next) => {
   const focusChanged = state?.focusMode !== next.focusMode;
+  const offerChanged = state?.work !== next.work;
   state = next;
-  if (focusChanged) renderFocusExit();
+  const wanted = next.mode === 'work' ? 'work' : 'stats';
+  if (wanted !== mode || offerChanged) applyMode(wanted);
+  else if (focusChanged) renderFocusExit();
   statsView.setPerfTier(next.capability.tier);
   statsView.setVersion(next.appVersion);
   render();
@@ -271,7 +405,7 @@ window.wall
       statsView.setPerfTier(initial.capability.tier);
       statsView.setVersion(initial.appVersion);
       // No animation on the very first paint: the view should already be there.
-      renderFocusExit();
+      applyMode(initial.mode === 'work' ? 'work' : 'stats', false);
       render();
     }
   })

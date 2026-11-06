@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The same strict policy as the wall and the pairing window. connect-src
+      'none' above all: a token is typed here, and this window must not be able
+      to send it anywhere but to the main process, which checks it with monday.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Connect monday</title>
+    <link rel="stylesheet" href="styles/connect.css" />
+  </head>
+  <body>
+    <main id="connect">
+      <!-- Filled from connect.ts. Never innerHTML. -->
+    </main>
+    <script src="connect.js"></script>
+  </body>
+</html>

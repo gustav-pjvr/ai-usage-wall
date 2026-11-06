@@ -1,10 +1,13 @@
 /**
  * One reconnecting WebSocket, shared by both roles.
  *
- * This is the ONLY file in the app that opens a network connection, and it is
+ * This is the only file that opens the PROJECTION connection, and it is
  * constructed only from projection/index.ts when a role is configured. Nothing
  * else may import it. That is rule 25, and it is what makes "projection off
- * means no network" checkable by grep rather than by reading every file.
+ * means no projection network" checkable by grep rather than by reading every
+ * file. It is not the app's only network path: the updater (stats build), Ask
+ * Gemini's CLI and Work mode's monday requests (src/main/work/monday-token.ts,
+ * full build, only once a token is connected) reach the network on their own.
  *
  * Node's global WebSocket is used (verified present in Electron 44 / Node 24),
  * so there is no dependency and nothing new in the packaged bundle.

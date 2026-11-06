@@ -34,7 +34,7 @@ await esbuild.build({
     },
   }],
 });
-const { normaliseSettings, loadSettings, DEFAULT_SETTINGS } = require(out);
+const { normaliseSettings, loadSettings, effectiveMode, DEFAULT_SETTINGS } = require(out);
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail = '') => {
@@ -115,6 +115,44 @@ ok('anything else falls back to detailed', normaliseSettings({ statsView: 'SIMPL
 ok('Codex is shown by default', normaliseSettings({}).showCodex === true);
 ok('off is kept', normaliseSettings({ showCodex: false }).showCodex === false);
 ok('only a real false turns it off', normaliseSettings({ showCodex: 0 }).showCodex === true && normaliseSettings({ showCodex: 'false' }).showCodex === true);
+
+console.log('\nsettings: Work mode (full build) and its filter');
+ok('work is kept in the full build', normaliseSettings({ mode: 'work' }).mode === 'work');
+ok('stats is kept', normaliseSettings({ mode: 'stats' }).mode === 'stats');
+ok('the old clients view still loads as stats, not work', normaliseSettings({ mode: 'clients' }).mode === 'stats');
+ok('Work, in any other spelling, is stats', normaliseSettings({ mode: 'WORK' }).mode === 'stats');
+ok('Mine is the default task filter', normaliseSettings({}).workFilter === 'mine');
+ok('Everyone is kept when chosen', normaliseSettings({ workFilter: 'everyone' }).workFilter === 'everyone');
+ok('anything else is Mine', normaliseSettings({ workFilter: 'all' }).workFilter === 'mine');
+ok('a paired screen never shows Work, whatever the setting', effectiveMode({ mode: 'work' }, { screen: true }) === 'stats');
+ok('this wall shows Work when it is set', effectiveMode({ mode: 'work' }, { screen: false }) === 'work');
+ok('and stats when that is set', effectiveMode({ mode: 'stats' }, { screen: false }) === 'stats');
+
+/*
+ * The stats edition, built with its own define: 'work' never survives there,
+ * from a settings file or from a patch, and the effective view is stats.
+ */
+const statsOut = path.join(tmp, 'settings-stats.cjs');
+await esbuild.build({
+  entryPoints: [path.join(root, 'src/main/settings.ts')],
+  bundle: true, platform: 'node', format: 'cjs', outfile: statsOut, logLevel: 'error',
+  define: { 'process.env.MBW_EDITION': JSON.stringify('stats') },
+  plugins: [{
+    name: 'stub-electron',
+    setup(b) {
+      b.onResolve({ filter: /^electron$/ }, () => ({ path: 'electron', namespace: 'stub' }));
+      b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: `export const app = { getPath: () => ${JSON.stringify(tmp)} };`, loader: 'js' }));
+    },
+  }],
+});
+const stats = require(statsOut);
+ok('stats build: a work setting loads as stats', stats.normaliseSettings({ mode: 'work' }).mode === 'stats');
+ok('stats build: the effective view is stats even when the file says work', stats.effectiveMode({ mode: 'work' }, { screen: false }) === 'stats');
+await fs.writeFile(path.join(tmp, 'settings.json'), JSON.stringify({ mode: 'work', notes: 'kept' }));
+const statsLoaded = await stats.loadSettings();
+ok('stats build: a settings file from the full build loads as stats and keeps the rest', statsLoaded.mode === 'stats' && statsLoaded.notes === 'kept');
+const fullLoaded = await loadSettings();
+ok('full build: the same file loads as work', fullLoaded.mode === 'work' && fullLoaded.notes === 'kept');
 
 console.log('\nsettings: round trip');
 const once = normaliseSettings({ mode: 'stats', opacity: 0.5, notes: 'hi', monitors: [2] });

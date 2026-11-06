@@ -29,9 +29,18 @@ export const isStatsOnly = EDITION === 'stats';
 export const PRODUCT_NAME = isStatsOnly ? 'Claude Stats Wall' : 'MuchBetter Client Wall';
 ```
 
-**`full`, MuchBetter Client Wall.** Claude Stats only, with the existing appId
-and product name retained so installed copies upgrade in place. A Work view is
-planned later. This edition is updated by `npm run deploy`.
+**`full`, MuchBetter Client Wall.** Claude Stats and Work mode (the monday
+Tasks board, [work-mode.md](work-mode.md)), with the existing appId and product
+name retained so installed copies upgrade in place. This edition is updated by
+`npm run deploy`.
+
+Work mode is absent from the stats build, not switched off: the main process,
+the wall and the toast reach it through a `require()` behind a test of the
+build define itself (`process.env.MBW_EDITION !== 'stats'`, in the same file),
+because esbuild decides which files to bundle before it inlines the imported
+`isStatsOnly`. The preload has no `work` member and no Connect bridge, and the
+build copies neither the Connect page nor the Work stylesheet.
+`test/work.test.mjs` bundles both editions and searches them.
 
 **`stats`, Claude Stats Wall.** The same dashboard, with a separate installed
 identity and the automatic updater.

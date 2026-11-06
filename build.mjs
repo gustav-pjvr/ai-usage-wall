@@ -97,6 +97,22 @@ const configs = [
     entryPoints: [path.join(root, 'src/renderer/chat.ts')],
     outfile: path.join(dist, 'renderer/chat.js'),
   },
+  /*
+   * The Connect monday dialog: Work mode, full build only. The stats edition
+   * builds neither the window nor its page (docs/work-mode.md).
+   */
+  ...(edition === 'full'
+    ? [
+        {
+          ...common,
+          platform: 'browser',
+          format: 'iife',
+          target: 'chrome120',
+          entryPoints: [path.join(root, 'src/renderer/connect.ts')],
+          outfile: path.join(dist, 'renderer/connect.js'),
+        },
+      ]
+    : []),
 ];
 
 /*
@@ -114,6 +130,13 @@ async function copyStatic() {
   await fs.copyFile(path.join(root, 'src/renderer/chat.html'), path.join(dist, 'renderer/chat.html'));
   for (const css of ['wall.css', 'stats.css', 'shell.css', 'notes.css', 'actions.css', 'ask.css', 'pair.css', 'toast.css', 'chat.css']) {
     await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
+  }
+  // Work mode's page and styles ship in the full build only.
+  if (edition === 'full') {
+    await fs.copyFile(path.join(root, 'src/renderer/connect.html'), path.join(dist, 'renderer/connect.html'));
+    for (const css of ['work.css', 'connect.css']) {
+      await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
+    }
   }
 }
 

@@ -19,7 +19,11 @@ import { execFile } from 'node:child_process';
 import { watch as watchFs, type FSWatcher } from 'node:fs';
 
 import { detectCapability, type Capability } from './capability';
-import { loadSettings, saveSettings, type Settings, normaliseSettings } from './settings';
+import { effectiveMode, loadSettings, saveSettings, type Settings, normaliseSettings, type WallMode } from './settings';
+import { createToastArbiter } from './toast-arbiter';
+// Type only: erased at build. The module itself is required below inside
+// `if (!isStatsOnly)`, so the stats bundle never contains it.
+import type { WorkController } from './work';
 import { PRODUCT_NAME, isStatsOnly } from '../shared/edition';
 import {
   checkNow,
@@ -106,6 +110,8 @@ interface WallWindow {
    * loan as `notesEditing`, kept separate so closing one never ends the other.
    */
   askEditing: boolean;
+  /** True while a Work mode text box (comment, date, new task) holds keyboard focus. Same loan again. */
+  workEditing: boolean;
 }
 
 let windows: WallWindow[] = [];
@@ -790,6 +796,7 @@ function refreshTrayMenu(): void {
       { type: 'separator' },
       { label: hidden ? 'Show wall' : 'Hide wall', click: () => toggleHidden() },
       { label: focusMode ? 'Leave focus mode' : 'Focus mode', click: () => toggleFocusMode() },
+      ...(work ? work.trayItems(currentMode()) : []),
       ...(isStatsOnly
         ? []
         : [
@@ -881,6 +888,39 @@ function refreshTrayMenu(): void {
  * handler, no hotkey, no tray item and no preload call exist there. Never on
  * the projection wire: nothing here touches toWire().
  */
+/*
+ * Work mode (docs/work-mode.md), full build only. Created when the IPC is
+ * registered; null in the stats build.
+ *
+ * The guard tests the build define itself, here, rather than the imported
+ * isStatsOnly: esbuild decides which files to bundle before it inlines
+ * constants from other modules, so only a condition it can fold in THIS file
+ * makes the require dead code and keeps src/main/work out of the stats bundle
+ * (test/work.test.mjs checks the built bundle).
+ */
+let work: WorkController | null = null;
+
+function startWorkMode(): void {
+  if (work) return;
+  if (process.env.MBW_EDITION !== 'stats') {
+    const { createWork } = require('./work') as typeof import('./work');
+    work = createWork({
+      isDev,
+      walls: () => windows.map((w) => w.win).filter((w) => !w.isDestroyed()),
+      isScreen: () => projection.isScreen() || projection.projectionStatus().role === 'screen',
+      focusMode: () => focusMode,
+      setMode: (mode) => void updateSettings({ mode }),
+      showWall: () => {
+        if (hidden) toggleHidden();
+      },
+      lendFocus: (event, active) => lendFocus(event, 'workEditing', active),
+      refreshTray: () => refreshTrayMenu(),
+      balloon: (title, content) => tray?.displayBalloon?.({ title, content }),
+      toast: { show: holdToastForWork, release: releaseToastForWork },
+    });
+  }
+}
+
 const askRunner = isStatsOnly ? null : createAgyRunner({ exe: defaultAgyExe(), log: (line) => console.log(line) });
 /** The Flash models agy offers, read once at startup; the known list until then. */
 let askModels: string[] = [...FALLBACK_MODELS];
@@ -979,6 +1019,7 @@ function createWindowForDisplay(display: Electron.Display): WallWindow {
     inputReachable: false,
     notesEditing: false,
     askEditing: false,
+    workEditing: false,
   };
 
   win.once('ready-to-show', () => {
@@ -1079,7 +1120,7 @@ function applyLayer(wall: WallWindow): { ok: boolean; reason?: string } {
   // An open notes edit holds focus on purpose. Re-asserting WS_EX_NOACTIVATE
   // here would silently end it, and saving the note calls updateSettings, which
   // calls this for every window, so the edit would kill itself on the way out.
-  if (wall.notesEditing || wall.askEditing) return { ok: true };
+  if (wall.notesEditing || wall.askEditing || wall.workEditing) return { ok: true };
   const mode: LayerMode = focusMode ? 'top' : settings.layerMode;
   const display = screen.getAllDisplays().find((d) => d.id === wall.displayId);
 
@@ -1251,8 +1292,9 @@ function hideToast(): void {
 /** Show the toast only while there is something in flight worth showing. */
 function syncToast(u: UpdateState): void {
   // A notice has the window for its two seconds. The timer calls back here
-  // afterwards, so nothing is lost by waiting.
-  if (noticeTimer) return;
+  // afterwards, so nothing is lost by waiting. A work notice holds it the same
+  // way and calls back here when it lets go (releaseToastForWork).
+  if (noticeTimer || toastArbiter.workHeld()) return;
   const wanted = u.phase === 'downloading' || u.phase === 'ready';
   if (!wanted) {
     hideToast();
@@ -1290,17 +1332,25 @@ let noticeTimer: NodeJS.Timeout | null = null;
 let noticeCount = 0;
 let noticeFrom = '';
 
-function notifyMessage(label: string): void {
+/** Decides who has the toast window (src/main/toast-arbiter.ts). */
+const toastArbiter = createToastArbiter();
+
+function notifyMessage(label: string, count = 1): void {
   /*
    * Nothing to announce if the conversation is already on screen and in front
    * of you. A popup telling you about a message you are watching arrive is
    * noise, and this window is the one surface that interrupts.
    */
   if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible() && chatWindow.isFocused()) return;
+  // A work notice has the window and its buttons: the message waits, counted, for it to go.
+  if (toastArbiter.chat(label) === 'defer') {
+    for (let i = 1; i < count; i++) toastArbiter.chat(label);
+    return;
+  }
 
   // A burst is one notice with a count, not a stack of them fighting for the
   // same corner.
-  noticeCount = noticeFrom === label ? noticeCount + 1 : 1;
+  noticeCount = (noticeFrom === label ? noticeCount : 0) + count;
   noticeFrom = label;
 
   ensureToastWindow();
@@ -1313,10 +1363,70 @@ function notifyMessage(label: string): void {
     noticeTimer = null;
     noticeCount = 0;
     noticeFrom = '';
-    // Hand the window back to the updater, which hides it if it has nothing.
-    syncToast(updateState());
+    // A work notice that waited for this one goes next; otherwise the updater, which hides it if it has nothing.
+    const next = toastArbiter.chatEnded();
+    if (next === 'work' && pendingWork) {
+      const p = pendingWork;
+      pendingWork = null;
+      openToastForWork(p.width, p.height, p.ready);
+    } else {
+      if (next === 'work') toastArbiter.workReleased();
+      syncToast(updateState());
+    }
   }, NOTICE_MS);
   noticeTimer.unref?.();
+}
+
+/*
+ * Work notices (full build, src/main/work/index.ts) borrow the same window,
+ * larger and taking clicks for its Show / Done / Later buttons. While one is
+ * up, the updater and chat notices wait; when it lets go, the window goes back
+ * to its normal size, ignores the mouse again, and whatever was waiting shows.
+ */
+const toastX = (w: number): number => screen.getPrimaryDisplay().workArea.x + screen.getPrimaryDisplay().workArea.width - w - TOAST_MARGIN;
+const toastY = (h: number): number => screen.getPrimaryDisplay().workArea.y + screen.getPrimaryDisplay().workArea.height - h - TOAST_MARGIN;
+/** A work notice waiting for a chat notice to finish. */
+let pendingWork: { width: number; height: number; ready: (win: BrowserWindow | null) => void } | null = null;
+
+/** Hand the window to a work notice now, or once the chat notice that is up has had its time. */
+function holdToastForWork(width: number, height: number, ready: (win: BrowserWindow | null) => void): void {
+  if (toastArbiter.work() === 'wait') {
+    pendingWork = { width, height, ready };
+    return;
+  }
+  openToastForWork(width, height, ready);
+}
+
+function openToastForWork(width: number, height: number, ready: (win: BrowserWindow | null) => void): void {
+  ensureToastWindow();
+  if (!toastWindow || toastWindow.isDestroyed()) {
+    releaseToastForWork();
+    ready(null);
+    return;
+  }
+  if (toastLinger) {
+    clearTimeout(toastLinger);
+    toastLinger = null;
+  }
+  toastWindow.setBounds({ x: toastX(width), y: toastY(height), width, height });
+  toastWindow.setIgnoreMouseEvents(false);
+  if (!toastWindow.isVisible()) toastWindow.showInactive();
+  ready(toastWindow);
+}
+
+function releaseToastForWork(): void {
+  if (!toastArbiter.workHeld()) return;
+  pendingWork = null;
+  const deferred = toastArbiter.workReleased();
+  if (toastWindow && !toastWindow.isDestroyed()) {
+    toastWindow.setIgnoreMouseEvents(true);
+    toastWindow.hide();
+    toastWindow.setBounds({ x: toastX(TOAST_W), y: toastY(TOAST_H), width: TOAST_W, height: TOAST_H });
+    toastWindow.webContents.send('toast:workEnd');
+  }
+  // Messages held back, each sender with its own count; the last one is what stays up.
+  for (const [label, count] of deferred) notifyMessage(label, count);
+  if (!deferred.length) syncToast(updateState());
 }
 
 /** One push, every surface. Safe to call on every state change. */
@@ -1413,13 +1523,20 @@ function stopDesktopWatch(): void {
 
 // ── State push ─────────────────────────────────────────────────────────────
 
+/** The view the wall shows: the setting, except never Work in the stats build or on a paired screen. */
+function currentMode(): WallMode {
+  return effectiveMode(settings, { screen: projection.isScreen() });
+}
+
 function wallState(wall: WallWindow) {
   const display = screen.getAllDisplays().find((d) => d.id === wall.displayId);
   return {
     settings,
     capability,
     focusMode,
-    mode: settings.mode,
+    mode: currentMode(),
+    /** Whether this wall offers Work at all: never in the stats edition, never on a paired screen. */
+    work: !isStatsOnly && !projection.isScreen(),
     appVersion: app.getVersion(),
     effectiveLayerMode: wall.effectiveMode,
     inputReachable: wall.inputReachable,
@@ -1752,9 +1869,10 @@ function applyStartup(): void {
 
 /** End any focus loan on this window and put it back to never stealing focus. */
 function releaseLoans(wall: WallWindow): void {
-  if (!wall.notesEditing && !wall.askEditing) return;
+  if (!wall.notesEditing && !wall.askEditing && !wall.workEditing) return;
   wall.notesEditing = false;
   wall.askEditing = false;
+  wall.workEditing = false;
   if (wall.win.isDestroyed()) return;
   wall.win.setFocusable(false);
   applyLayer(wall);
@@ -1763,6 +1881,7 @@ function releaseLoans(wall: WallWindow): void {
 function quit(): void {
   // Cancelled first; the app waits for its clean-up before quitting (below).
   askRunner?.cancel();
+  work?.stop();
   stopUpdater();
   stopDesktopWatch();
   if (toastLinger) clearTimeout(toastLinger);
@@ -1818,7 +1937,7 @@ function privateNames(): string[] {
  * Two loans can be open at once, the notes bar's and the ask bar's, and the
  * window only goes back to unfocusable when neither is.
  */
-function lendFocus(event: Electron.IpcMainInvokeEvent, which: 'notesEditing' | 'askEditing', active: boolean): boolean {
+function lendFocus(event: Electron.IpcMainInvokeEvent, which: 'notesEditing' | 'askEditing' | 'workEditing', active: boolean): boolean {
   const wall = windows.find((w) => w.win.webContents.id === event.sender.id);
   if (!wall || wall.win.isDestroyed()) return false;
   if (active) {
@@ -1831,7 +1950,7 @@ function lendFocus(event: Electron.IpcMainInvokeEvent, which: 'notesEditing' | '
     // applyLayer switched off until the next edit.
   }
   wall[which] = false;
-  if (!wall.notesEditing && !wall.askEditing) {
+  if (!wall.notesEditing && !wall.askEditing && !wall.workEditing) {
     wall.win.setFocusable(false);
     applyLayer(wall);
   }
@@ -1872,6 +1991,7 @@ function registerAskIpc(): void {
 function registerIpc(): void {
   // Guarded here as well as inside, so the stats bundle drops the handlers entirely.
   if (!isStatsOnly) registerAskIpc();
+  if (!isStatsOnly) startWorkMode();
   ipcMain.handle('wall:getState', (event) => {
     const wall = windows.find((w) => w.win.webContents.id === event.sender.id);
     return wall ? wallState(wall) : null;
@@ -2143,6 +2263,8 @@ if (!app.requestSingleInstanceLock()) {
     );
     registerHotkeys();
     applyStartup();
+    // After the windows and the tray: the first sync pushes to both.
+    work?.start();
     if (!isStatsOnly) {
       // Run folders a crash or a forced quit left behind (agy.ts, sweepStaleRuns).
       void sweepStaleRuns().then((n) => {

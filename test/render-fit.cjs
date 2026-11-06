@@ -450,9 +450,14 @@ function codexFixture(now, opts = {}) {
  */
 const BEFORE_CODEX = {"2560x1440":[["panel-hero",34.7,106.7,1028.5,478.2],["panel-live",1079.1,106.7,1028.5,478.2],["panel-cost",2123.5,106.7,252.9,159.7],["panel-ran",2392.4,106.7,133,159.7],["panel-vel",2123.5,282.4,401.8,302.5],["panel-counters",34.7,600.9,819.6,382.6],["panel-daily",870.2,600.9,1028.5,382.6],["panel-eff",1914.7,600.9,610.7,382.6],["panel-models",34.7,999.4,819.6,382.6],["panel-hours",870.2,999.4,819.6,382.6],["panel-projects",1705.8,999.4,819.6,382.6]],"1920x1200":[["panel-hero",26,80,771.3,404.6],["panel-live",809.3,80,771.4,404.6],["panel-cost",1592.7,80,189.2,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1592.7,211.7,301.4,272.9],["panel-counters",26,496.6,614.7,323.7],["panel-daily",652.7,496.6,771.3,323.7],["panel-eff",1436,496.6,458,323.7],["panel-models",26,832.3,614.7,323.7],["panel-hours",652.7,832.3,614.7,323.7],["panel-projects",1279.3,832.3,614.7,323.7]],"1920x1080":[["panel-hero",26,80,771.3,358.5],["panel-live",809.3,80,771.4,358.5],["panel-cost",1592.7,80,189.2,119.7],["panel-ran",1793.8,80,100.2,119.7],["panel-vel",1592.7,211.7,301.4,226.8],["panel-counters",26,450.5,614.7,286.8],["panel-daily",652.7,450.5,771.3,286.8],["panel-eff",1436,450.5,458,286.8],["panel-models",26,749.2,614.7,286.8],["panel-hours",652.7,749.2,614.7,286.8],["panel-projects",1279.3,749.2,614.7,286.8]],"1600x900":[["panel-hero",21.7,66.7,642.8,299],["panel-live",674.4,66.7,642.8,299],["panel-cost",1327.2,66.7,157.3,99.8],["panel-ran",1494.5,66.7,83.8,99.8],["panel-vel",1327.2,176.5,251.1,189.2],["panel-counters",21.7,375.6,512.2,239.2],["panel-daily",543.9,375.6,642.8,239.2],["panel-eff",1196.7,375.6,381.7,239.2],["panel-models",21.7,624.8,512.2,239.2],["panel-hours",543.9,624.8,512.2,239.2],["panel-projects",1066.1,624.8,512.3,239.2]],"1512x982":[["panel-hero",20.5,63,607.4,332.9],["panel-live",637.3,63,607.4,332.9],["panel-cost",1254.2,63,148.5,95.7],["panel-ran",1412.2,63,79.3,95.7],["panel-vel",1254.2,168.1,237.3,227.8],["panel-counters",20.5,405.3,484.1,266.3],["panel-daily",514,405.3,607.4,266.3],["panel-eff",1130.8,405.3,360.7,266.3],["panel-models",20.5,681.1,484.1,266.3],["panel-hours",514,681.1,484.1,266.3],["panel-projects",1007.5,681.1,484.1,266.3]],"1440x900":[["panel-hero",19.5,60,578.5,303.3],["panel-live",607,60,578.5,303.3],["panel-cost",1194.5,60,140.6,91.3],["panel-ran",1344,60,76.5,91.3],["panel-vel",1194.5,160.2,226,203],["panel-counters",19.5,372.3,461,242.6],["panel-daily",489.5,372.3,578.5,242.6],["panel-eff",1077,372.3,343.5,242.6],["panel-models",19.5,623.9,461,242.7],["panel-hours",489.5,623.9,461,242.7],["panel-projects",959.5,623.9,461,242.7]],"1366x768":[["panel-hero",18.5,56.9,548.8,254.9],["panel-live",575.8,56.9,548.8,254.9],["panel-cost",1133.1,56.9,131,88.1],["panel-ran",1272.7,56.9,74.8,88.1],["panel-vel",1133.1,153.5,214.4,158.2],["panel-counters",18.5,320.3,437.3,203.9],["panel-daily",464.3,320.3,548.8,203.9],["panel-eff",1021.6,320.3,325.9,203.9],["panel-models",18.5,532.8,437.3,203.9],["panel-hours",464.3,532.8,437.3,203.9],["panel-projects",910.2,532.8,437.3,203.9]],"1280x800":[["panel-hero",18.2,56,513.3,267.8],["panel-live",539.9,56,513.3,267.8],["panel-cost",1061.5,56,117.6,87.3],["panel-ran",1187.5,56,74.3,87.3],["panel-vel",1061.5,151.6,200.3,172.1],["panel-counters",18.2,332.2,408.9,214.2],["panel-daily",435.5,332.2,513.3,214.2],["panel-eff",957.2,332.2,304.6,214.2],["panel-models",18.2,554.8,408.9,214.2],["panel-hours",435.5,554.8,409,214.2],["panel-projects",852.9,554.8,408.9,214.2]]};
 
+/** What main says about the view (Work mode, test/render-work.cjs sets it). */
+let viewState = { mode: 'stats', work: undefined };
+const setViewState = (next) => {
+  viewState = next;
+};
 const state = (w, h) => ({
   settings: {
-    mode: 'stats',
+    mode: viewState.mode,
     debug: false,
     layerMode: 'desktop',
     clickThrough: false,
@@ -463,7 +468,8 @@ const state = (w, h) => ({
   },
   capability: { tier: 'high', cores: 8, memoryGb: 16, gpuAccelerated: true, reasons: [] },
   focusMode: false,
-  mode: 'stats',
+  mode: viewState.mode,
+  ...(viewState.work === undefined ? {} : { work: viewState.work }),
   appVersion: SITE_SHOT ? require('../package.json').version : '0.9.11',
   effectiveLayerMode: 'desktop',
   inputReachable: true,
@@ -798,6 +804,22 @@ async function statsEditionHasNoAsk() {
     actions: !!document.querySelector('#wall-actions .wall-action-ms'),
   }))()`);
   ok('stats edition: no ASK chip, no panel, no ask bridge (the wall itself still renders)', !r.chip && !r.panel && r.bridge === 'undefined' && r.actions, JSON.stringify(r));
+  // Work: nothing at all, even when a (hostile or stale) main claims Work is on.
+  setViewState({ mode: 'work', work: true });
+  await w.loadFile(path.join(dir, 'renderer', 'index.html'));
+  await wait(1500);
+  const wk = await w.webContents.executeJavaScript(`(() => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+    return {
+      bridge: typeof window.wall.work, connect: typeof window.mondayConnect, toast: typeof window.updateToast.onWork,
+      view: !!document.querySelector('#view-work'), buttons: document.querySelectorAll('.mode-btn').length,
+      hidden: document.querySelector('#mode-switch').hidden, mode: document.body.dataset.mode,
+      stats: document.querySelector('#view-stats').classList.contains('is-active'),
+      css: [...document.styleSheets].some((s) => /work\\.css/.test(s.href || '')),
+    };
+  })()`);
+  ok('stats edition: no Work bridge, Connect bridge, toast buttons, view, switch or stylesheet; Tab does nothing', wk.bridge === 'undefined' && wk.connect === 'undefined' && wk.toast === 'undefined' && !wk.view && wk.buttons === 0 && wk.hidden && wk.mode === 'stats' && wk.stats && !wk.css, JSON.stringify(wk));
+  setViewState({ mode: 'stats', work: undefined });
   w.destroy();
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -862,6 +884,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('wall:exitFocus', () => undefined);
   ipcMain.handle('wall:openExternal', () => undefined);
   ipcMain.handle('wall:installUpdate', () => undefined);
+  // Work mode's main process (test/render-work.cjs): registered before any page loads.
+  const workHarness = require('./render-work.cjs').harness();
 
   /*
    * Built with the WALL'S OWN window options, not a convenient test window.
@@ -1786,15 +1810,19 @@ app.whenReady().then(async () => {
   await wait(1500);
   ok('simple: and as reset 2 s later, long before the 20 s clock would have said so', /^reset:5-hour window/.test(await firstRow()), await firstRow());
 
-  // There is no alternate app view, and Tab retains normal keyboard navigation.
+  /*
+   * Work not offered (a main that does not say `work: true`, as on a paired
+   * screen): stats stays, there are no mode buttons, and Tab does not switch.
+   */
   const onlyStats = await win.webContents.executeJavaScript(`(() => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
-    return document.querySelectorAll('#stage .view').length === 1 &&
-      document.querySelector('#view-stats').classList.contains('is-active') &&
+    return document.querySelector('#view-stats').classList.contains('is-active') &&
+      !document.querySelector('#view-work').classList.contains('is-active') &&
+      document.body.dataset.mode === 'stats' &&
       document.querySelectorAll('.mode-btn').length === 0 &&
       document.querySelector('#mode-switch').hidden;
   })()`);
-  ok('stats is the only app view, with no mode buttons or Tab toggle', onlyStats);
+  ok('Work not offered: stats only, no mode buttons, Tab does not switch', onlyStats);
 
   // The unpriced caveat and the all-unpriced cost, in the simple view, for both engines.
   const gaps = () => win.webContents.executeJavaScript(`(() => {
@@ -1973,6 +2001,12 @@ app.whenReady().then(async () => {
   // ── Ask Gemini ─────────────────────────────────────────────────────────
   await askChecks(askCalls);
   await statsEditionHasNoAsk();
+
+  // ── Work mode (full build) ─────────────────────────────────────────────
+  const workChecks = require('./render-work.cjs');
+  await workChecks({ ok, SIZES, RENDERER, PRELOAD, saved, setState: setViewState, h: workHarness });
+  await workChecks.connectChecks({ ok, ROOT, PRELOAD, h: workHarness });
+  await workChecks.toastChecks({ ok, ROOT, PRELOAD, h: workHarness });
 
   win.destroy();
   console.log(`\n${pass} passed, ${fail} failed\n`);

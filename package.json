@@ -1,7 +1,7 @@
 {
   "name": "ai-usage-wall",
   "productName": "MuchBetter Client Wall",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Ambient desktop client wall for MuchBetter. A living, branded showcase of client work.",
   "author": "Gustav (MuchBetter)",
   "license": "UNLICENSED",
@@ -12,7 +12,7 @@
     "dev": "node build.mjs --watch",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "node test/run.mjs && node test/projection.test.mjs && node test/projection-crypto.test.mjs && node test/stats-projection.test.mjs && node test/usage-append.test.mjs && node test/usage-history.test.mjs && node test/t3-usage.test.mjs && node test/codex-usage.test.mjs && node test/claude-limits.test.mjs && node test/chat.test.mjs && node test/pricing.test.mjs && node test/settings.test.mjs && node test/constellation.test.mjs && node test/milestones.test.mjs && node test/active-time.test.mjs && node test/intraday.test.mjs && node test/timelapse.test.mjs && node test/ask.test.mjs && node test/monday.test.mjs && node test/work.test.mjs",
+    "test": "node test/run.mjs && node test/projection.test.mjs && node test/projection-crypto.test.mjs && node test/stats-projection.test.mjs && node test/usage-append.test.mjs && node test/usage-history.test.mjs && node test/t3-usage.test.mjs && node test/codex-usage.test.mjs && node test/claude-limits.test.mjs && node test/chat.test.mjs && node test/pricing.test.mjs && node test/settings.test.mjs && node test/constellation.test.mjs && node test/milestones.test.mjs && node test/active-time.test.mjs && node test/intraday.test.mjs && node test/timelapse.test.mjs && node test/ask.test.mjs && node test/monday.test.mjs && node test/work.test.mjs && node test/mail.test.mjs && node test/graph.test.mjs",
     "test:ask-live": "node test/ask.test.mjs --live",
     "package": "npm run build && electron-builder --win",
     "package:dir": "npm run build && electron-builder --win dir",
@@ -27,6 +27,7 @@
   "dependencies": {
     "chokidar": "^4.0.3",
     "electron-updater": "^6.8.9",
+    "imapflow": "2.2.6",
     "koffi": "^3.1.6"
   },
   "devDependencies": {

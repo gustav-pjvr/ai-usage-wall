@@ -1,6 +1,6 @@
 /**
- * Work mode: the monday Tasks board on the wall (full build only,
- * docs/work-mode.md). Phase 1 is tasks; mail arrives in phase 2.
+ * Work mode: the inbox (left, src/renderer/inbox.ts) and the monday Tasks
+ * board (right) on the wall (full build only, docs/work-mode.md).
  *
  * WHAT THIS FILE NEVER DOES
  *   - Touch the network. The renderer runs under connect-src 'none'; every
@@ -23,6 +23,7 @@ import {
   type ActionResult, type TaskAction, type TaskCard, type TaskColumns, type TaskPriority, type TaskStatus,
   type TasksView, type WorkFilter, type WorkPayload,
 } from '../shared/work-view';
+import { InboxView, type MailBridge } from './inbox';
 
 export interface WorkBridge {
   get(): Promise<WorkPayload | null>;
@@ -110,7 +111,7 @@ function ordered(key: ColKey, cards: TaskCard[]): TaskCard[] {
  * or an open card's controls; a three pixel threshold keeps a click a click,
  * and the click that ends a drag is swallowed so a drag never opens a card.
  */
-function enableDragScroll(list: HTMLElement): void {
+export function enableDragScroll(list: HTMLElement): void {
   let startY = 0;
   let startTop = 0;
   let armed = false;
@@ -118,7 +119,7 @@ function enableDragScroll(list: HTMLElement): void {
   let swallow = false;
   list.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('button, input, textarea, .task-acts')) return;
+    if ((e.target as HTMLElement).closest('button, input, textarea, .task-acts, .mail-open')) return;
     armed = true;
     dragging = false;
     startY = e.clientY;
@@ -228,11 +229,13 @@ export class WorkView {
   private readonly notes = new Map<string, { text: string; tone: 'ok' | 'bad' }>();
   private readonly noteTimers = new Map<string, number>();
   private creating = false;
+  /** The inbox panel, when the build has mail (always, in the full build). */
+  readonly inbox: InboxView | null;
 
-  constructor(private readonly bridge: WorkBridge) {
+  constructor(private readonly bridge: WorkBridge, mail?: MailBridge) {
     this.loan = new FocusLoan(bridge);
     this.root = el('div', 'work');
-    this.root.setAttribute('aria-label', 'Work: the monday Tasks board');
+    this.root.setAttribute('aria-label', 'Work: the inbox and the monday Tasks board');
 
     this.strip = el('section', 'wpanel work-strip');
     this.strip.setAttribute('aria-label', 'Task summary');
@@ -262,7 +265,20 @@ export class WorkView {
     this.statusEl = el('div', 'work-status');
     this.statusEl.setAttribute('role', 'status');
 
-    this.root.append(this.strip, cols, this.empty, this.statusEl);
+    // The tasks side: the strip, the four columns, and the "connect monday" card over them only.
+    const tasks = el('div', 'work-tasks');
+    tasks.append(this.strip, cols, this.empty);
+    this.inbox = mail ? new InboxView(mail, enableDragScroll) : null;
+    if (this.inbox) {
+      this.root.classList.add('has-mail');
+      // A task made from a mail lands on the board at once, highlighted.
+      this.inbox.onTask = (card) => {
+        this.apply(card);
+        this.highlight(card.id);
+      };
+      this.root.append(this.inbox.root);
+    }
+    this.root.append(tasks, this.statusEl);
 
     // Mine | Everyone.
     this.filterChip = el('div', 'wall-seg work-chip work-filter');
@@ -405,11 +421,12 @@ export class WorkView {
     this.statusEl.replaceChildren();
     const sync = p ? syncLabel(p.status, Date.now()) : { text: 'monday loading', tone: 'off' as const };
     const s = el('span', `work-sync tone-${sync.tone}`, sync.text);
+    const mailLines = (this.inbox?.statusLines(Date.now()) ?? []).map((l) => el('span', `mail-sync tone-${l.tone}`, l.text));
     this.statusEl.append(
+      ...mailLines,
       s,
       el('span', undefined, 'Quiet hours 18:00 to 07:30 and weekends'),
       el('span', undefined, 'Work data stays on this PC, never projected'),
-      el('span', undefined, 'Mail arrives in phase 2'),
     );
   }
 

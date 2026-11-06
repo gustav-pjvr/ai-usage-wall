@@ -84,6 +84,13 @@ export interface Settings {
    * worse, because it is passed as one argument and can never be a flag.
    */
   askModel: string;
+  /**
+   * Work mode's mail VIPs (full build only): senders whose new mail notifies
+   * even in quiet hours (docs/work-mode.md, "Mail notices"). Plain addresses,
+   * hand edited in settings.json. Defaults to Jaco's Gmail address, the one
+   * known address of his; the stats edition always has an empty list.
+   */
+  mailVip: string[];
 }
 
 const DEFAULTS: Settings = {
@@ -105,7 +112,12 @@ const DEFAULTS: Settings = {
   statsView: 'detailed',
   showCodex: true,
   askModel: 'gemini-3.8-flash-medium',
+  // The build define itself, so the stats bundle folds this to an empty list and carries no address.
+  mailVip: process.env.MBW_EDITION === 'stats' ? [] : ['jacojvr@gmail.com'],
 };
+
+/** A plain address, as the mail notifier compares it. */
+const VIP = /^[^\s<>@]{1,64}@[^\s<>@]+\.[^\s<>@]{2,}$/;
 
 /** Matches MODEL_SLUG in src/main/ask/agy.ts: a Gemini slug that can never start with `-`. */
 const ASK_MODEL = /^gemini-[a-z0-9][a-z0-9.-]{0,56}$/;
@@ -156,6 +168,11 @@ export function normaliseSettings(raw: unknown): Settings {
     statsView: r.statsView === 'simple' ? 'simple' : DEFAULTS.statsView,
     showCodex: r.showCodex !== false,
     askModel: typeof r.askModel === 'string' && ASK_MODEL.test(r.askModel) ? r.askModel : DEFAULTS.askModel,
+    mailVip: process.env.MBW_EDITION === 'stats'
+      ? []
+      : Array.isArray(r.mailVip)
+        ? [...new Set(r.mailVip.filter((a): a is string => typeof a === 'string' && a.length <= 254 && VIP.test(a.trim())).map((a) => a.trim().toLowerCase()))].slice(0, 100)
+        : [...DEFAULTS.mailVip],
   };
 }
 

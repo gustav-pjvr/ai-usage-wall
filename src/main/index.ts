@@ -917,6 +917,7 @@ function startWorkMode(): void {
       refreshTray: () => refreshTrayMenu(),
       balloon: (title, content) => tray?.displayBalloon?.({ title, content }),
       toast: { show: holdToastForWork, release: releaseToastForWork },
+      mailVip: () => settings.mailVip,
     });
   }
 }
@@ -2193,6 +2194,8 @@ if (!app.requestSingleInstanceLock()) {
 
     await projection.startProjection({
       onStatus: () => {
+        // Work mode's mail stops while this machine is a paired screen, and starts again after.
+        work?.screenChanged();
         refreshTrayMenu();
         pushPairStatus();
         pushChatChanged();

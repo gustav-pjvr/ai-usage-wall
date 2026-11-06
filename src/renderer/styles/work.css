@@ -23,11 +23,15 @@
   --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
   --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
 
+  --acct: var(--back);
+
   position: absolute;
   inset: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: calc(var(--u) * 12);
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  row-gap: calc(var(--u) * 12);
+  column-gap: calc(var(--u) * 14);
   padding: var(--top-chrome) calc(var(--u) * 26) calc(var(--u) * 10);
   color: var(--ink);
   font-family: var(--sans);
@@ -56,6 +60,24 @@
   border: 1px solid var(--panel-edge);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.22);
   overflow: hidden;
+}
+
+/*
+ * Inbox on the left (a third), tasks on the right (the mock,
+ * docs/design/mock-work). The status strip runs under both.
+ */
+.work.has-mail { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+.work.has-mail .work-inbox { grid-row: 1; grid-column: 1; }
+.work.has-mail .work-tasks { grid-row: 1; grid-column: 2; }
+.work-status { grid-column: 1 / -1; }
+
+.work-tasks {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: calc(var(--u) * 12);
 }
 
 /* ── Summary strip ─────────────────────────────────────────────────────── */
@@ -472,8 +494,10 @@ textarea.task-input { min-height: calc(var(--u) * 58); }
 }
 
 .work-status span { white-space: nowrap; }
-.work-sync.tone-ok { color: var(--ink-soft); }
-.work-sync.tone-bad { color: var(--late); white-space: normal; }
+.work-sync.tone-ok,
+.mail-sync.tone-ok { color: var(--ink-soft); }
+.work-sync.tone-bad,
+.mail-sync.tone-bad { color: var(--late); white-space: normal; }
 
 /* ── The action row in Work mode (actions.css owns the row itself) ────── */
 
@@ -530,12 +554,287 @@ body:not([data-mode='work']) #work-new {
   background: linear-gradient(180deg, oklch(0.34 0.06 230), oklch(0.27 0.045 235));
 }
 
+/* ── Inbox ─────────────────────────────────────────────────────────────── */
+
+[data-account='muchbetter'] { --acct: oklch(0.68 0.13 252); }
+[data-account='gmail'] { --acct: oklch(0.68 0.17 25); }
+[data-account='pickleplay'] { --acct: oklch(0.75 0.15 150); }
+
+.work-inbox {
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--u) * 13) calc(var(--u) * 10) 0 calc(var(--u) * 14);
+}
+
+.inbox-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--u) * 10);
+  margin-right: calc(var(--u) * 4);
+  min-width: 0;
+}
+
+.inbox-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--u) * 9);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.inbox-title-k {
+  font-size: max(9px, calc(var(--u) * 11.5));
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: oklch(0.82 0.02 220);
+}
+
+.inbox-title-n,
+.inbox-order {
+  font-family: var(--mono);
+  font-size: max(8.5px, calc(var(--u) * 10.5));
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.inbox-order { flex: none; color: var(--ink-dim); }
+
+.inbox-chips {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--u) * 6);
+  margin: calc(var(--u) * 9) calc(var(--u) * 4) calc(var(--u) * 10) 0;
+  min-width: 0;
+}
+
+.inbox-chips[hidden] { display: none; }
+
+.inbox-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--u) * 6);
+  max-width: 100%;
+  min-width: 0;
+  padding: calc(var(--u) * 4) calc(var(--u) * 10);
+  border-radius: 999px;
+  border: 1px solid oklch(1 0 0 / 0.12);
+  background: oklch(1 0 0 / 0.03);
+  color: oklch(0.8 0.02 225);
+  font-family: inherit;
+  font-size: max(8.5px, calc(var(--u) * 10));
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.inbox-chip:hover { background: oklch(1 0 0 / 0.08); }
+.inbox-chip.is-on { background: oklch(1 0 0 / 0.13); border-color: oklch(1 0 0 / 0.24); color: var(--ink); }
+.inbox-chip-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inbox-chip-n { flex: none; font-family: var(--mono); font-weight: 600; }
+.inbox-chip.is-bad .inbox-chip-n { color: var(--late); }
+
+.inbox-dot {
+  flex: none;
+  width: calc(var(--u) * 8);
+  height: calc(var(--u) * 8);
+  min-width: 6px;
+  min-height: 6px;
+  border-radius: 50%;
+  background: var(--acct);
+}
+
+/* The list scrolls on its own, like a task column: the wheel, and drag on the background. */
+.inbox-list {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  padding: 0 calc(var(--u) * 4) calc(var(--u) * 30) 0;
+  cursor: grab;
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--u) * 30), transparent);
+}
+
+.inbox-list::-webkit-scrollbar { display: none; }
+.inbox-list.dragging { cursor: grabbing; }
+.inbox-list.dragging .mail { pointer-events: none; }
+
+.mail {
+  position: relative;
+  min-width: 0;
+  padding: calc(var(--u) * 9) calc(var(--u) * 12);
+  margin-bottom: calc(var(--u) * 6);
+  border-radius: 8px;
+  background: oklch(0.195 0.016 245);
+  border: 1px solid oklch(1 0 0 / 0.05);
+  cursor: pointer;
+  transition: background 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mail:hover { background: oklch(0.215 0.017 245); }
+.mail.is-open { cursor: default; background: oklch(0.23 0.018 245); border-color: oklch(1 0 0 / 0.16); }
+.mail[data-pending] { cursor: progress; }
+.mail.is-bulk:not(.is-unread):not(.is-open) { opacity: 0.78; }
+
+.mail.is-highlight {
+  border-color: oklch(0.78 0.14 195 / 0.9);
+  box-shadow: 0 0 0 2px oklch(0.78 0.14 195 / 0.35);
+  animation: task-flash 1.2s cubic-bezier(0.22, 1, 0.36, 1) 2;
+}
+
+.mail-top {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 7);
+  min-width: 0;
+}
+
+.mail-from {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: max(10px, calc(var(--u) * 13));
+  color: var(--ink-soft);
+}
+
+.mail-flag { flex: none; color: var(--wait); font-size: max(10px, calc(var(--u) * 12)); }
+
+.mail-time {
+  flex: none;
+  font-family: var(--mono);
+  font-size: max(8.5px, calc(var(--u) * 10.5));
+  color: var(--ink-dim);
+}
+
+.mail-subj {
+  margin-top: calc(var(--u) * 3);
+  font-size: max(10px, calc(var(--u) * 13));
+  line-height: 1.35;
+  color: oklch(0.86 0.012 225);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail.is-open .mail-subj { white-space: normal; overflow-wrap: anywhere; }
+
+.mail.is-unread .mail-from,
+.mail.is-unread .mail-subj { font-weight: 600; color: var(--ink); }
+
+.mail-snip {
+  margin-top: calc(var(--u) * 3);
+  font-size: max(9px, calc(var(--u) * 11));
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-open {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--u) * 8);
+  margin-top: calc(var(--u) * 9);
+  padding-top: calc(var(--u) * 9);
+  border-top: 1px solid oklch(1 0 0 / 0.07);
+  cursor: default;
+  min-width: 0;
+}
+
+.mail-addr {
+  font-family: var(--mono);
+  font-size: max(8.5px, calc(var(--u) * 10.5));
+  color: var(--ink-dim);
+  overflow-wrap: anywhere;
+}
+
+/* Plain text, as main made it. Its own scroll, so a long message never pushes the actions away. */
+.mail-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: max(10px, calc(var(--u) * 12.5));
+  line-height: 1.5;
+  color: var(--ink);
+  max-height: min(calc(var(--u) * 360), 42vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: calc(var(--u) * 4);
+  scrollbar-width: thin;
+  scrollbar-color: oklch(1 0 0 / 0.22) transparent;
+  user-select: text;
+  cursor: text;
+}
+
+.mail-body.tone-bad { color: var(--late); cursor: default; }
+.mail-body.is-loading { display: flex; flex-direction: column; gap: calc(var(--u) * 8); cursor: progress; }
+.mail-loading { font-size: max(9px, calc(var(--u) * 11)); color: var(--ink-soft); }
+
+.mail-att {
+  font-size: max(9px, calc(var(--u) * 11));
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.mail-acts { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 5); min-width: 0; }
+.mail-msg { margin-top: calc(var(--u) * 6); }
+
+.mail-skeleton { cursor: default; display: flex; flex-direction: column; gap: calc(var(--u) * 8); }
+
+.inbox-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: calc(var(--u) * 10);
+  padding: calc(var(--u) * 14) calc(var(--u) * 4);
+}
+
+.inbox-empty-title { font-size: max(11px, calc(var(--u) * 15)); font-weight: 600; }
+.inbox-empty-text { font-size: max(9.5px, calc(var(--u) * 12)); line-height: 1.5; color: var(--ink-soft); }
+
+/* Archive and Trash: 5 s to undo, at the foot of the panel. */
+.inbox-undo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 9);
+  margin: 0 calc(var(--u) * 4) calc(var(--u) * 10) 0;
+  padding: calc(var(--u) * 7) calc(var(--u) * 10);
+  border-radius: 8px;
+  background: oklch(0.23 0.02 245);
+  border: 1px solid oklch(1 0 0 / 0.14);
+  font-size: max(9.5px, calc(var(--u) * 11.5));
+  min-width: 0;
+}
+
+.inbox-undo[hidden] { display: none; }
+.inbox-undo-l { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.inbox-undo-l.tone-ok { color: var(--done); }
+.inbox-undo-l.tone-bad { color: var(--late); }
+
 @media (prefers-reduced-motion: reduce) {
   .sk-line,
   .work-stat-n.is-skeleton,
   .task-spin,
-  .task.is-highlight { animation: none; }
-  .task { transition: none; }
+  .task.is-highlight,
+  .mail.is-highlight { animation: none; }
+  .task,
+  .mail,
+  .inbox-chip { transition: none; }
 }
 
 /* Short screens: the strip tightens rather than the columns losing room. */

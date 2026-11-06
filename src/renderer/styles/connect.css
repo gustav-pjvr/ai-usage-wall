@@ -150,3 +150,61 @@ body {
 [hidden] {
   display: none !important;
 }
+
+/* ── Connect mail (mail-connect.ts): two blocks, Microsoft 365 and IMAP ── */
+
+.mc-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--edge);
+}
+
+.mc-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mc-title {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.mc-state {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.mc-state.is-ok { color: var(--good); }
+.mc-state.is-bad { color: var(--bad); }
+
+.mc-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mc-radio {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 0;
+}
+
+.mc-radio input { accent-color: var(--sig); }
+.mc-radio-l { display: flex; flex-wrap: wrap; column-gap: 8px; min-width: 0; }
+.mc-addr { color: var(--fg-dim); font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.mc-help { font-size: 12px; }
+.mc-block .btn { padding: 7px 14px; }
+.mc-block .token { padding: 8px 11px; }

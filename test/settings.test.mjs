@@ -154,6 +154,13 @@ ok('stats build: a settings file from the full build loads as stats and keeps th
 const fullLoaded = await loadSettings();
 ok('full build: the same file loads as work', fullLoaded.mode === 'work' && fullLoaded.notes === 'kept');
 
+console.log('\nsettings: mail VIPs (Work mode, full build)');
+ok('full build: the VIP list defaults to Jaco\'s known address', same(DEFAULT_SETTINGS.mailVip, ['jacojvr@gmail.com']));
+ok('full build: plain addresses only, trimmed and lower-cased, no repeats',
+   same(normaliseSettings({ mailVip: [' Jaco@Example.com ', 'jaco@example.com', 'not an address', 42, '<x@y.z>'] }).mailVip, ['jaco@example.com']));
+ok('full build: an empty list stays empty (Gustav can turn VIPs off)', same(normaliseSettings({ mailVip: [] }).mailVip, []));
+ok('stats build: no VIP list at all, whatever the file says', same(stats.DEFAULT_SETTINGS.mailVip, []) && same(stats.normaliseSettings({ mailVip: ['a@b.co'] }).mailVip, []));
+
 console.log('\nsettings: round trip');
 const once = normaliseSettings({ mode: 'stats', opacity: 0.5, notes: 'hi', monitors: [2] });
 ok('normalising twice changes nothing', same(normaliseSettings(once), once));

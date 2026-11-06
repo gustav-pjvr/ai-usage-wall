@@ -15,9 +15,10 @@ activity, all read from files on this machine. It has a Simple view (one card
 each for Claude and Codex) and a Detailed view (every panel, the default), and a
 switch that hides Codex. It is the only view in the shareable stats edition.
 
-**Work** (full build only) is the monday Tasks board on the wall: four scrolling
-columns, a summary strip, actions that write back to monday, and notices. See
-[Work mode](#work-mode).
+**Work** (full build only) is the inbox and the monday Tasks board on the wall:
+mail from Microsoft 365, Gmail and GoDaddy on the left, four scrolling task
+columns and a summary strip on the right, actions that write back to the mail
+servers and to monday, and notices. See [Work mode](#work-mode).
 
 ---
 
@@ -79,6 +80,7 @@ so deleting the file is safe.
 | `monitors` | `[]` | Empty means all displays |
 | `mode` | `"stats"` | `stats` or, in the full build, `work`. The stats build always loads `stats`; the old `clients` loads as `stats` |
 | `workFilter` | `"mine"` | Full build: Work mode's Mine (Owner includes Gustav) or `everyone` |
+| `mailVip` | `["jacojvr@gmail.com"]` | Full build: senders whose new mail notifies in quiet hours too. Plain addresses; `[]` turns VIPs off. The stats build has none |
 | `debug` | `false` | Diagnostics overlay |
 | `askModel` | `"gemini-3.8-flash-medium"` | Full build: the Gemini model Ask Gemini uses, chosen in the tray |
 
@@ -130,8 +132,23 @@ the panel says when it has run out. Details, and what was and was not proven:
 
 ## Work mode
 
-Full build only. The monday Tasks board, switched to from the top control, with
-`Tab` or from the tray (**View**). Connect it once from the tray
+Full build only. The inbox (left, about a third of the width) and the monday
+Tasks board (right), switched to from the top control, with `Tab` or from the
+tray (**View**).
+
+**Mail** (phase 2). Connect it from the tray (**Connect mail...**): Microsoft 365
+(gustav@muchbetter.world) signs in through the browser; Gmail
+(gustavpjvr@gmail.com) takes an app password and GoDaddy
+(gustav@pickleplaysouthafrica.org) its mailbox password, each checked with a
+real sign-in before it is stored encrypted on this PC. The panel shows every
+account newest first, with chips that filter by account and count unread.
+Click a message to read it as plain text (no HTML, no remote images, links as
+text) and to mark it read or unread, flag it, archive it, move it to Trash
+(both with 5 seconds to undo, never a permanent delete), make a monday task of
+it, or open it in Outlook, Gmail or GoDaddy webmail. Nothing is sent from the
+wall; replying is phase 4.
+
+**Tasks.** Connect it once from the tray
 (**Connect monday...**) with your monday personal API token (avatar,
 Developers, My access tokens); it is checked with monday, stored encrypted on
 this PC, and never shown again. **Disconnect monday** deletes it.
@@ -147,10 +164,12 @@ monday's daily cap.
 
 Notices come through the toast with Show, Done and Later: Jaco assigning a task,
 Jaco moving or commenting on one of Gustav's, a task leaving Waiting, and one
-morning summary at 08:00. Quiet hours are 18:00 to 07:30 and weekends (only
-Jaco's assignments get through), none in focus mode, never for Gustav's own
-changes, never twice. Work data stays on this PC and is never projected. Mail
-is phase 2. Details: [docs/work-mode.md](docs/work-mode.md).
+morning summary at 08:00. New mail from a person shows the sender and the
+subject, with Show, Mark read and Later; newsletters and automated mail never
+notify. Quiet hours are 18:00 to 07:30 and weekends (only Jaco's assignments
+and VIP mail get through), none in focus mode, never for Gustav's own changes,
+never twice. Work data stays on this PC and is never projected. Details:
+[docs/work-mode.md](docs/work-mode.md).
 
 ## Projection
 

@@ -15,8 +15,8 @@ reversed; these are the depth behind it.
 | [notes-bar.md](notes-bar.md) | The one line note across the top, why it locks, and why it stays on this machine |
 | [ask-gemini.md](ask-gemini.md) | Ask Gemini (full build): the question panel, the Antigravity CLI backend, its lock-down, and exactly what is sent to Google |
 | [design/gemini-ask.md](design/gemini-ask.md) | The design it was built from, and why the Gemini CLI was dropped for the Antigravity CLI |
-| [work-mode.md](work-mode.md) | Work mode (full build): the monday Tasks board, connecting monday, actions, notices, what is stored where |
-| [design/work-mode.md](design/work-mode.md) | The design it was built from (phase 1 of 4 built), with Gustav's decisions |
+| [work-mode.md](work-mode.md) | Work mode (full build): the inbox (Microsoft 365, Gmail, GoDaddy) and the monday Tasks board, connecting each, actions, notices, what is stored where |
+| [design/work-mode.md](design/work-mode.md) | The design it was built from (phases 1 to 3 built; reply and send, phase 4, not), with Gustav's decisions |
 | [constellation.md](constellation.md) | The project sky in the top panel: what size, brightness and a link mean, and how it stays cheap |
 | [milestones.md](milestones.md) | The badge and the list: what counts, why the first run is silent, and why there is no duration record |
 | [work-timelapse.md](work-timelapse.md) | The time-lapse of today or any day: three lines, what they measure, which days can be replayed, and why it always ends |

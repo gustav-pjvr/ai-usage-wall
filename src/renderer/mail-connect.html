@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      The Connect monday dialog's policy. connect-src 'none' above all: a mail
+      password is typed here, and this window must not be able to send it
+      anywhere but to the main process, which checks it with a real sign-in.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'"
+    />
+    <title>Connect mail</title>
+    <link rel="stylesheet" href="styles/connect.css" />
+  </head>
+  <body>
+    <main id="connect">
+      <!-- Filled from mail-connect.ts. Never innerHTML. -->
+    </main>
+    <script src="mail-connect.js"></script>
+  </body>
+</html>

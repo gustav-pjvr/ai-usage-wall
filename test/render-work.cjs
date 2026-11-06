@@ -10,6 +10,10 @@
  *   - Text boxes borrow keyboard focus and say so when they cannot.
  *   - Monday text stays text. Wheel and drag scroll a column.
  *   - The Connect dialog and the toast's work notice fit and behave.
+ *   - The inbox (phase 2): a third of the width beside the task columns at
+ *     every size with 200 rows and long subjects; mail stays text; every
+ *     action pending, then the answer; undo; Make a task; the Connect mail
+ *     dialog; the toast's mail notice with Mark read.
  *
  * Nothing here talks to monday: the main process is these handlers.
  */
@@ -28,6 +32,32 @@ const LONG = 'Second round of homepage copy changes for the lodge booking site, 
 const UNBROKEN = 'Unbroken_' + 'x'.repeat(150);
 const XSS = '<img src=x onerror="window.__pwned=1"> stays text';
 const FAKE_TOKEN = 'render-test-token-never-shown-0c41';
+const FAKE_PASSWORD = 'render-test-mail-password-never-shown-77e2';
+const LONG_SUBJECT = 'Re: Re: Fwd: the second round of homepage copy changes for the lodge booking site, with a subject long enough to run past any inbox width ';
+const MAIL_BODY = 'Hi Gustav,\n\nThanks for the draft. <img src=x onerror="window.__pwned=1"> stays text.\n\nPay here (https://pay.example/' + 'y'.repeat(180) + ')\n\n' + 'A long paragraph that wraps. '.repeat(60) + '\n\nRegards,\nAnna';
+const MAIL_ACCOUNT_LIST = [
+  { id: 'muchbetter', label: 'MuchBetter', colour: '#4f8fe8', unread: 6, provider: 'graph' },
+  { id: 'gmail', label: 'Gmail', colour: '#e8574f', unread: 5, provider: 'imap' },
+  { id: 'pickleplay', label: 'PicklePlay', colour: '#4fc27a', unread: 1, provider: 'imap' },
+];
+
+/** 200 rows across the three accounts: long and unbroken subjects, markup, flags, read and unread. */
+function mailFixture(now = Date.now()) {
+  const accounts = MAIL_ACCOUNT_LIST.map((a) => ({ ...a, status: 'ready', syncedAt: new Date(now - 20_000).toISOString() }));
+  const rows = Array.from({ length: 200 }, (_, i) => ({
+    account: MAIL_ACCOUNT_LIST[i % 3].id,
+    handle: `H${i}`,
+    fromName: i % 11 === 0 ? 'A sender with a remarkably long display name that cannot fit on one line' : `Sender ${i}`,
+    fromAddress: `sender${i}@example.com`,
+    subject: i === 4 ? XSS : i % 9 === 0 ? `${LONG_SUBJECT}${i}` : i % 13 === 0 ? `${UNBROKEN}${i}` : `Message number ${i}`,
+    snippet: i % 5 === 0 ? 'x'.repeat(300) : `First line of message ${i}`,
+    date: new Date(now - i * 17 * 60_000).toISOString(),
+    seen: i % 3 !== 0,
+    flagged: i % 7 === 0,
+    bulk: i % 10 === 9,
+  }));
+  return { known: true, accounts, rows };
+}
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -115,6 +145,65 @@ function harness() {
   ipcMain.handle('connect:close', () => {
     h.calls.close++;
   });
+  // Work mode's inbox (phase 2), as src/main/work/mail.ts answers.
+  h.mail = null;
+  h.mailFail = null;
+  h.mailCalls = { open: [], action: [], undo: [], task: [], web: [], connect: 0, submit: [], microsoft: 0, cancel: 0, close: 0 };
+  const mrow = (handle) => (h.mail?.rows ?? []).find((r) => r.handle === handle);
+  ipcMain.handle('mail:get', () => h.mail);
+  ipcMain.handle('mail:open', async (_e, handle) => {
+    h.mailCalls.open.push(handle);
+    await wait(h.delay);
+    return { ok: true, body: { handle, text: MAIL_BODY, attachments: [{ name: 'quote-v6.pdf', size: 20480 }] } };
+  });
+  ipcMain.handle('mail:action', async (_e, handle, kind) => {
+    h.mailCalls.action.push([handle, kind]);
+    await wait(h.delay);
+    if (h.mailFail) return { ok: false, message: h.mailFail };
+    if (kind === 'archive' || kind === 'trash') return { ok: true, undo: '0b6f7a1e-2c3d-4e5f-8a9b-0c1d2e3f4a5b' };
+    const r = mrow(handle);
+    return { ok: true, row: { ...r, seen: kind === 'read' ? true : kind === 'unread' ? false : r.seen, flagged: kind === 'flag' ? true : kind === 'unflag' ? false : r.flagged } };
+  });
+  ipcMain.handle('mail:undo', async (_e, token) => {
+    h.mailCalls.undo.push(token);
+    await wait(h.delay);
+    return { ok: true };
+  });
+  ipcMain.handle('mail:task', async (_e, handle) => {
+    h.mailCalls.task.push(handle);
+    await wait(h.delay);
+    return { ok: true, card: { id: '9998', name: mrow(handle).subject, group: 'group_mm86nn5y', status: 'Not started', priority: null, due: null, ownerIds: [G], assignedByIds: [G], project: null, updatedAt: new Date().toISOString() } };
+  });
+  ipcMain.handle('mail:web', (_e, handle) => {
+    h.mailCalls.web.push(handle);
+    return true;
+  });
+  ipcMain.handle('mail:connect', () => {
+    h.mailCalls.connect++;
+  });
+  ipcMain.handle('mailconnect:state', () => [
+    { id: 'muchbetter', label: 'MuchBetter', preset: 'm365', connected: false, refused: false },
+    { id: 'gmail', label: 'Gmail', preset: 'gmail', connected: true, refused: false },
+    { id: 'pickleplay', label: 'PicklePlay', preset: 'godaddy', connected: false, refused: false },
+  ]);
+  ipcMain.handle('mailconnect:submit', async (_e, preset, password) => {
+    h.mailCalls.submit.push([preset, password]);
+    await wait(h.delay);
+    return h.mailCalls.submit.length === 1
+      ? { ok: false, message: 'Gmail did not accept that app password. Make a new one in your Google account (2-Step Verification must be on) and paste it here.' }
+      : { ok: true, message: 'PicklePlay connected.' };
+  });
+  ipcMain.handle('mailconnect:microsoft', async () => {
+    h.mailCalls.microsoft++;
+    for (let i = 0; i < 40 && !h.mailCalls.cancel; i++) await wait(50);
+    return { ok: false, message: 'Sign-in cancelled.' };
+  });
+  ipcMain.handle('mailconnect:cancel', () => {
+    h.mailCalls.cancel++;
+  });
+  ipcMain.handle('mailconnect:close', () => {
+    h.mailCalls.close++;
+  });
   return h;
 }
 
@@ -168,16 +257,52 @@ const PROBE = `(() => {
       if (nm && nm.scrollWidth > nm.clientWidth + 1) f.push(name + ' card ' + t.dataset.id + ': the name is ' + (nm.scrollWidth - nm.clientWidth) + 'px wider than its box');
     }
   }
+  // The inbox: about a third of the width, left of the task columns, scrolling on its own.
+  const inbox = work.querySelector('.work-inbox');
+  let inboxScrolls = null, mails = 0;
+  if (!inbox) f.push('no inbox panel');
+  else {
+    const ir = r(inbox), tr = r(work.querySelector('.work-tasks'));
+    out(ir, win, 'inbox');
+    if (ir.right > tr.left + 0.5) f.push('the inbox overlaps the task columns');
+    const share = ir.width / (ir.width + tr.width);
+    if (share < 0.28 || share > 0.38) f.push('the inbox is ' + Math.round(share * 100) + '% of the width, not about a third');
+    if (inbox.scrollWidth > inbox.clientWidth + 1 || inbox.scrollHeight > inbox.clientHeight + 1) f.push('the inbox overflows its panel');
+    out(r(inbox.querySelector('.inbox-head')), ir, 'inbox head');
+    for (const c of inbox.querySelectorAll('.inbox-chip')) out(r(c), ir, 'chip ' + c.textContent);
+    const list = inbox.querySelector('.inbox-list');
+    if (list.scrollWidth > list.clientWidth + 1) f.push('the inbox list scrolls sideways');
+    if (list.clientHeight < 100) f.push('the inbox list has only ' + list.clientHeight + 'px');
+    inboxScrolls = list.scrollHeight > list.clientHeight + 10;
+    mails = list.querySelectorAll('.mail:not(.mail-skeleton)').length;
+    const lr = r(list);
+    for (const m of [...list.querySelectorAll('.mail')].slice(0, 14)) {
+      const mr = r(m);
+      if (mr.left < lr.left - 0.5 || mr.right > lr.right + 0.5) f.push('mail ' + m.dataset.handle + ' is wider than the inbox');
+      const cs = getComputedStyle(m);
+      const inner = { left: mr.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), right: mr.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) };
+      for (const k of m.querySelectorAll('*')) {
+        const kr = r(k);
+        if (kr.width === 0) continue;
+        if (kr.left < inner.left - 0.5 || kr.right > inner.right + 0.5) { f.push('mail ' + m.dataset.handle + ': ' + k.className + ' escapes the row (' + Math.round(kr.right) + ' > ' + Math.round(inner.right) + ')'); break; }
+      }
+      for (const sel of ['.mail-body', '.mail-acts', '.mail-att', '.mail-addr']) {
+        const b = m.querySelector(sel);
+        if (b && b.scrollWidth > b.clientWidth + 1) f.push('mail ' + m.dataset.handle + ' ' + sel + ' scrolls sideways');
+      }
+    }
+  }
   const status = work.querySelector('.work-status');
   out(r(status), win, 'status strip');
   if (status.scrollWidth > status.clientWidth + 1) f.push('status strip overflows sideways');
-  return { f, W, H, scrolls, cards: [...work.querySelectorAll('.task:not(.task-skeleton)')].length };
+  return { f, W, H, scrolls, inboxScrolls, mails, cards: [...work.querySelectorAll('.task:not(.task-skeleton)')].length };
 })()`;
 
 module.exports = async function workChecks({ ok, SIZES, RENDERER, PRELOAD, saved, setState, h }) {
   console.log('\nWork mode\n');
   setState({ mode: 'work', work: true });
   h.payload = fixture();
+  h.mail = mailFixture();
   const win = new BrowserWindow({
     width: 1920, height: 1080, useContentSize: true, show: true, frame: false, focusable: false, type: 'toolbar', opacity: 0.02, skipTaskbar: true,
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
@@ -194,9 +319,9 @@ module.exports = async function workChecks({ ok, SIZES, RENDERER, PRELOAD, saved
   /** Scroll the element's column so it is on screen, as a person would before clicking it. */
   const reveal = (sel) => js(`(() => {
     const e = document.querySelector(${JSON.stringify(sel)});
-    const l = e && e.closest('.work-list');
+    const l = e && e.closest('.work-list, .inbox-list');
     if (!l) return;
-    const t = e.closest('.task') || e;
+    const t = e.closest('.task, .mail') || e;
     const er = e.getBoundingClientRect(), lr = l.getBoundingClientRect();
     if (er.top < lr.top || er.bottom > lr.bottom) l.scrollTop = Math.max(0, t.offsetTop - 12);
   })()`);
@@ -227,6 +352,8 @@ module.exports = async function workChecks({ ok, SIZES, RENDERER, PRELOAD, saved
 
   // Open one card in the narrowest content (Done), so its controls are measured at every size too.
   await click('#view-work [data-col="done"] .task');
+  // And the first mail, so an open message (its body, attachments and actions) is measured at every size too.
+  await click('#view-work .mail[data-handle="H0"]', h.delay + 250);
   for (const size of SIZES) {
     win.setContentSize(size.w, size.h);
     await wait(650);
@@ -236,8 +363,8 @@ module.exports = async function workChecks({ ok, SIZES, RENDERER, PRELOAD, saved
       ok(`${size.label}   Work view`, false, g.fatal);
       continue;
     }
-    ok(`${size.label}   Work view ${g.W}x${g.H}: nothing escapes the window, a column or a card; all four columns scroll (${g.cards} cards)`,
-      g.W === size.w && g.f.length === 0 && g.scrolls.every(Boolean) && g.cards >= 120, g.f.slice(0, 6).join('; ') || JSON.stringify(g.scrolls));
+    ok(`${size.label}   Work view ${g.W}x${g.H}: nothing escapes the window, a column, a card or the inbox; all four columns and the inbox scroll (${g.cards} cards, ${g.mails} mails)`,
+      g.W === size.w && g.f.length === 0 && g.scrolls.every(Boolean) && g.cards >= 120 && g.inboxScrolls === true && g.mails === 200, g.f.slice(0, 6).join('; ') || JSON.stringify({ scrolls: g.scrolls, inbox: g.inboxScrolls, mails: g.mails }));
   }
   win.setContentSize(1920, 1080);
   await wait(650);
@@ -249,6 +376,118 @@ module.exports = async function workChecks({ ok, SIZES, RENDERER, PRELOAD, saved
     token: document.body.innerText.includes(${JSON.stringify(FAKE_TOKEN)}),
   }))()`);
   ok('monday text is text: markup in a task name stays literal, no element and no script', !text.pwned && text.imgs === 0 && text.literal, JSON.stringify(text));
+
+  // ── The inbox (phase 2) ───────────────────────────────────────────────────
+  const mtext = await js(`(() => {
+    const ib = document.querySelector('#view-work .work-inbox');
+    const unread = ib.querySelector('.mail.is-unread:not(.is-open) .mail-subj');
+    const read = ib.querySelector('.mail:not(.is-unread):not(.is-open) .mail-subj');
+    return {
+      pwned: !!window.__pwned, imgs: ib.querySelectorAll('img').length, anchors: ib.querySelectorAll('a').length,
+      literal: [...ib.querySelectorAll('.mail-subj')].some((e) => e.textContent === ${JSON.stringify(XSS)}),
+      body: (ib.querySelector('.mail.is-open .mail-body') || {}).textContent || '',
+      att: (ib.querySelector('.mail.is-open .mail-att') || {}).textContent || '',
+      unreadW: Number(getComputedStyle(unread).fontWeight), readW: Number(getComputedStyle(read).fontWeight),
+      flags: ib.querySelectorAll('.mail .mail-flag').length,
+      first: ib.querySelector('.mail').dataset.handle,
+    };
+  })()`);
+  ok('mail is text: markup in a subject or a body stays literal; no element, no link, no remote image in the inbox',
+    !mtext.pwned && mtext.imgs === 0 && mtext.anchors === 0 && mtext.literal && mtext.body === MAIL_BODY, JSON.stringify({ ...mtext, body: mtext.body.slice(0, 60) }));
+  ok('newest first; unread rows bold, read rows not; flagged rows carry the flag; attachments listed by name',
+    mtext.first === 'H0' && mtext.unreadW >= 600 && mtext.readW < 600 && mtext.flags > 0 && mtext.att === 'Attachments: quote-v6.pdf (20 KB)', JSON.stringify(mtext));
+  const chipText = () => js(`[...document.querySelectorAll('#view-work .inbox-chip')].map((c) => c.textContent + (c.classList.contains('is-on') ? '*' : ''))`);
+  ok('account chips: All mail and one per account, each with its unread count', JSON.stringify(await chipText()) === JSON.stringify(['All mail12*', 'MuchBetter6', 'Gmail5', 'PicklePlay1']), JSON.stringify(await chipText()));
+  await click('#view-work .inbox-chip[data-account="gmail"]');
+  const onlyGmail = await js(`[...document.querySelectorAll('#view-work .work-inbox .mail')].map((m) => m.dataset.account)`);
+  ok('a chip filters the inbox to that account', onlyGmail.length === h.mail.rows.filter((r) => r.account === 'gmail').length && onlyGmail.every((a) => a === 'gmail'), String(onlyGmail.length));
+  await click('#view-work .inbox-chip:not([data-account])');
+
+  // Open a message: a loading state first, then its text.
+  await click('#view-work .mail[data-handle="H3"]', 120);
+  const loadingMail = await js(`(() => { const b = document.querySelector('#view-work .mail[data-handle="H3"] .mail-body'); return b ? { busy: b.getAttribute('aria-busy'), words: (b.querySelector('.mail-loading') || {}).textContent, lines: b.querySelectorAll('.sk-line').length } : null; })()`);
+  ok('opening a message shows a loading state the shape of the text, then the body', !!loadingMail && loadingMail.busy === 'true' && loadingMail.words === 'Loading the message...' && loadingMail.lines === 3, JSON.stringify(loadingMail));
+  await wait(h.delay + 200);
+  ok('the body was asked for on open, by its handle only', h.mailCalls.open.at(-1) === 'H3', JSON.stringify(h.mailCalls.open));
+
+  const mailBtn = async (handle, label) => js(`(() => { const b = [...document.querySelectorAll('#view-work .mail[data-handle="${handle}"] .mail-acts .wbtn')].find((x) => x.textContent === ${JSON.stringify(label)}); if (!b) return null; b.dataset.probe = 'm-' + ${JSON.stringify(label.replace(/\W/g, ''))}; return true; })()`);
+  const mailMsg = (handle) => js(`(() => { const m = document.querySelector('#view-work .mail[data-handle="${handle}"]'); if (!m) return null; const x = m.querySelector('.mail-msg'); return { pending: m.hasAttribute('data-pending'), busy: m.getAttribute('aria-busy'), msg: x ? x.textContent : '', tone: x ? x.className : '', spin: !!m.querySelector('.task-spin'), disabled: [...m.querySelectorAll('.mail-acts .wbtn')].every((b) => b.disabled), unread: m.classList.contains('is-unread'), flagged: !!m.querySelector('.mail-flag') }; })()`);
+
+  // Mark read: pending, then the server's read-back.
+  ok('H3 starts unread', (await mailMsg('H3')).unread);
+  await mailBtn('H3', 'Mark read');
+  await click('[data-probe="m-Markread"]', 120);
+  const readPending = await mailMsg('H3');
+  ok('Mark read shows its pending state: aria-busy, a spinner, "Marking read...", every button disabled',
+    readPending.pending && readPending.busy === 'true' && readPending.msg === 'Marking read...' && readPending.spin && readPending.disabled, JSON.stringify(readPending));
+  await wait(h.delay + 250);
+  const readDone = await mailMsg('H3');
+  ok('then the read-back: "Marked read", no longer bold', !readDone.pending && readDone.msg === 'Marked read' && /tone-ok/.test(readDone.tone) && !readDone.unread, JSON.stringify(readDone));
+
+  // A failure: the row stays as it was and says why.
+  h.mailFail = 'The server did not confirm the change. It may not have been made.';
+  await mailBtn('H3', 'Flag');
+  await click('[data-probe="m-Flag"]', h.delay + 250);
+  const flagBad = await mailMsg('H3');
+  ok('a failed Flag leaves the row unflagged and says so in plain words', /^Not changed: The server did not confirm/.test(flagBad.msg) && /tone-bad/.test(flagBad.tone) && !flagBad.flagged, JSON.stringify(flagBad));
+  h.mailFail = null;
+
+  // Trash: pending, gone, and 5 s to undo.
+  await mailBtn('H3', 'Trash');
+  await click('[data-probe="m-Trash"]', 120);
+  const trashPending = await mailMsg('H3');
+  ok('Trash shows "Moving to Trash..." while the server works', !!trashPending && trashPending.msg === 'Moving to Trash...' && trashPending.disabled, JSON.stringify(trashPending));
+  await wait(h.delay + 250);
+  const undoBar = () => js(`(() => { const u = document.querySelector('#view-work .inbox-undo'); return { shown: !u.hidden && u.getBoundingClientRect().height > 0, text: u.textContent, busy: u.getAttribute('aria-busy'), inside: u.getBoundingClientRect().right <= document.querySelector('#view-work .work-inbox').getBoundingClientRect().right + 0.5 }; })()`);
+  const trashed = await undoBar();
+  ok('the row leaves the inbox and the undo bar offers 5 seconds', !(await mailMsg('H3')) && trashed.shown && trashed.inside && /^Moved to Trash\.Undo \([45]\)$/.test(trashed.text), JSON.stringify(trashed));
+  await click('#view-work .inbox-undo .wbtn', 120);
+  const undoing = await undoBar();
+  ok('Undo shows "Undoing..." with aria-busy', undoing.text === 'Undoing...' && undoing.busy === 'true', JSON.stringify(undoing));
+  await wait(h.delay + 250);
+  const undone = await undoBar();
+  ok('then "Back in the inbox." once the server has moved it back', undone.text === 'Back in the inbox.' && h.mailCalls.undo.at(-1) === '0b6f7a1e-2c3d-4e5f-8a9b-0c1d2e3f4a5b', JSON.stringify(undone));
+
+  // Make a task: pending, then the new card on the board.
+  await click('#view-work .mail[data-handle="H2"]', h.delay + 250);
+  await mailBtn('H2', 'Make a task');
+  await click('[data-probe="m-Makeatask"]', 120);
+  ok('Make a task shows "Making a task..."', (await mailMsg('H2')).msg === 'Making a task...', JSON.stringify(await mailMsg('H2')));
+  await wait(h.delay + 300);
+  const made = await js(`(() => { const t = document.querySelector('#view-work .task[data-id="9998"]'); return { msg: (document.querySelector('#view-work .mail[data-handle="H2"] .mail-msg') || {}).textContent, col: t && t.closest('.work-col').dataset.col, name: t && t.querySelector('.task-name').textContent }; })()`);
+  ok('then "Task made in Backlog", and the task is on the board named after the subject', made.msg === 'Task made in Backlog' && made.col === 'backlog' && made.name === 'Message number 2' && h.mailCalls.task.at(-1) === 'H2', JSON.stringify(made));
+
+  // Open in the account's web mail, by handle only.
+  const webLabel = await js(`[...document.querySelectorAll('#view-work .mail[data-handle="H2"] .mail-acts .wbtn')].map((b) => b.textContent).filter((t) => t.startsWith('Open in'))`);
+  await mailBtn('H2', 'Open in webmail');
+  await click('[data-probe="m-Openinwebmail"]');
+  ok('Open in webmail (PicklePlay) asks main to open that message by handle', JSON.stringify(webLabel) === '["Open in webmail"]' && h.mailCalls.web.at(-1) === 'H2', JSON.stringify({ webLabel, web: h.mailCalls.web }));
+
+  // Show on a notice: the message far down the list opens and scrolls into view.
+  win.webContents.send('mail:highlight', 'H150');
+  await wait(h.delay + 300);
+  const mhl = await js(`(() => { const m = document.querySelector('#view-work .mail[data-handle="H150"]'); if (!m) return null; const l = m.closest('.inbox-list').getBoundingClientRect(), r = m.getBoundingClientRect(); return { hl: m.classList.contains('is-highlight'), open: m.classList.contains('is-open'), visible: r.top >= l.top - 1 && r.top <= l.bottom - 20, body: !!m.querySelector('.mail-body:not(.is-loading)') }; })()`);
+  ok("a mail notice's Show opens that message, highlighted, scrolled into view", !!mhl && mhl.hl && mhl.open && mhl.visible && mhl.body, JSON.stringify(mhl));
+
+  // The status strip has a line per account.
+  const mailSync = await js(`[...document.querySelectorAll('#view-work .work-status .mail-sync')].map((s) => s.textContent)`);
+  ok('the status strip says when each mail account last synced', mailSync.length === 3 && mailSync.every((t) => /^(MuchBetter|Gmail|PicklePlay) synced \d+s ago$/.test(t)), JSON.stringify(mailSync));
+
+  // Wheel scrolls the inbox.
+  const ip = await js(`(() => { const l = document.querySelector('#view-work .inbox-list'); l.scrollTop = 0; const r = l.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+  win.webContents.sendInputEvent({ type: 'mouseWheel', x: ip.x, y: ip.y, deltaX: 0, deltaY: -240 });
+  await wait(500);
+  ok('the wheel scrolls the inbox', (await js(`document.querySelector('#view-work .inbox-list').scrollTop`)) > 0);
+
+  // No accounts yet: an explanation and Connect mail, inside the panel.
+  win.webContents.send('mail:update', { known: true, accounts: [], rows: [] });
+  await wait(250);
+  const mempty = await js(`(() => { const e = document.querySelector('#view-work .inbox-empty'); if (!e) return null; const r = e.getBoundingClientRect(), p = document.querySelector('#view-work .work-inbox').getBoundingClientRect(); return { inside: r.left >= p.left && r.right <= p.right + 0.5, btn: e.querySelector('button').textContent, chips: document.querySelector('#view-work .inbox-chips').hidden }; })()`);
+  ok('no mail account: the panel explains and offers Connect mail', !!mempty && mempty.inside && mempty.btn === 'Connect mail' && mempty.chips, JSON.stringify(mempty));
+  await click('#view-work .inbox-empty button');
+  ok('Connect mail asks main to open the dialog', h.mailCalls.connect === 1, String(h.mailCalls.connect));
+  win.webContents.send('mail:update', h.mail);
+  await wait(250);
 
   // Mine and Everyone.
   const counts = async () => js(`(() => ({
@@ -497,6 +736,75 @@ module.exports.toastChecks = async function toastChecks({ ok, ROOT, PRELOAD, h }
   win.webContents.send('toast:workEnd');
   await wait(100);
   ok('the notice goes when main ends it', await js(`document.querySelector('.work').hidden`));
+
+  // A mail notice: the sender and the subject (Gustav's choice), and Mark read instead of Done.
+  win.webContents.send('toast:work', { id: 8, label: 'Gmail · new mail', from: 'Anna Client', title: `${LONG_SUBJECT}${LONG_SUBJECT}<img src=x onerror="window.__pwned=1">`, count: 1, canDone: true, doneLabel: 'Mark read' });
+  await wait(200);
+  const mshown = await js(`(() => {
+    const b = document.querySelector('.work');
+    const r = b.getBoundingClientRect();
+    const escapes = [...b.querySelectorAll('*')].filter((e) => { const x = e.getBoundingClientRect(); return x.width > 0 && (x.right > r.right + 0.5 || x.bottom > r.bottom + 0.5); }).map((e) => e.className);
+    return { fits: b.scrollHeight <= b.clientHeight + 1 && r.bottom <= innerHeight + 0.5, escapes, from: b.querySelector('.work-from').textContent, imgs: b.querySelectorAll('img').length, pwned: !!window.__pwned,
+      buttons: [...b.querySelectorAll('button')].filter((x) => !x.hidden).map((x) => x.textContent) };
+  })()`);
+  ok('a mail notice shows the sender, the subject as text, and Show / Mark read / Later, inside 340 x 150',
+    mshown.fits && mshown.escapes.length === 0 && mshown.from === 'Anna Client' && mshown.imgs === 0 && !mshown.pwned && JSON.stringify(mshown.buttons) === JSON.stringify(['Show', 'Mark read', 'Later']), JSON.stringify(mshown));
+  await js(`[...document.querySelectorAll('.work button')].find((b) => b.textContent === 'Mark read').click()`);
+  await wait(120);
+  const mpending = await js(`[...document.querySelectorAll('.work button')].map((b) => b.textContent + (b.disabled ? '(off)' : '')).join(',')`);
+  ok('Mark read shows "Marking read..." with every button disabled', mpending === 'Show(off),Marking read...(off),Later(off)', mpending);
+  await wait(h.delay + 200);
+  const mdone = await js(`(() => ({ msg: document.querySelector('.work-msg').textContent, ok: document.querySelector('.work-msg').classList.contains('is-ok') }))()`);
+  ok('then "Marked read"', mdone.msg === 'Marked read' && mdone.ok && JSON.stringify(h.calls.toast.at(-1)) === JSON.stringify([8, 'done']), JSON.stringify(mdone));
+  win.webContents.send('toast:workEnd');
+  win.destroy();
+};
+
+/** The Connect mail dialog: fits, password hidden and cleared, pending states, the browser sign-in waits and cancels. */
+module.exports.mailConnectChecks = async function mailConnectChecks({ ok, ROOT, PRELOAD, h }) {
+  console.log('\nConnect mail dialog\n');
+  // The real window is 480 x 740 outside; about 464 x 701 inside on Windows.
+  const win = new BrowserWindow({
+    width: 464, height: 701, useContentSize: true, show: true, frame: false, opacity: 0.02, skipTaskbar: true,
+    webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+  });
+  await win.loadFile(path.join(ROOT, 'dist', 'renderer', 'mail-connect.html'));
+  await wait(500);
+  const js = (code) => win.webContents.executeJavaScript(code);
+  const fit = await js(`(() => {
+    const m = document.querySelector('#connect');
+    const wide = [...m.querySelectorAll('*')].filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.right > innerWidth + 0.5; }).map((e) => e.className);
+    const i = document.querySelector('#password');
+    return { scrollW: document.documentElement.scrollWidth <= innerWidth, tall: m.scrollHeight <= m.clientHeight + 1, sh: m.scrollHeight, ch: m.clientHeight, wide, type: i.type, auto: i.autocomplete,
+      title: document.querySelector('.title').textContent, radios: document.querySelectorAll('input[type=radio]').length,
+      ms: document.querySelector('.mc-block .btn-pri').textContent, states: [...document.querySelectorAll('.mc-state')].map((s) => s.textContent), field: document.querySelector('label.sub').textContent };
+  })()`);
+  ok('the dialog fits its window with no scrolling: Microsoft sign-in, Gmail or PicklePlay, a hidden password field',
+    fit.scrollW && fit.tall && fit.wide.length === 0 && fit.type === 'password' && fit.auto === 'off' && fit.title === 'Connect mail' && fit.radios === 2 && fit.ms === 'Sign in with Microsoft' && fit.field === 'App password' &&
+    JSON.stringify(fit.states) === JSON.stringify(['Not connected', 'Gmail: Connected']), JSON.stringify(fit));
+  const submit = () => js(`(() => { document.querySelector('#password').value = ${JSON.stringify(FAKE_PASSWORD)}; document.querySelector('form button[type=submit]').click(); })()`);
+  await submit();
+  await wait(120);
+  const pending = await js(`(() => ({ value: document.querySelector('#password').value, busy: document.querySelector('.connect-form').getAttribute('aria-busy'), btn: document.querySelector('form button[type=submit]').textContent, disabled: document.querySelector('form button[type=submit]').disabled, text: document.body.innerText.includes(${JSON.stringify(FAKE_PASSWORD)}) }))()`);
+  ok('Connect clears the field at once and shows "Signing in to Gmail..."', pending.value === '' && pending.busy === 'true' && pending.btn === 'Signing in to Gmail...' && pending.disabled && !pending.text, JSON.stringify(pending));
+  await wait(h.delay + 250);
+  const refused = await js(`(() => ({ status: document.querySelector('.status').textContent, bad: document.querySelector('.status').classList.contains('is-bad'), text: document.body.innerText.includes(${JSON.stringify(FAKE_PASSWORD)}) }))()`);
+  ok('a refused app password says what to do, and the password is nowhere in the page', /did not accept that app password/.test(refused.status) && refused.bad && !refused.text && JSON.stringify(h.mailCalls.submit[0]) === JSON.stringify(['gmail', FAKE_PASSWORD]), JSON.stringify(refused));
+  await js(`document.querySelector('input[type=radio][value=godaddy]').click()`);
+  await wait(100);
+  ok('choosing PicklePlay asks for the mailbox password', (await js(`document.querySelector('label.sub').textContent`)) === 'Mailbox password');
+  await submit();
+  await wait(h.delay + 250);
+  const okd = await js(`(() => ({ status: document.querySelector('.status').textContent, good: document.querySelector('.status').classList.contains('is-ok') }))()`);
+  ok('a good password: "PicklePlay connected."', /^PicklePlay connected\./.test(okd.status) && okd.good && h.mailCalls.submit[1][0] === 'godaddy', JSON.stringify(okd));
+  await js(`document.querySelector('.mc-block .btn-pri').click()`);
+  await wait(150);
+  const waiting = await js(`(() => ({ btn: document.querySelector('.mc-block .btn-pri').textContent, disabled: document.querySelector('.mc-block .btn-pri').disabled, cancel: !document.querySelectorAll('.mc-block .btn')[1].hidden, status: document.querySelector('.status').textContent }))()`);
+  ok('Sign in with Microsoft waits for the browser, says so, and offers Cancel', waiting.btn === 'Waiting for the browser sign-in...' && waiting.disabled && waiting.cancel && /opened in your browser/.test(waiting.status), JSON.stringify(waiting));
+  await js(`document.querySelectorAll('.mc-block .btn')[1].click()`);
+  await wait(300);
+  const cancelled = await js(`(() => ({ btn: document.querySelector('.mc-block .btn-pri').textContent, status: document.querySelector('.status').textContent }))()`);
+  ok('Cancel stops the wait and says so', h.mailCalls.cancel === 1 && cancelled.btn === 'Sign in with Microsoft' && cancelled.status === 'Sign-in cancelled.', JSON.stringify(cancelled));
   win.destroy();
 };
 

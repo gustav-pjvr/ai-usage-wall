@@ -24,11 +24,20 @@ import { fileURLToPath } from 'node:url';
 import { runInThisContext } from 'node:vm';
 import * as esbuild from 'esbuild';
 import ts from 'typescript';
+import { graphMessage, imapMessage, imapServer, microsoft } from './fixtures/mail-fakes.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mbw-work-'));
 const require = createRequire(import.meta.url);
 const TOKEN = 'planted-monday-token-MUST-NOT-LEAK-7f3a';
+// Mail (phase 2): a planted IMAP password and planted Microsoft tokens, searched for like the monday token.
+const PASSWORD = 'planted-imap-app-password-MUST-NOT-LEAK-c2d9';
+const ACCESS = 'planted-graph-access-token-MUST-NOT-LEAK-5e1b';
+const REFRESH = 'planted-graph-refresh-token-MUST-NOT-LEAK-8a40';
+const MS_CODE = 'planted.graph-code_MUST-NOT-LEAK';
+const MAIL_SECRETS = [PASSWORD, ACCESS, REFRESH, MS_CODE];
+/** What the system browser does with a URL main opens (the Microsoft sign-in, in the mail tests). */
+let browserHook = null;
 const key = randomBytes(32);
 
 // ── Electron stub ───────────────────────────────────────────────────────────
@@ -61,7 +70,7 @@ const electron = {
   ipcMain: { handle: (channel, fn) => { assert.ok(!handlers.has(channel), `one handler per channel: ${channel}`); handlers.set(channel, fn); } },
   BrowserWindow: FakeWindow,
   net: { fetch: (url, init) => fetchImpl(url, init) },
-  shell: { openExternal: async (url) => { opened.push(url); } },
+  shell: { openExternal: async (url) => { opened.push(url); if (browserHook && url.startsWith('https://login.microsoftonline.com/')) browserHook(url); } },
   safeStorage: {
     isEncryptionAvailable: () => true,
     getSelectedStorageBackend: () => 'gnome_libsecret',
@@ -113,7 +122,12 @@ let passed = 0;
 let failed = 0;
 async function test(name, fn) {
   try { await fn(); passed++; original.log(`  PASS  ${name}`); }
-  catch (error) { failed++; original.log(`  FAIL  ${name}: ${String(error?.stack ?? error).replaceAll(TOKEN, '[redacted]')}`); }
+  catch (error) {
+    failed++;
+    let text = String(error?.stack ?? error).replaceAll(TOKEN, '[redacted]');
+    for (const sec of MAIL_SECRETS) text = text.replaceAll(sec, '[redacted]');
+    original.log(`  FAIL  ${name}: ${text}`);
+  }
 }
 const noToken = (label, value) => {
   const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -189,8 +203,10 @@ function monday(rows, options = {}) {
       data = { create_update: { id: '900' } };
     } else if (query.includes('create_item')) {
       const values = JSON.parse(v.values);
-      state.rows.push(item('901', { name: v.name, priority: values[P]?.label, due: values[D]?.date }));
-      data = { create_item: { id: '901' } };
+      // A new id per item, as monday gives (Make a task from a mail is the second create in a run).
+      const id = String(901 + state.rows.filter((r) => Number(r.id) >= 901).length);
+      state.rows.push(item(id, { name: v.name, priority: values[P]?.label, due: values[D]?.date }));
+      data = { create_item: { id } };
     } else throw new Error('Unexpected test query');
     return { ok: true, status: 200, json: async () => structuredClone({ data }) };
   };
@@ -219,6 +235,12 @@ try {
   const view = await load('src/shared/work-view.ts');
   const token = await load('src/main/work/monday-token.ts');
   const mondayMod = await load('src/main/work/monday.ts');
+  const mailView = await load('src/shared/mail-view.ts');
+  await load('src/main/work/mail-text.ts');
+  const mailAccounts = await load('src/main/work/mail-accounts.ts');
+  const imapMod = await load('src/main/work/imap.ts');
+  const graphMod = await load('src/main/work/graph.ts');
+  const mailMod = await load('src/main/work/mail.ts');
   const notify = await load('src/main/work/notify.ts');
   const sync = await load('src/main/work/sync.ts');
   const work = await load('src/main/work/index.ts');
@@ -371,6 +393,85 @@ try {
 
   // ── Status words ──────────────────────────────────────────────────────────
   original.log('\nstatus strip');
+  // ── Mail notice rules (design section 3, Gustav's decisions) ──────────────
+  original.log('\nmail notice rules (injected clock)');
+  const mev = (n, o = {}) => ({ kind: 'person', account: 'gmail', handle: `h${n}`, fromName: `Sender ${n}`, fromAddress: `s${n}@example.com`, subject: `Subject ${n}`, key: `gmail:10:${n}`, ...o });
+  const mailNotifier = (clock, o = {}) => {
+    const shown = [], saved = [], held = [];
+    const n = notify.createMailNotifier({
+      now: () => clock, focus: () => !!o.focus, vip: () => o.vip ?? ['jaco@example.com'],
+      label: (id) => (id === 'gmail' ? 'Gmail' : 'Mail'), state: o.state ?? notify.emptyMailNoticeState(),
+      save: (st) => saved.push(st), show: (x) => shown.push(x), hold: (c) => held.push(c),
+    });
+    return { n, shown, saved, held };
+  };
+  await test('new mail from a person in working hours: one notice with the sender and the subject, Mark read offered', () => {
+    const t = mailNotifier(local(WED, 10));
+    t.n.events([mev(1)]);
+    assert.equal(t.shown.length, 1);
+    const x = t.shown[0];
+    assert.deepEqual([x.kind, x.label, x.from, x.title, x.count, x.canDone, x.mail.handle, x.taskId], ['mail', 'Gmail · new mail', 'Sender 1', 'Subject 1', 1, true, 'h1', null]);
+  });
+  await test('bulk mail (List-Unsubscribe, no-reply, Promotions or Social) never notifies and is not held', () => {
+    const t = mailNotifier(local(WED, 10));
+    t.n.events([mev(1, { kind: 'bulk' }), mev(2, { kind: 'bulk' })]);
+    assert.equal(t.shown.length, 0);
+    assert.deepEqual(t.held, []);
+  });
+  await test('the same mail never notifies twice, also after a restart; the saved state holds no address or subject', () => {
+    const t = mailNotifier(local(WED, 10));
+    t.n.events([mev(1)]);
+    t.n.events([mev(1)]);
+    assert.equal(t.shown.length, 1);
+    const state = t.saved.at(-1);
+    assert.ok(state.seen.every((k) => /^[0-9a-f]{32}$/.test(k)));
+    assert.ok(!JSON.stringify(state).includes('example.com') && !JSON.stringify(state).includes('Subject'));
+    const again = mailNotifier(local(WED, 11), { state: JSON.parse(JSON.stringify(state)) });
+    again.n.events([mev(1)]);
+    assert.equal(again.shown.length, 0);
+  });
+  await test('quiet hours and weekends: only VIP senders get through (any case), the rest are held for the morning', () => {
+    for (const at of [local(WED, 19), local(WED, 7, 29), local(SAT, 12)]) {
+      const t = mailNotifier(at);
+      t.n.events([mev(1), mev(2, { fromAddress: 'Jaco@Example.com', fromName: 'Jaco' })]);
+      assert.equal(t.shown.length, 1);
+      assert.equal(t.shown[0].from, 'Jaco');
+      assert.deepEqual(t.held, [1]);
+    }
+    const day = mailNotifier(local(WED, 7, 30));
+    day.n.events([mev(1)]);
+    assert.equal(day.shown.length, 1, '07:30 on a weekday is not quiet');
+  });
+  await test('focus mode: nothing is shown (VIPs neither), it is counted for the morning, and it does not come back', () => {
+    const t = mailNotifier(local(WED, 10), { focus: true });
+    t.n.events([mev(1), mev(2, { fromAddress: 'jaco@example.com' })]);
+    assert.equal(t.shown.length, 0);
+    assert.deepEqual(t.held, [2]);
+    const after = mailNotifier(local(WED, 11), { state: t.saved.at(-1) });
+    after.n.events([mev(1), mev(2)]);
+    assert.equal(after.shown.length, 0);
+  });
+  await test('a burst of new mail is one notice with a count and no Mark read', () => {
+    const t = mailNotifier(local(WED, 10));
+    t.n.events([mev(1), mev(2), mev(3)]);
+    assert.equal(t.shown.length, 1);
+    const x = t.shown[0];
+    assert.deepEqual([x.kind, x.label, x.count, x.canDone, x.from, x.title], ['burst', 'Mail · 3 new', 3, false, 'Sender 3 and others', 'Subject 3']);
+  });
+  await test('mail held by quiet hours counts into the task morning summary', () => {
+    const saved = [];
+    const tasks = notify.createWorkNotifier({ now: () => local(WED, 8, 5), focus: () => false, state: notify.emptyNotifierState(), save: (st) => saved.push(st), show: () => undefined });
+    tasks.hold(2);
+    assert.equal(tasks.snapshot().held, 2);
+    tasks.hold(-1);
+    tasks.hold(1.5);
+    assert.equal(tasks.snapshot().held, 2);
+  });
+  await test('the VIP list keeps plain addresses only, lower-cased', () => {
+    assert.deepEqual(notify.cleanVipList(['Jaco@Example.com', 'not an address', 42, 'a@b.co', 'a@b.co']), ['jaco@example.com', 'a@b.co']);
+    assert.deepEqual(notify.cleanVipList('jaco@example.com'), []);
+  });
+
   await test('synced N s ago, read off the clock; failures in plain words', async () => {
     const at = Date.parse('2026-11-04T10:00:00.000Z');
     const ok = { connected: true, syncing: false, syncedAt: '2026-11-04T10:00:00.000Z', problem: null };
@@ -646,6 +747,42 @@ try {
   });
 
   // ── The IPC, the Connect dialog and the toast, end to end on a fake monday ──
+  await test('mail center: a start overtaken by a suspend starts nothing; overlapping starts make one provider; a restart replaces it', async () => {
+    const make = () => {
+      const providers = [];
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      const provider = () => {
+        const p = { started: 0, stopped: 0, start() { p.started++; }, stop() { p.stopped++; } };
+        providers.push(p);
+        return p;
+      };
+      const center = mailMod.createMailCenter({
+        now: () => 0,
+        imap: { load: async (id) => { await gate; return id === 'gmail' ? { account: { id: 'gmail' }, credential: {} } : null; }, save: async () => undefined, remove: async () => undefined },
+        graph: { load: async () => null, signIn: async () => { throw new Error('no'); }, cancel() {}, remove: async () => undefined },
+        makeImap: provider, makeGraph: provider, onChange: () => undefined, onEvents: () => undefined,
+      });
+      return { center, providers, release };
+    };
+    const a = make();
+    const starting = a.center.start();
+    a.center.suspend();
+    a.release();
+    await starting;
+    assert.equal(a.providers.length, 0, 'nothing starts after the machine became a screen');
+    assert.deepEqual(a.center.payload().accounts, []);
+    const b = make();
+    const both = Promise.all([b.center.start(), b.center.start()]);
+    b.release();
+    await both;
+    assert.equal(b.providers.length, 1, 'one provider for one account, however many starts overlapped');
+    await b.center.start();
+    assert.equal(b.providers.length, 2);
+    assert.equal(b.providers[0].stopped, 1, 'the replaced provider was stopped');
+    assert.equal(b.providers[1].stopped, 0);
+  });
+
   original.log('\nIPC, Connect dialog and notices (planted token)');
 
   const wall = new FakeWindow({});
@@ -658,10 +795,16 @@ try {
     toast: { show: (_w, _h, ready) => ready(toastWin), release: () => { host.released++; } },
     timeoutMs: 250, doneLimitMs: 200, noticeMs: 300,
     now: () => host.clock,
+    mailVip: () => [],
+    imapClient: (options) => imap.factory(options),
+    signInMs: 4000,
   };
   const jacos = ['3', '4', '5'].map((n) => item(n, { owners: [J], assigned: [J], name: `Jaco task ${n}` }));
   const m = monday([item('1', { owners: [J], assigned: [J], name: 'Lodge quote' }), item('2', { status: 'Waiting' }), ...jacos]);
-  fetchImpl = (url, init) => m.fetch(url, init);
+  // A fake IMAP server and a fake Microsoft; monday's requests still go to the fake monday.
+  const imap = imapServer(PASSWORD, [imapMessage(1), imapMessage(2, { body: '<p>Second</p>' })]);
+  const ms = microsoft({ tenant: graphMod.TENANT_ID, clientId: graphMod.CLIENT_ID, access: ACCESS, refresh: REFRESH, code: MS_CODE, messages: [graphMessage(1)] });
+  fetchImpl = (url, init) => (url.startsWith('https://api.monday.com/') ? m.fetch(url, init) : ms.fetch(url, init));
   const controller = work.createWork(host);
   const ipc = (channel, sender, ...args) => handlers.get(channel)({ sender }, ...args);
   const replies = [];
@@ -674,7 +817,10 @@ try {
 
   await test('every Work channel is registered, and only these', async () => {
     assert.deepEqual([...handlers.keys()].sort(), [
-      'connect:close', 'connect:submit', 'toast:workAction', 'work:action', 'work:connect',
+      'connect:close', 'connect:submit',
+      'mail:action', 'mail:connect', 'mail:get', 'mail:open', 'mail:task', 'mail:undo', 'mail:web',
+      'mailconnect:cancel', 'mailconnect:close', 'mailconnect:microsoft', 'mailconnect:state', 'mailconnect:submit',
+      'toast:workAction', 'work:action', 'work:connect',
       'work:create', 'work:focus', 'work:get', 'work:open',
     ]);
   });
@@ -762,7 +908,8 @@ try {
     await settle();
     notice = toastWin.webContents.sent.filter(([c]) => c === 'toast:work').at(-1)?.[1];
     assert.ok(notice, 'a notice was sent');
-    assert.deepEqual(Object.keys(notice).sort(), ['canDone', 'count', 'from', 'id', 'label', 'title']);
+    assert.deepEqual(Object.keys(notice).sort(), ['canDone', 'count', 'doneLabel', 'from', 'id', 'label', 'title']);
+    assert.equal(notice.doneLabel, 'Done');
     assert.equal(notice.from, 'Jaco');
     assert.equal(notice.title, 'Lodge quote');
   });
@@ -807,6 +954,217 @@ try {
     assert.equal(last.canDone, false);
     assert.equal(controller.noticeState().queued, 0);
   });
+  // ── Mail, end to end on fake servers (planted password and tokens) ──────
+  original.log('\nmail: IPC, Connect mail, notices (planted password and tokens)');
+  const notHere = { ok: false, message: 'Not available here.' };
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+  let mailWin;
+  await test('mail before any account: known and empty (the panel offers Connect mail)', async () => {
+    assert.deepEqual(await call('mail:get', wall.webContents), { known: true, accounts: [], rows: [] });
+    assert.equal(await call('mail:get', fakeWebContents()), null);
+  });
+  await test('Connect mail: only its own window may submit; a wrong password or account is refused and nothing is stored', async () => {
+    assert.deepEqual(await call('mailconnect:submit', wall.webContents, 'gmail', PASSWORD), notHere);
+    assert.deepEqual(await call('mailconnect:microsoft', wall.webContents), notHere);
+    await call('mail:connect', wall.webContents);
+    mailWin = windows.at(-1);
+    assert.match(mailWin.loaded, /mail-connect\.html$/);
+    const bad = await call('mailconnect:submit', mailWin.webContents, 'gmail', 'not-the-password');
+    assert.equal(bad.ok, false);
+    assert.match(bad.message, /did not accept that app password/);
+    for (const preset of ['m365', 'titan', '../x', null]) assert.equal((await call('mailconnect:submit', mailWin.webContents, preset, PASSWORD)).ok, false);
+    assert.equal((await call('mailconnect:submit', mailWin.webContents, 'gmail', 'line\nbreak')).ok, false);
+    await assert.rejects(fs.access(path.join(tmp, 'mail-accounts', 'gmail.bin')));
+  });
+  await test('Connect mail: a real IMAP login with the password first, then stored encrypted, and the inbox syncs', async () => {
+    const r = await call('mailconnect:submit', mailWin.webContents, 'gmail', PASSWORD);
+    assert.deepEqual(r, { ok: true, message: 'Gmail connected.' });
+    assert.ok(imap.logins.includes('gustavpjvr@gmail.com'));
+    const bytes = await fs.readFile(path.join(tmp, 'mail-accounts', 'gmail.bin'));
+    assert.ok(!bytes.includes(Buffer.from(PASSWORD)));
+    await settle();
+    const p = await call('mail:get', wall.webContents);
+    assert.deepEqual(p.accounts.map((a) => [a.id, a.status, a.unread]), [['gmail', 'ready', 2]]);
+    assert.deepEqual(p.rows.map((x) => x.subject).sort(), ['Message 1', 'Message 2']);
+    const state = await call('mailconnect:state', mailWin.webContents);
+    assert.ok(state.find((a) => a.id === 'gmail').connected);
+    assert.deepEqual(await call('mailconnect:state', wall.webContents), []);
+    assert.ok(wall.webContents.sent.some(([c]) => c === 'mail:update'));
+  });
+  let row1;
+  await test('open: the body is text made in main (no tags, no remote image); a forged handle or a stranger is refused', async () => {
+    row1 = (await call('mail:get', wall.webContents)).rows.find((x) => x.subject === 'Message 1');
+    const r = await call('mail:open', wall.webContents, row1.handle);
+    assert.equal(r.ok, true);
+    assert.match(r.body.text, /Body of 1/);
+    assert.doesNotMatch(r.body.text, /[<>]|tracker/);
+    assert.equal((await call('mail:open', wall.webContents, `${row1.handle}x`)).ok, false);
+    assert.deepEqual(await call('mail:open', fakeWebContents(), row1.handle), notHere);
+  });
+  await test('read and flag read back; unknown kinds never reach the server; trash and archive undo; no deletes', async () => {
+    let r = await call('mail:action', wall.webContents, row1.handle, 'read');
+    assert.equal(r.ok, true);
+    assert.equal(r.row.seen, true);
+    r = await call('mail:action', wall.webContents, row1.handle, 'flag');
+    assert.equal(r.row.flagged, true);
+    const before = imap.calls.length;
+    for (const kind of ['delete', 'expunge', 'send', null]) assert.equal((await call('mail:action', wall.webContents, row1.handle, kind)).ok, false);
+    assert.equal(imap.calls.length, before);
+    for (const kind of ['trash', 'archive']) {
+      const live = (await call('mail:get', wall.webContents)).rows.find((x) => x.subject === 'Message 1');
+      const a = await call('mail:action', wall.webContents, live.handle, kind);
+      assert.equal(a.ok, true);
+      assert.match(a.undo, /^[0-9a-f-]{36}$/);
+      assert.ok(!(await call('mail:get', wall.webContents)).rows.some((x) => x.handle === live.handle));
+      assert.deepEqual(await call('mail:undo', wall.webContents, a.undo), { ok: true });
+      assert.equal((await call('mail:undo', wall.webContents, a.undo)).ok, false);
+      await settle();
+      assert.ok((await call('mail:get', wall.webContents)).rows.some((x) => x.subject === 'Message 1'), `back after ${kind} undo`);
+    }
+    // Trash undo moves back; archive undo COPIES back to INBOX (Gmail's Inbox label), never a move out of All Mail.
+    assert.deepEqual(imap.calls.filter((c) => c[0] === 'move' || c[0] === 'copy'), [
+      ['move', 'INBOX', '[Gmail]/Trash'], ['move', '[Gmail]/Trash', 'INBOX'], ['move', 'INBOX', '[Gmail]/All Mail'], ['copy', '[Gmail]/All Mail', 'INBOX'],
+    ]);
+  });
+  await test('Make a task: a Backlog task named after the subject, through monday', async () => {
+    const row2 = (await call('mail:get', wall.webContents)).rows.find((x) => x.subject === 'Message 2');
+    const r = await call('mail:task', wall.webContents, row2.handle);
+    assert.equal(r.ok, true, r.message);
+    assert.equal(r.card.name, 'Message 2');
+    assert.equal(r.card.status, 'Not started');
+    assert.equal((await call('mail:task', wall.webContents, 'forged')).ok, false);
+  });
+  await test('Open in Gmail opens only Gmail, for that message', async () => {
+    const row2 = (await call('mail:get', wall.webContents)).rows.find((x) => x.subject === 'Message 2');
+    assert.equal(await call('mail:web', wall.webContents, row2.handle), true);
+    assert.equal(opened.at(-1), 'https://mail.google.com/mail/u/?authuser=gustavpjvr%40gmail.com#search/rfc822msgid%3Amail-2%40example.com');
+    const count = opened.length;
+    assert.equal(await call('mail:web', wall.webContents, 'https://evil.example'), false);
+    assert.equal(await call('mail:web', fakeWebContents(), row2.handle), false);
+    assert.equal(opened.length, count);
+  });
+  await test('Microsoft 365: the browser sign-in through the loopback, the token stored encrypted, its inbox joins first', async () => {
+    browserHook = (url) => ms.browser(url);
+    const r = await call('mailconnect:microsoft', mailWin.webContents);
+    browserHook = null;
+    assert.deepEqual(r, { ok: true, message: 'MuchBetter connected.' });
+    await pause(80);
+    const bytes = await fs.readFile(path.join(tmp, 'graph-token.bin'));
+    for (const sec of MAIL_SECRETS) assert.ok(!bytes.includes(Buffer.from(sec)));
+    const p = await call('mail:get', wall.webContents);
+    assert.deepEqual(p.accounts.map((a) => a.id), ['muchbetter', 'gmail']);
+    const g = p.rows.find((x) => x.subject === 'Graph subject 1');
+    assert.ok(g);
+    const a = await call('mail:action', wall.webContents, g.handle, 'archive');
+    assert.equal(a.ok, true);
+    assert.deepEqual(await call('mail:undo', wall.webContents, a.undo), { ok: true });
+    assert.equal([...ms.messages.values()][0].parentFolderId, 'FOLDER-INBOX');
+    assert.ok(ms.calls.every((c) => c.method !== 'DELETE'));
+  });
+  await test('new mail from a person: a toast with the sender and subject (words only), Mark read marks it through IMAP', async () => {
+    await pause(350);
+    const count = toastWin.webContents.sent.filter(([c]) => c === 'toast:work').length;
+    imap.arrive(imapMessage(imap.nextUid++, { envelope: { from: [{ name: 'Anna Client', address: 'anna@client.example' }], subject: 'Homepage copy, second round', date: new Date(), messageId: '<new-1@client.example>' } }));
+    await pause(80);
+    const sent = toastWin.webContents.sent.filter(([c]) => c === 'toast:work');
+    assert.equal(sent.length, count + 1);
+    const n = sent.at(-1)[1];
+    assert.deepEqual(Object.keys(n).sort(), ['canDone', 'count', 'doneLabel', 'from', 'id', 'label', 'title']);
+    assert.deepEqual([n.label, n.from, n.title, n.doneLabel, n.canDone], ['Gmail · new mail', 'Anna Client', 'Homepage copy, second round', 'Mark read', true]);
+    assert.equal((await call('toast:workAction', wall.webContents, n.id, 'done')).ok, false, 'only the toast may press it');
+    assert.deepEqual(await call('toast:workAction', toastWin.webContents, n.id, 'done'), { ok: true, message: 'Marked read.' });
+    const arrived = imap.boxes.get('INBOX').rows.find((x) => x.envelope.subject === 'Homepage copy, second round');
+    assert.ok(arrived.flags.has('\\Seen'));
+  });
+  await test('Show switches to Work and opens that mail; bulk mail never shows a notice', async () => {
+    await pause(350);
+    imap.arrive(imapMessage(imap.nextUid++, { envelope: { from: [{ name: 'Jaco', address: 'jaco@example.com' }], subject: 'Quote numbers', date: new Date(), messageId: '<new-2@example.com>' } }));
+    await pause(80);
+    const n = toastWin.webContents.sent.filter(([c]) => c === 'toast:work').at(-1)[1];
+    assert.equal(n.title, 'Quote numbers');
+    await call('toast:workAction', toastWin.webContents, n.id, 'show');
+    assert.equal(host.mode.at(-1), 'work');
+    const hl = wall.webContents.sent.filter(([c]) => c === 'mail:highlight').at(-1);
+    const row = (await call('mail:get', wall.webContents)).rows.find((x) => x.subject === 'Quote numbers');
+    assert.equal(hl[1], row.handle);
+    await pause(350);
+    const count = toastWin.webContents.sent.filter(([c]) => c === 'toast:work').length;
+    imap.arrive(imapMessage(imap.nextUid++, { headers: Buffer.from('List-Unsubscribe: <mailto:off@shop.example>\r\n') }));
+    imap.arrive(imapMessage(imap.nextUid++, { envelope: { from: [{ name: 'Shop', address: 'no-reply@shop.example' }], subject: 'Sale', date: new Date(), messageId: '<s@shop.example>' } }));
+    await pause(80);
+    assert.equal(toastWin.webContents.sent.filter(([c]) => c === 'toast:work').length, count);
+  });
+  await test('the tray offers Connect mail and, per account, Reconnect and Disconnect, with no address in a label', async () => {
+    const items = controller.trayItems('work');
+    const labels = items.map((i) => i.label);
+    assert.ok(labels.includes('Connect mail...'));
+    for (const l of ['MuchBetter mail', 'Gmail mail']) {
+      const it = items.find((i) => i.label === l);
+      assert.ok(it, l);
+      assert.deepEqual(it.submenu.map((s) => s.label), ['Reconnect...', 'Disconnect']);
+    }
+    assert.ok(!JSON.stringify(labels).includes('@'));
+  });
+  await test('becoming a paired screen stops every mail account; unpairing starts them again', async () => {
+    host.screen = true;
+    controller.screenChanged();
+    assert.ok(imap.clients.every((c) => c.closed), 'every IMAP connection is closed');
+    assert.equal(await call('mail:get', wall.webContents), null);
+    const before = imap.logins.length;
+    const graphBefore = ms.calls.length;
+    imap.arrive(imapMessage(imap.nextUid++));
+    await pause(80);
+    assert.equal(imap.logins.length, before, 'no reconnect while a screen');
+    assert.equal(ms.calls.length, graphBefore, 'no Graph request while a screen');
+    host.screen = false;
+    controller.screenChanged();
+    await pause(200);
+    assert.ok(imap.logins.length > before, 'Gmail signs in again');
+    assert.deepEqual((await call('mail:get', wall.webContents)).accounts.map((a) => a.id), ['muchbetter', 'gmail']);
+  });
+  await test('a paired screen gets no mail and cannot act on it', async () => {
+    host.screen = true;
+    const row2 = (() => null)();
+    void row2;
+    assert.equal(await call('mail:get', wall.webContents), null);
+    assert.deepEqual(await call('mail:action', wall.webContents, row1.handle, 'read'), notHere);
+    assert.deepEqual(await call('mail:open', wall.webContents, row1.handle), notHere);
+    assert.equal(await call('mail:web', wall.webContents, row1.handle), false);
+    host.screen = false;
+  });
+  await test('Disconnect deletes the stored password and the Microsoft sign-in', async () => {
+    for (const l of ['Gmail mail', 'MuchBetter mail']) {
+      controller.trayItems('work').find((i) => i.label === l).submenu.find((s) => s.label === 'Disconnect').click();
+      await settle();
+    }
+    await assert.rejects(fs.access(path.join(tmp, 'mail-accounts', 'gmail.bin')));
+    await assert.rejects(fs.access(path.join(tmp, 'graph-token.bin')));
+    assert.deepEqual((await call('mail:get', wall.webContents)).accounts, []);
+  });
+  await test('THE MAIL SECRETS: the password and tokens are in no IPC reply, push, toast, log line or file in plain text', async () => {
+    const hide = (label, value) => {
+      const text = typeof value === 'string' ? value : JSON.stringify(value);
+      for (const sec of MAIL_SECRETS) assert.ok(!String(text).includes(sec), `${label} holds a planted mail secret`);
+    };
+    for (const [channel, r] of replies) hide(`reply ${channel}`, r);
+    for (const w of windows) hide('pushes', w.webContents.sent);
+    hide('log', output.join('\n'));
+    const walk = async (dir) => {
+      for (const e of await fs.readdir(dir, { withFileTypes: true })) {
+        const f = path.join(dir, e.name);
+        if (e.isDirectory()) await walk(f);
+        else {
+          const bytes = await fs.readFile(f);
+          for (const sec of MAIL_SECRETS) assert.ok(!bytes.includes(Buffer.from(sec)), `${f} holds a mail secret in plain text`);
+        }
+      }
+    };
+    await walk(tmp);
+    // The password went to the IMAP login, and the tokens to Microsoft, and only there.
+    assert.ok(imap.clients.some((c) => c.options.auth.pass === PASSWORD));
+    for (const c of ms.calls) hide('a Graph request body', c.body && !/oauth2/.test(c.url) ? c.body : '');
+  });
+
   await test('a refused token offers Reconnect monday..., and a new token replaces it and syncing resumes', async () => {
     const labels = () => controller.trayItems('work').map((i) => i.label);
     assert.ok(!labels().includes('Reconnect monday...'));
@@ -817,7 +1175,7 @@ try {
     assert.equal(p.status.problem, 'auth');
     assert.match(view.syncLabel(p.status, host.clock).text, /use Reconnect monday in the tray/);
     assert.match((await call('work:action', wall.webContents, '2', { kind: 'priority', value: 'Low' })).message, /Use Reconnect monday\.\.\. in the tray/);
-    assert.deepEqual(labels().slice(1), ['Reconnect monday...', 'Disconnect monday']);
+    assert.deepEqual(labels().slice(1).filter((l) => /monday/.test(l)), ['Reconnect monday...', 'Disconnect monday']);
     connectWin.close();
     controller.trayItems('work').find((i) => i.label === 'Reconnect monday...').click();
     const again = windows.at(-1);
@@ -828,7 +1186,7 @@ try {
     await settle();
     const after = await call('work:get', wall.webContents);
     assert.deepEqual([after.status.connected, after.status.problem], [true, null]);
-    assert.deepEqual(labels().slice(1), ['Disconnect monday']);
+    assert.deepEqual(labels().slice(1).filter((l) => /monday/.test(l)), ['Disconnect monday']);
   });
   await test('Disconnect deletes the token and tells the wall', async () => {
     const item0 = controller.trayItems('work').find((i) => i.label === 'Disconnect monday');
@@ -896,6 +1254,15 @@ try {
     for (const k of ['"work"', '"tasks"', '"monday"', '"mondayToken"', '"workPayload"', '"inProgress"', 'T1']) assert.ok(!text.includes(k), `wire carries ${k}`);
   });
 
+  await test('toWire drops every mail field, password and token, whatever the index carries', async () => {
+    const { toWire } = require(path.join(tmp, 'wire.cjs'));
+    const mailPayload = { known: true, accounts: [{ id: 'gmail', label: 'Gmail', colour: '#e8574f', unread: 2, status: 'ready', syncedAt: null }], rows: [{ account: 'gmail', handle: 'H1', fromName: 'Anna', fromAddress: 'anna@client.example', subject: 'Quote', snippet: '', date: '2026-11-06T09:00:00Z', seen: false, flagged: false, bulk: false }] };
+    const index = { totals: {}, projects: {}, sessions: {}, mail: mailPayload, inbox: mailPayload.rows, mailPassword: PASSWORD, graphToken: ACCESS, graphRefresh: REFRESH };
+    const text = JSON.stringify(toWire(index, { shareProjectNames: true, sourceLabel: 'PC', indexing: false }));
+    for (const sec of MAIL_SECRETS) assert.ok(!text.includes(sec));
+    for (const k of ['"mail"', '"inbox"', 'anna@client.example', 'Quote', 'mailPassword', 'graphToken']) assert.ok(!text.includes(k), `wire carries ${k}`);
+  });
+
   // ── The editions ──────────────────────────────────────────────────────────
   original.log('\neditions');
   const bundle = async (entry, edition, platform) => {
@@ -907,7 +1274,10 @@ try {
     });
     return fs.readFile(out, 'utf8');
   };
-  const MARKERS = ['work:get', 'work:action', 'work:create', 'work:open', 'work:focus', 'work:connect', 'work:update', 'connect:submit', 'toast:workAction', 'mondayConnect', 'api.monday.com', 'monday'];
+  const MARKERS = ['work:get', 'work:action', 'work:create', 'work:open', 'work:focus', 'work:connect', 'work:update', 'connect:submit', 'toast:workAction', 'mondayConnect', 'api.monday.com', 'monday',
+    // Mail (phase 2): the IPC, the Connect mail bridge, the IMAP and Graph code, the accounts.
+    'mail:get', 'mail:action', 'mail:open', 'mail:undo', 'mail:update', 'mailconnect:', 'mailConnect', 'imapflow', 'ImapFlow', 'imap.gmail.com', 'imap.secureserver.net',
+    'graph.microsoft.com', 'login.microsoftonline.com', 'graph-token.bin', 'mail-accounts', 'jacojvr', 'gustav@muchbetter.world', 'pickleplaysouthafrica.org'];
   const entries = [['src/main/index.ts', 'node'], ['src/preload/index.ts', 'node'], ['src/renderer/main.ts', 'browser'], ['src/renderer/toast.ts', 'browser']];
   const built = {};
   for (const edition of ['stats', 'full']) {
@@ -923,6 +1293,10 @@ try {
   await test('full build: the same markers are present (so the stats check is not vacuous)', async () => {
     assert.ok(built.full['src/main/index.ts'].includes('work:get') && built.full['src/main/index.ts'].includes('api.monday.com'));
     assert.ok(built.full['src/preload/index.ts'].includes('work:get') && built.full['src/preload/index.ts'].includes('mondayConnect'));
+    for (const marker of ['mail:get', 'mailconnect:', 'imap.gmail.com', 'graph.microsoft.com', 'login.microsoftonline.com', 'ImapFlow', 'graph-token.bin']) {
+      assert.ok(built.full['src/main/index.ts'].includes(marker), `full main has ${marker}`);
+    }
+    assert.ok(built.full['src/preload/index.ts'].includes('mail:get') && built.full['src/preload/index.ts'].includes('mailConnect'));
     assert.ok(built.full['src/renderer/main.ts'].includes('monday'));
     assert.ok(built.full['src/renderer/toast.ts'].includes('toast:work') || built.full['src/preload/index.ts'].includes('toast:work'));
   });

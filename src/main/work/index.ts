@@ -8,6 +8,12 @@
  * IPC, no monday code and no token handling at all (test/work.test.mjs builds
  * it and checks).
  *
+ * MAIL (phase 2): the inbox panel, Gmail and GoDaddy over IMAP, Microsoft 365
+ * over Graph, the Connect mail dialog and mail notices. Passwords and tokens
+ * follow the same rules as the monday token below: typed (or signed in) once,
+ * checked by a real login, stored with DPAPI, never sent to any renderer,
+ * logged, put in a payload or projected. No sending or replying (phase 4).
+ *
  * THE TOKEN
  *   - Typed once into the Connect dialog, sent to main on submit, checked
  *     against monday (`me` must be Gustav), stored with DPAPI
@@ -24,10 +30,18 @@ import {
   GUSTAV_ID, PRIORITIES, isTaskUrl, taskUrl,
   type ActionResult, type TaskAction, type TaskPriority, type TaskStatus, type WorkPayload,
 } from '../../shared/work-view';
+import { MAIL_ACCOUNTS, MAIL_ACTIONS, accountInfo, type MailActionKind, type MailPayload } from '../../shared/mail-view';
+import { createGraphAccount, createGraphMail, type GraphFetch, type GraphSession } from './graph';
+import { createImapMail, type MailClientFactory } from './imap';
+import { createMailCenter, isWebMailUrl, type MailProvider } from './mail';
+import { createMailAccountStore, createMailCredential } from './mail-accounts';
 import { createMondayClient } from './monday';
 import { createMondayToken, deleteMondayToken, loadMondayToken, MondayError, saveMondayToken, type MondayFetch } from './monday-token';
-import { cleanNotifierState, createWorkNotifier, emptyNotifierState, type NotifierState, type WorkNotice } from './notify';
-import { createWorkSync } from './sync';
+import {
+  cleanMailNoticeState, cleanNotifierState, createMailNotifier, createWorkNotifier, emptyMailNoticeState, emptyNotifierState,
+  type MailNoticeState, type NotifierState, type WorkNotice,
+} from './notify';
+import { createWorkSync, workingHours } from './sync';
 
 export interface WorkHost {
   isDev: boolean;
@@ -59,6 +73,12 @@ export interface WorkHost {
   doneLimitMs?: number;
   /** How long a work notice stays up, for tests; NOTICE_MS otherwise. */
   noticeMs?: number;
+  /** The VIP senders whose mail notifies in quiet hours (settings.json `mailVip`). */
+  mailVip?: () => string[];
+  /** For tests: the IMAP transport (imapflow otherwise). */
+  imapClient?: MailClientFactory;
+  /** For tests: how long the Microsoft browser sign-in may take (3 minutes otherwise). */
+  signInMs?: number;
 }
 
 const STATUSES: readonly TaskStatus[] = ['Not started', 'In progress', 'Waiting', 'Done', 'Dropped'];
@@ -82,6 +102,30 @@ function parseAction(raw: unknown): TaskAction | null {
 
 /** Where the notice state lives: seen event keys, the held count and the last summary day. Never a token. */
 const noticeFile = (): string => path.join(app.getPath('userData'), 'work-notices.json');
+/** Mail notice memory: hashed message keys only (notify.ts), never an address or a subject. */
+const mailNoticeFile = (): string => path.join(app.getPath('userData'), 'mail-notices.json');
+
+function loadMailNoticeState(): MailNoticeState {
+  try {
+    const text = readFileSync(mailNoticeFile(), 'utf8');
+    return cleanMailNoticeState(JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text));
+  } catch {
+    return emptyMailNoticeState();
+  }
+}
+
+let savingMail: Promise<void> = Promise.resolve();
+function saveMailNoticeState(state: MailNoticeState): void {
+  savingMail = savingMail.then(async () => {
+    const target = mailNoticeFile();
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(`${target}.tmp`, JSON.stringify(state), 'utf8');
+    await fs.rename(`${target}.tmp`, target);
+  }).catch((err: unknown) => console.warn('[work] could not save mail notice state:', (err as NodeJS.ErrnoException)?.code ?? 'error'));
+}
+
+/** Mail syncs every 60 s in working hours (weekdays 07:30 to 18:00), every 5 minutes otherwise. */
+export const mailInterval = (ms: number): number => (workingHours(ms) ? 60_000 : 5 * 60_000);
 
 function loadNoticeState(): NotifierState {
   try {
@@ -134,15 +178,20 @@ export function createWork(host: WorkHost) {
     if (next) showNotice(next);
   }
 
-  /** Two notices as one: a burst with the sum of their counts, Show on the newer task. */
+  /** Two notices as one: a burst with the sum of their counts, Show on the newer task or mail. */
   function merge(a: WorkNotice | null, b: WorkNotice): WorkNotice {
     if (!a) return b;
     const count = a.count + b.count;
+    const mailA = !!a.mail;
+    const mailB = !!b.mail;
+    const label = mailA && mailB ? `Mail · ${count} new` : !mailA && !mailB ? `monday · ${count} task updates` : `Work · ${count} updates`;
+    // Show goes to the newer one: its task, or its mail, never one of each.
+    const taskId = mailB ? null : b.taskId ?? (mailA ? null : a.taskId);
+    const mail = mailB ? b.mail : taskId ? null : a.mail ?? null;
     return {
-      ...b, kind: 'burst', count, canDone: false,
-      label: `monday · ${count} task updates`,
+      ...b, kind: 'burst', count, canDone: false, label,
       from: a.from === b.from ? b.from : `${b.from} and others`,
-      taskId: b.taskId ?? a.taskId,
+      taskId, mail,
     };
   }
 
@@ -185,7 +234,8 @@ export function createWork(host: WorkHost) {
     // Main keeps the task id. The toast only ever learns the notice id and the words.
     const words = {
       id: notice.id, label: next.label, from: next.from, title: next.title, count: next.count,
-      canDone: next.canDone && next.taskId !== null,
+      canDone: next.canDone && (next.taskId !== null || !!next.mail),
+      doneLabel: next.mail ? 'Mark read' : 'Done',
     };
     // A toast window created just now has no listener yet: a message sent before
     // its page loads is dropped, so the very first notice waits for the load.
@@ -239,10 +289,134 @@ export function createWork(host: WorkHost) {
     me: GUSTAV_ID,
   });
 
+  /** Mail stops while this machine is a paired screen and starts again when it is not (L7). */
+  let wasScreen = host.isScreen();
+  function screenChanged(): void {
+    const screen = host.isScreen();
+    if (screen === wasScreen) return;
+    wasScreen = screen;
+    if (screen) mail.suspend();
+    else {
+      console.log('[mail] no longer a paired screen: mail starts again');
+      void mail.start();
+    }
+    host.refreshTray();
+  }
+
   const tick = setInterval(() => {
+    // A backstop for a role change the projection status did not report.
+    screenChanged();
     if (!host.isScreen()) notifier.tick(sync.current());
   }, TICK_MS);
   tick.unref?.();
+
+  // ── Mail ────────────────────────────────────────────────────────────────
+
+  const graphFetch: GraphFetch = (url, init) => net.fetch(url, init) as unknown as ReturnType<GraphFetch>;
+  const graphAccount = createGraphAccount({
+    fetch: graphFetch,
+    // The sign-in page opens in the system browser; createGraphAccount builds the URL from the fixed authority.
+    openExternal: (url) => shell.openExternal(url),
+    now,
+    ...(host.timeoutMs ? { timeoutMs: host.timeoutMs } : {}),
+    ...(host.signInMs ? { signInMs: host.signInMs } : {}),
+  });
+  const imapStore = createMailAccountStore();
+  const imapProvider = (account: Parameters<typeof createImapMail>[0]['account'], credential: Parameters<typeof createImapMail>[0]['credential']): MailProvider =>
+    createImapMail({ account, credential, now, ...(host.imapClient ? { createClient: host.imapClient } : {}) });
+  const m365 = MAIL_ACCOUNTS.find((a) => a.preset === 'm365')!;
+
+  const mailNotifier = createMailNotifier({
+    now,
+    focus: () => host.focusMode(),
+    vip: () => host.mailVip?.() ?? [],
+    label: (id) => accountInfo(id)?.label ?? 'Mail',
+    state: loadMailNoticeState(),
+    save: saveMailNoticeState,
+    show: showNotice,
+    hold: (count) => notifier.hold(count),
+  });
+
+  let mailTray = '';
+  const mail = createMailCenter<GraphSession>({
+    now,
+    imap: imapStore,
+    graph: graphAccount,
+    makeImap: imapProvider,
+    makeGraph: (session) => createGraphMail({ session, account: { id: m365.id, label: m365.label, colour: m365.colour }, now, interval: mailInterval }),
+    onChange: (p: MailPayload) => {
+      pushAll('mail:update', p);
+      // The tray follows the accounts: connected, and Reconnect while a sign-in is refused.
+      const sig = mail.accounts().map((a) => `${a.id}:${a.connected}:${a.refused}`).join(',');
+      if (sig !== mailTray) {
+        mailTray = sig;
+        host.refreshTray();
+      }
+    },
+    onEvents: (events) => {
+      if (!host.isScreen()) mailNotifier.events(events);
+    },
+    paused: () => host.isScreen(),
+    log: (line) => console.log(line),
+  });
+
+  /** A real IMAP login and INBOX read with the pasted password, before anything is stored. */
+  async function verifyImap(account: Parameters<typeof imapProvider>[0], password: string): Promise<MailProvider> {
+    const provider = imapProvider(account, createMailCredential(password));
+    try {
+      await provider.sync();
+      return provider;
+    } catch (error) {
+      provider.stop();
+      throw error;
+    }
+  }
+
+  async function disconnectMail(id: string): Promise<void> {
+    const label = accountInfo(id)?.label ?? 'Mail';
+    const ok = await mail.disconnect(id);
+    host.refreshTray();
+    host.balloon(ok ? `${label} disconnected` : `${label} not fully disconnected`, ok ? 'The password or sign-in was deleted from this PC.' : 'The stored sign-in could not be deleted.');
+  }
+
+  let mailConnectWin: BrowserWindow | null = null;
+
+  function openMailConnect(): void {
+    if (mailConnectWin && !mailConnectWin.isDestroyed()) {
+      mailConnectWin.show();
+      mailConnectWin.focus();
+      return;
+    }
+    mailConnectWin = new BrowserWindow({
+      width: 480,
+      height: 740,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      title: 'Connect mail',
+      backgroundColor: '#26262b',
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, '..', 'preload', 'index.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+        spellcheck: false,
+        devTools: host.isDev,
+      },
+    });
+    mailConnectWin.setMenu(null);
+    // A window a password is typed into goes nowhere else.
+    mailConnectWin.webContents.on('will-navigate', (e) => e.preventDefault());
+    mailConnectWin.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    void mailConnectWin.loadFile(path.join(__dirname, '..', 'renderer', 'mail-connect.html'));
+    mailConnectWin.on('closed', () => {
+      // A sign-in still waiting for the browser stops with its window.
+      mail.cancelMicrosoft();
+      mailConnectWin = null;
+    });
+  }
 
   // ── Connect dialog ──────────────────────────────────────────────────────
 
@@ -332,6 +506,8 @@ export function createWork(host: WorkHost) {
     host.walls().some((w) => !w.isDestroyed() && w.webContents.id === e.sender.id);
   const fromConnect = (e: { sender: WebContents }): boolean =>
     !!connectWin && !connectWin.isDestroyed() && e.sender.id === connectWin.webContents.id;
+  const fromMailConnect = (e: { sender: WebContents }): boolean =>
+    !!mailConnectWin && !mailConnectWin.isDestroyed() && e.sender.id === mailConnectWin.webContents.id;
   const fromToast = (e: { sender: WebContents }): boolean =>
     !!toastWin && !toastWin.isDestroyed() && e.sender.id === toastWin.webContents.id;
   const refused = { ok: false, message: 'Not available here.' } as const;
@@ -375,6 +551,45 @@ export function createWork(host: WorkHost) {
     return sync.act((c) => c.createTask(input));
   });
 
+  // Mail. Handles are opaque; main maps them back and checks every argument.
+  ipcMain.handle('mail:get', (e) => (fromWall(e) && !host.isScreen() && mail.known() ? mail.payload() : null));
+  ipcMain.handle('mail:open', (e, handle: unknown) => (fromWall(e) && !host.isScreen() ? mail.open(handle) : refused));
+  ipcMain.handle('mail:action', (e, handle: unknown, kind: unknown) => {
+    if (!fromWall(e) || host.isScreen()) return refused;
+    if (!MAIL_ACTIONS.includes(kind as MailActionKind)) return { ok: false, message: 'That change is not one the wall can make.' };
+    return mail.act(handle, kind as MailActionKind);
+  });
+  ipcMain.handle('mail:undo', (e, token: unknown) => (fromWall(e) && !host.isScreen() ? mail.undo(token) : refused));
+  ipcMain.handle('mail:task', (e, handle: unknown) => {
+    if (!fromWall(e) || host.isScreen()) return refused;
+    const row = mail.row(handle);
+    if (!row) return { ok: false, message: 'That message has changed or gone. The inbox is refreshing.' };
+    // The subject names the task; it lands in Backlog, owned and assigned by Gustav (createTask).
+    const subject = row.subject.replace(/\s+/g, ' ').trim() || `Mail from ${row.fromName || row.fromAddress}`;
+    const name = Array.from(subject).slice(0, 500).join('');
+    return sync.act((c) => c.createTask({ name }));
+  });
+  ipcMain.handle('mail:web', async (e, handle: unknown) => {
+    if (!fromWall(e) || host.isScreen()) return false;
+    const url = mail.webUrl(handle);
+    if (!url || !isWebMailUrl(url)) return false;
+    await shell.openExternal(url);
+    return true;
+  });
+  ipcMain.handle('mail:connect', (e) => {
+    if (fromWall(e) && !host.isScreen()) openMailConnect();
+  });
+  ipcMain.handle('mailconnect:state', (e) => (fromMailConnect(e) ? mail.accounts() : []));
+  ipcMain.handle('mailconnect:submit', (e, preset: unknown, password: unknown) =>
+    (fromMailConnect(e) && !host.isScreen() ? mail.connectImap(preset, password, verifyImap) : refused));
+  ipcMain.handle('mailconnect:microsoft', (e) => (fromMailConnect(e) && !host.isScreen() ? mail.connectMicrosoft() : refused));
+  ipcMain.handle('mailconnect:cancel', (e) => {
+    if (fromMailConnect(e)) mail.cancelMicrosoft();
+  });
+  ipcMain.handle('mailconnect:close', (e) => {
+    if (fromMailConnect(e) && mailConnectWin && !mailConnectWin.isDestroyed()) mailConnectWin.close();
+  });
+
   ipcMain.handle('connect:submit', (e, token: unknown) => (fromConnect(e) ? submitToken(token) : refused));
   ipcMain.handle('connect:close', (e) => {
     if (fromConnect(e) && connectWin && !connectWin.isDestroyed()) connectWin.close();
@@ -388,15 +603,17 @@ export function createWork(host: WorkHost) {
       endNotice();
       return { ok: true, message: '' };
     }
+    const mailHandle = current.n.mail?.handle ?? null;
     if (action === 'show') {
       endNotice();
       if (host.isScreen()) return refused;
       host.setMode('work');
       host.showWall();
-      if (taskId) pushAll('work:highlight', taskId);
+      if (mailHandle) pushAll('mail:highlight', mailHandle);
+      else if (taskId) pushAll('work:highlight', taskId);
       return { ok: true, message: '' };
     }
-    if (action === 'done' && current.n.canDone && taskId && !current.busy) {
+    if (action === 'done' && current.n.canDone && (taskId || mailHandle) && !current.busy) {
       current.busy = true;
       if (noticeTimer) clearTimeout(noticeTimer);
       noticeTimer = null;
@@ -407,18 +624,28 @@ export function createWork(host: WorkHost) {
        * shows the truth on its next read.
        */
       let limit: NodeJS.Timeout | undefined;
-      const late = new Promise<ActionResult>((resolve) => {
-        limit = setTimeout(() => resolve({ ok: false, message: 'monday has not answered yet. Check the task on monday before trying again.' }), host.doneLimitMs ?? 30_000);
+      const late = new Promise<{ ok: boolean; message: string }>((resolve) => {
+        limit = setTimeout(() => resolve({
+          ok: false,
+          message: mailHandle ? 'The mail server has not answered yet. Check the message before trying again.' : 'monday has not answered yet. Check the task on monday before trying again.',
+        }), host.doneLimitMs ?? 30_000);
         limit.unref?.();
       });
-      const result = await Promise.race([sync.act((c) => c.setStatus(taskId, 'Done')), late]);
+      // A mail notice's button is Mark read; a task notice's is Done.
+      const job: Promise<{ ok: boolean; message: string }> = mailHandle
+        ? mail.act(mailHandle, 'read').then((r) => (r.ok ? { ok: true, message: 'Marked read.' } : { ok: false, message: r.message }))
+        : sync.act((c) => c.setStatus(taskId as string, 'Done')).then((r: ActionResult) => {
+          // A card monday confirmed moves on the wall, even when it answered after the toast gave up waiting.
+          if (r.ok) pushAll('work:card', r.card);
+          return r.ok ? { ok: true, message: 'Marked done.' } : { ok: false, message: r.message };
+        });
+      const result = await Promise.race([job, late]);
       clearTimeout(limit);
-      if (result.ok) pushAll('work:card', result.card);
       if (notice === current) {
         current.busy = false;
         armNoticeTimer(result.ok ? Math.min(1800, host.noticeMs ?? 1800) : (host.noticeMs ?? NOTICE_MS));
       }
-      return result.ok ? { ok: true, message: 'Marked done.' } : { ok: false, message: result.message };
+      return result;
     }
     return { ok: false, message: 'That is not something this notice can do.' };
   });
@@ -426,10 +653,14 @@ export function createWork(host: WorkHost) {
   return {
     start(): void {
       void sync.start();
+      void mail.start();
     },
 
     /** Fetch the board now instead of at the next poll. */
     refresh: (): Promise<void> => sync.refresh('manual'),
+
+    /** The projection role changed (src/main/index.ts calls this on every status). */
+    screenChanged,
 
     /** Tray items, full build only. */
     trayItems(mode: 'stats' | 'work'): MenuItemConstructorOptions[] {
@@ -439,6 +670,17 @@ export function createWork(host: WorkHost) {
       const reconnect: MenuItemConstructorOptions[] = connected && problem === 'auth'
         ? [{ label: 'Reconnect monday...', enabled: !screen, click: () => openConnect() }]
         : [];
+      // Mail: Connect, and per account Reconnect and Disconnect. Never a password or an address in a label.
+      const mailItems: MenuItemConstructorOptions[] = [
+        { label: 'Connect mail...', enabled: !screen, click: () => openMailConnect() },
+        ...mail.accounts().filter((a) => a.connected).map((a): MenuItemConstructorOptions => ({
+          label: `${a.label} mail${a.refused ? '  (sign-in refused)' : ''}`,
+          submenu: [
+            { label: 'Reconnect...', enabled: !screen, click: () => openMailConnect() },
+            { label: 'Disconnect', click: () => void disconnectMail(a.id) },
+          ],
+        })),
+      ];
       return [
         {
           label: 'View',
@@ -455,14 +697,17 @@ export function createWork(host: WorkHost) {
         connected
           ? { label: 'Disconnect monday', click: () => void disconnect() }
           : { label: 'Connect monday...', enabled: !screen, click: () => openConnect() },
+        ...mailItems,
       ];
     },
 
     stop(): void {
       sync.stop();
+      mail.stop();
       clearInterval(tick);
       if (noticeTimer) clearTimeout(noticeTimer);
       if (connectWin && !connectWin.isDestroyed()) connectWin.destroy();
+      if (mailConnectWin && !mailConnectWin.isDestroyed()) mailConnectWin.destroy();
     },
 
     /** Whether a work notice is up, and what waits behind it (one collapsed notice at most). */

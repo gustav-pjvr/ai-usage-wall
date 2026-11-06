@@ -2007,6 +2007,7 @@ app.whenReady().then(async () => {
   await workChecks({ ok, SIZES, RENDERER, PRELOAD, saved, setState: setViewState, h: workHarness });
   await workChecks.connectChecks({ ok, ROOT, PRELOAD, h: workHarness });
   await workChecks.toastChecks({ ok, ROOT, PRELOAD, h: workHarness });
+  await workChecks.mailConnectChecks({ ok, ROOT, PRELOAD, h: workHarness });
 
   win.destroy();
   console.log(`\n${pass} passed, ${fail} failed\n`);

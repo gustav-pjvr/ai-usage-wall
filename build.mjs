@@ -111,6 +111,15 @@ const configs = [
           entryPoints: [path.join(root, 'src/renderer/connect.ts')],
           outfile: path.join(dist, 'renderer/connect.js'),
         },
+        // The Connect mail dialog, full build only, like Connect monday.
+        {
+          ...common,
+          platform: 'browser',
+          format: 'iife',
+          target: 'chrome120',
+          entryPoints: [path.join(root, 'src/renderer/mail-connect.ts')],
+          outfile: path.join(dist, 'renderer/mail-connect.js'),
+        },
       ]
     : []),
 ];
@@ -134,6 +143,7 @@ async function copyStatic() {
   // Work mode's page and styles ship in the full build only.
   if (edition === 'full') {
     await fs.copyFile(path.join(root, 'src/renderer/connect.html'), path.join(dist, 'renderer/connect.html'));
+    await fs.copyFile(path.join(root, 'src/renderer/mail-connect.html'), path.join(dist, 'renderer/mail-connect.html'));
     for (const css of ['work.css', 'connect.css']) {
       await fs.copyFile(path.join(root, 'src/renderer/styles', css), path.join(dist, 'renderer/styles', css));
     }

@@ -9,6 +9,7 @@ import { isStatsOnly } from '../shared/edition';
 import type { DayRaw, TimelapseDays } from '../shared/intraday';
 // Type only, erased at build: the module is required below inside `if (!isStatsOnly)`.
 import type { WorkBridge, WorkView } from './work';
+import type { MailBridge } from './inbox';
 
 // ── Types mirrored from main ───────────────────────────────────────────────
 
@@ -61,6 +62,8 @@ declare global {
       ask?: AskBridge;
       /** Work mode (monday Tasks). Present in the full build only. */
       work?: WorkBridge;
+      /** Work mode's inbox. Present in the full build only. */
+      mail?: MailBridge;
     };
   }
 }
@@ -126,7 +129,7 @@ if (process.env.MBW_EDITION !== 'stats' && window.wall.work) {
   workMount.id = 'view-work';
   workMount.className = 'view';
   document.getElementById('stage')!.append(workMount);
-  workView = new View(window.wall.work);
+  workView = new View(window.wall.work, window.wall.mail);
   workMount.append(workView.root);
   // Mine | Everyone and + Task live in the action row, shown only in Work (actions.css).
   wallActions.addChip(workView.newChip, workView.newPanel);

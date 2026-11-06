@@ -5,9 +5,9 @@ mail from every inbox in one scrolling panel, and the monday Tasks board as
 four scrolling columns, with actions on both and notices through the wall's
 existing toast. Mock: `docs/design/mock-work/work-1920x1080.png` (sample data).
 
-**Phase 1 (Tasks) is implemented**: [../work-mode.md](../work-mode.md). Mail
-(phases 2 to 4) is not built yet. Gustav's decisions (2026-11-06) are in
-section 6.
+**Phase 1 (Tasks) and phase 2 (mail, with Microsoft 365, so phase 3 too) are
+implemented**: [../work-mode.md](../work-mode.md). Reply and send (phase 4) is
+not built. Gustav's decisions (2026-11-06) are in section 6.
 
 ## 1. Recon: what exists
 
@@ -166,9 +166,29 @@ and opens that mail or task. Bursts collapse into one notice with a count.
    summary; a pasted token must belong to Gustav; the full-screen and screen
    share check is not in phase 1 (focus mode is).
 2. **IMAP mail**: Gmail (app password) and GoDaddy, read and actions, mail
-   notices.
+   notices. **Implemented** ([../work-mode.md](../work-mode.md)), together with
+   phase 3. Built as designed, with these choices: the account chips sit in the
+   inbox panel's header rather than the top bar (the top bar has no room at
+   1280 px beside the view switch and the task chips); Archive and Trash undo
+   from a bar at the foot of the panel; "Open in the mail app" is one button per
+   message (Outlook on the web, Gmail by Message-ID, GoDaddy webmail's inbox,
+   which has no per-message link); "Make a task" names the task after the
+   subject and does not yet write a link back into Notes (createTask takes a
+   name, priority and due date only); Gmail's Promotions and Social come from a
+   Gmail search, as X-GM-LABELS does not list the tabs; VIPs are `mailVip` in
+   settings.json, starting with Jaco's Gmail address; mail held by quiet hours
+   or focus mode counts into the morning summary.
 3. **Microsoft 365** through Graph, after the Entra app registration.
-4. **Reply and send** for all accounts.
+   **Implemented** with phase 2: PKCE public client, loopback on 127.0.0.1
+   (redirect `http://127.0.0.1:<port>`), Inbox delta, the same actions and
+   notices. Scopes `offline_access User.Read Mail.ReadWrite`: Mail.Send is
+   consented but asked for only when phase 4 sends. After the Opus audit
+   (2026-11-06): new Graph mail must postdate the newest message of the first
+   sync (server time), rotation waits
+   for the mailbox check and stops at Disconnect, plain text is never
+   tokenized, Gmail's archive undo copies back to INBOX, mail stops while the
+   machine is a paired screen.
+4. **Reply and send** for all accounts. Not built.
 
 Version 0.11.0 when phase 1 and 2 ship together, or one minor per phase.
 

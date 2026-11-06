@@ -19,7 +19,7 @@ interface NoticeLike {
   count: number;
 }
 
-/** A work notice (full build): words only. Main keeps the task it is about. */
+/** A work notice (full build): words only. Main keeps the task or the mail it is about. */
 interface WorkNoticeLike {
   id: number;
   label: string;
@@ -27,6 +27,8 @@ interface WorkNoticeLike {
   title: string;
   count: number;
   canDone: boolean;
+  /** 'Mark read' on a mail notice, 'Done' on a task notice. */
+  doneLabel?: string;
 }
 
 declare global {
@@ -118,6 +120,8 @@ if (process.env.MBW_EDITION !== 'stats' && window.updateToast.onWork && window.u
   document.body.append(box);
 
   let current: WorkNoticeLike | null = null;
+  /** A mail notice's button marks the mail read; a task notice's marks the task done. Only these two words. */
+  const doneLabel = (n: WorkNoticeLike): 'Done' | 'Mark read' => (n.doneLabel === 'Mark read' ? 'Mark read' : 'Done');
   const setBusy = (on: boolean): void => {
     box.setAttribute('aria-busy', String(on));
     for (const b of [show, done, later]) b.disabled = on;
@@ -131,7 +135,7 @@ if (process.env.MBW_EDITION !== 'stats' && window.updateToast.onWork && window.u
     from.textContent = n.from;
     title.textContent = n.title;
     done.hidden = !n.canDone;
-    done.textContent = 'Done';
+    done.textContent = doneLabel(n);
     msg.textContent = '';
     msg.className = 'work-msg';
     setBusy(false);
@@ -149,16 +153,17 @@ if (process.env.MBW_EDITION !== 'stats' && window.updateToast.onWork && window.u
       return;
     }
     setBusy(true);
-    done.textContent = 'Marking done...';
+    const mail = doneLabel(n) === 'Mark read';
+    done.textContent = mail ? 'Marking read...' : 'Marking done...';
     void act(n.id, 'done')
       .catch(() => ({ ok: false, message: 'The wall could not send that.' }))
       .then((r) => {
         if (current !== n) return;
         setBusy(false);
         done.hidden = r.ok;
-        done.textContent = 'Done';
+        done.textContent = doneLabel(n);
         msg.className = `work-msg ${r.ok ? 'is-ok' : 'is-bad'}`;
-        msg.textContent = r.ok ? 'Marked done on monday' : r.message;
+        msg.textContent = r.ok ? (mail ? 'Marked read' : 'Marked done on monday') : r.message;
       });
   };
   show.addEventListener('click', () => send('show'));

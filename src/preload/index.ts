@@ -51,6 +51,26 @@ const work = isStatsOnly
       onCard: on('work:card'),
     };
 
+/*
+ * Work mode's inbox (docs/work-mode.md, "Mail"). Full build only, like `work`.
+ * Handles are opaque; nothing here can carry a password or a token, which are
+ * typed only into the Connect mail window and its own bridge below.
+ */
+const mail = isStatsOnly
+  ? undefined
+  : {
+      get: () => ipcRenderer.invoke('mail:get'),
+      open: (handle: string) => ipcRenderer.invoke('mail:open', handle),
+      action: (handle: string, kind: string) => ipcRenderer.invoke('mail:action', handle, kind),
+      undo: (token: string) => ipcRenderer.invoke('mail:undo', token),
+      task: (handle: string) => ipcRenderer.invoke('mail:task', handle),
+      web: (handle: string) => ipcRenderer.invoke('mail:web', handle),
+      /** Open the Connect mail dialog. */
+      connect: () => ipcRenderer.invoke('mail:connect'),
+      onUpdate: on('mail:update'),
+      onHighlight: on('mail:highlight'),
+    };
+
 const api = {
   getState: () => ipcRenderer.invoke('wall:getState'),
   updateSettings: (patch: unknown) => ipcRenderer.invoke('wall:updateSettings', patch),
@@ -90,6 +110,7 @@ const api = {
   },
   ...(ask ? { ask } : {}),
   ...(work ? { work } : {}),
+  ...(mail ? { mail } : {}),
 };
 
 contextBridge.exposeInMainWorld('wall', api);
@@ -154,6 +175,18 @@ if (!isStatsOnly) {
   contextBridge.exposeInMainWorld('mondayConnect', {
     submit: (token: string) => ipcRenderer.invoke('connect:submit', token),
     close: () => ipcRenderer.invoke('connect:close'),
+  });
+  /*
+   * The Connect mail window's bridge: the one place a mail password crosses
+   * to main, once, on submit. Microsoft 365 needs no password here at all: its
+   * sign-in happens in the system browser.
+   */
+  contextBridge.exposeInMainWorld('mailConnect', {
+    state: () => ipcRenderer.invoke('mailconnect:state'),
+    submit: (preset: string, password: string) => ipcRenderer.invoke('mailconnect:submit', preset, password),
+    microsoft: () => ipcRenderer.invoke('mailconnect:microsoft'),
+    cancel: () => ipcRenderer.invoke('mailconnect:cancel'),
+    close: () => ipcRenderer.invoke('mailconnect:close'),
   });
 }
 

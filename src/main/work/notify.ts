@@ -22,12 +22,15 @@
  * comment's text, never a token.
  */
 
+import { createHash } from 'node:crypto';
+
+import type { MailEvent } from '../../shared/mail-view';
 import { GUSTAV_ID, JACO_ID, localDay as sharedLocalDay, personName, type TaskCard, type TaskEvent, type TasksView } from '../../shared/work-view';
 
 export interface WorkNotice {
   /** De-duplication key of the newest event in it, or `summary:<day>`. */
   key: string;
-  kind: TaskEvent['kind'] | 'summary' | 'burst';
+  kind: TaskEvent['kind'] | 'summary' | 'burst' | 'mail';
   /** Small caps line, e.g. "monday · new task". */
   label: string;
   /** The sender, shown as the title. */
@@ -38,8 +41,10 @@ export interface WorkNotice {
   taskId: string | null;
   /** How many events this notice stands for. */
   count: number;
-  /** Done makes sense only for one named task. */
+  /** Done makes sense only for one named task (or Mark read for one mail). */
   canDone: boolean;
+  /** A mail notice: the message Show opens and Mark read marks. Main only, never sent to the toast. */
+  mail?: { handle: string } | null;
 }
 
 export interface NotifierState {
@@ -165,10 +170,127 @@ export function createWorkNotifier(deps: {
       });
     },
 
+    /** Count changes from elsewhere (mail held by quiet hours or focus mode) into the next morning summary. */
+    hold(count: number): void {
+      if (!Number.isInteger(count) || count <= 0) return;
+      state.held = Math.min(10_000, state.held + count);
+      persist();
+    },
+
     snapshot(): NotifierState {
       return { seen: [...seen].slice(-SEEN_MAX), held: state.held, summaryDay: state.summaryDay };
     },
   };
 }
+
+// ── Mail notices (design section 3, Gustav's decisions 2026-11-06) ────────
+//
+//   - New mail from a person, in INBOX, any account: notify with the sender's
+//     name and the subject (Gustav chose that over sender only).
+//   - Bulk (List-Unsubscribe, no-reply, Gmail Promotions or Social, Outlook's
+//     Other): never notifies.
+//   - A sender on the VIP list (settings.json `mailVip`) notifies in quiet
+//     hours too; everyone else waits, counted into the morning summary.
+//   - Never in focus mode (counted, not shown later), never twice for the same
+//     message (hashed keys persisted in mail-notices.json, with no address or
+//     subject in the file), and a burst in one sync is one notice.
+
+export interface MailNoticeState {
+  /** sha256 prefixes of message keys already handled, newest last. */
+  seen: string[];
+}
+
+export const emptyMailNoticeState = (): MailNoticeState => ({ seen: [] });
+
+export function cleanMailNoticeState(raw: unknown): MailNoticeState {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<MailNoticeState>;
+  return { seen: Array.isArray(r.seen) ? r.seen.filter((k): k is string => typeof k === 'string' && /^[0-9a-f]{32}$/.test(k)).slice(-SEEN_MAX) : [] };
+}
+
+/** The key as stored: a hash, so the file holds no account, address or subject. */
+export const mailKey = (e: MailEvent): string => createHash('sha256').update(e.key ?? `${e.account}:${e.handle}`).digest('hex').slice(0, 32);
+
+/**
+ * Lower-cased plain addresses; anything else in the list is ignored.
+ *
+ * VIP matching trusts the From header, which any sender can write: a forged
+ * From can make a stranger's mail notify in quiet hours. That is all it can do.
+ * It decides only whether a notice shows; it unlocks no action, no data and no
+ * other rule.
+ */
+export function cleanVipList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const ok = raw.filter((a): a is string => typeof a === 'string' && a.length <= 254 && /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(a.trim()));
+  return [...new Set(ok.map((a) => a.trim().toLowerCase()))].slice(0, 100);
+}
+
+export function createMailNotifier(deps: {
+  now: () => number;
+  focus: () => boolean;
+  vip: () => string[];
+  /** The account's label for the notice's small line ("Gmail · new mail"). */
+  label: (accountId: string) => string;
+  state: MailNoticeState;
+  save: (state: MailNoticeState) => void;
+  show: (notice: WorkNotice) => void;
+  /** Mail held back (quiet hours, focus mode), counted into the task notifier's morning summary. */
+  hold: (count: number) => void;
+}) {
+  const seen = new Set(cleanMailNoticeState(deps.state).seen);
+
+  function persist(): void {
+    const list = [...seen].slice(-SEEN_MAX);
+    if (seen.size > SEEN_MAX) {
+      seen.clear();
+      for (const k of list) seen.add(k);
+    }
+    deps.save({ seen: list });
+  }
+
+  return {
+    /** The new messages from one sync of one account. */
+    events(events: MailEvent[]): void {
+      const all = events.filter((e) => !seen.has(mailKey(e)));
+      if (!all.length) return;
+      const fresh = all.filter((e) => e.kind === 'person');
+      // Marked before anything is shown, bulk included: a crash mid-notice must not replay it.
+      for (const e of all) seen.add(mailKey(e));
+      if (!fresh.length) {
+        persist();
+        return;
+      }
+      if (deps.focus()) {
+        deps.hold(fresh.length);
+        persist();
+        return;
+      }
+      const vips = new Set(cleanVipList(deps.vip()));
+      const quiet = isQuiet(deps.now());
+      const deliver = quiet ? fresh.filter((e) => !!e.fromAddress && vips.has(e.fromAddress.toLowerCase())) : fresh;
+      if (fresh.length > deliver.length) deps.hold(fresh.length - deliver.length);
+      persist();
+      if (!deliver.length) return;
+      const newest = deliver[deliver.length - 1];
+      const from = newest.fromName || newest.fromAddress || 'Someone';
+      if (deliver.length === 1) {
+        deps.show({
+          key: mailKey(newest), kind: 'mail', label: `${deps.label(newest.account)} · new mail`, from,
+          title: newest.subject || '(no subject)', taskId: null, count: 1, canDone: true, mail: { handle: newest.handle },
+        });
+        return;
+      }
+      const senders = [...new Set(deliver.map((e) => e.fromName || e.fromAddress || 'Someone'))];
+      deps.show({
+        key: mailKey(newest), kind: 'burst', label: `Mail · ${deliver.length} new`,
+        from: senders.length === 1 ? senders[0] : `${from} and others`,
+        title: newest.subject || '(no subject)', taskId: null, count: deliver.length, canDone: false, mail: { handle: newest.handle },
+      });
+    },
+
+    snapshot: (): MailNoticeState => ({ seen: [...seen].slice(-SEEN_MAX) }),
+  };
+}
+
+export type MailNotifier = ReturnType<typeof createMailNotifier>;
 
 export type WorkNotifier = ReturnType<typeof createWorkNotifier>;

@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Work mode (design mock)</title>
+<style>
+  :root {
+    --u: min(calc(100vw / 1920), calc(100vh / 1080));
+    --sig: oklch(0.78 0.14 195);
+    --ms: oklch(0.72 0.13 245);          /* Microsoft 365 account */
+    --gm: oklch(0.72 0.16 25);           /* Gmail account */
+    --ti: oklch(0.8 0.14 75);            /* Titan account */
+    --gd: oklch(0.78 0.12 150);          /* GoDaddy account */
+    --prog: oklch(0.66 0.13 240);        /* monday "In progress" blue */
+    --wait: oklch(0.8 0.15 70);          /* monday "Waiting" orange */
+    --back: oklch(0.6 0.01 250);         /* monday "Not started" grey */
+    --done: oklch(0.76 0.17 155);        /* monday "Done" green */
+    --high: oklch(0.66 0.2 20);
+    --panel-bg: oklch(0.175 0.016 245);
+    --panel-edge: oklch(1 0 0 / 0.075);
+    --ink: oklch(0.93 0.01 220);
+    --ink-soft: oklch(0.66 0.015 240);
+    --ink-dim: oklch(0.47 0.015 240);
+    --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+    --sans: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body { background: oklch(0.13 0.014 250); color: var(--ink); font-family: var(--sans); overflow: hidden; }
+  .wall { position: absolute; inset: 0; padding: calc(var(--u) * 80) calc(var(--u) * 26) calc(var(--u) * 34); }
+  .wall::before { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-image: linear-gradient(oklch(1 0 0 / 0.045) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0 / 0.045) 1px, transparent 1px);
+    background-size: 64px 64px; opacity: 0.45; mask-image: radial-gradient(120% 100% at 50% 0%, black 30%, transparent 85%); }
+
+  .modes { position: absolute; top: calc(var(--u) * 38); left: 50%; transform: translateX(-50%); display: flex; padding: 3px; border-radius: 999px; background: oklch(0.2 0.02 220 / 0.8); border: 1px solid var(--panel-edge); }
+  .modes span { padding: calc(var(--u) * 6) calc(var(--u) * 16); border-radius: 999px; font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.1em; color: var(--ink-dim); }
+  .modes span.on { background: oklch(0.32 0.05 200); color: oklch(0.85 0.1 195); }
+  .actions { position: absolute; top: calc(var(--u) * 38); right: calc(var(--u) * 26); display: flex; gap: calc(var(--u) * 6); align-items: center; }
+  .left { position: absolute; top: calc(var(--u) * 38); left: calc(var(--u) * 26); display: flex; gap: calc(var(--u) * 6); }
+  .chip { display: inline-flex; align-items: center; gap: calc(var(--u) * 7); padding: calc(var(--u) * 6) calc(var(--u) * 13); border-radius: 999px; border: 1px solid oklch(1 0 0 / 0.09); background: oklch(0.19 0.014 245 / 0.72); font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: oklch(0.78 0.02 225); }
+  .chip.on { background: oklch(1 0 0 / 0.1); color: var(--ink); }
+  .chip b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+  .seg { display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid oklch(1 0 0 / 0.09); background: oklch(0.19 0.014 245 / 0.72); }
+  .seg span { padding: calc(var(--u) * 5) calc(var(--u) * 12); border-radius: 999px; font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.09em; color: var(--ink-dim); }
+  .seg span.on { background: oklch(1 0 0 / 0.1); color: var(--ink); }
+  .dot { width: calc(var(--u) * 8); height: calc(var(--u) * 8); border-radius: 50%; display: inline-block; flex: none; }
+  .ms { background: var(--ms); } .gm { background: var(--gm); } .ti { background: var(--ti); } .gd { background: var(--gd); }
+
+  .grid { position: relative; height: 100%; display: grid; grid-template-columns: calc(var(--u) * 640) 1fr; gap: calc(var(--u) * 14); }
+  .panel { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: calc(var(--u) * 14) calc(var(--u) * 16); border-radius: 12px; background: var(--panel-bg); border: 1px solid var(--panel-edge); overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.22); }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--u) * 10); margin-bottom: calc(var(--u) * 10); }
+  .title { font-size: calc(var(--u) * 11.5); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: oklch(0.82 0.02 220); display: flex; align-items: center; gap: calc(var(--u) * 8); }
+  .count { font-family: var(--mono); font-size: calc(var(--u) * 11); color: var(--ink-soft); }
+  .scroll { overflow: hidden; flex: 1; min-height: 0; position: relative; }
+  .scroll::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: calc(var(--u) * 40); background: linear-gradient(transparent, var(--panel-bg)); pointer-events: none; }
+  .bar { position: absolute; right: 0; top: 4%; width: 3px; height: 26%; border-radius: 3px; background: oklch(1 0 0 / 0.14); }
+
+  /* Inbox */
+  .mail { display: grid; grid-template-columns: calc(var(--u) * 10) 1fr auto; column-gap: calc(var(--u) * 10); row-gap: calc(var(--u) * 2); padding: calc(var(--u) * 10) calc(var(--u) * 10); border-radius: 8px; border-bottom: 1px solid oklch(1 0 0 / 0.05); }
+  .mail .dot { margin-top: calc(var(--u) * 6); }
+  .from { font-size: calc(var(--u) * 14); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .when { font-family: var(--mono); font-size: calc(var(--u) * 11); color: var(--ink-dim); }
+  .subj { grid-column: 2 / 4; font-size: calc(var(--u) * 13.5); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .snip { grid-column: 2 / 4; font-size: calc(var(--u) * 12); color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mail.unread .from, .mail.unread .subj { color: var(--ink); font-weight: 600; }
+  .flag { color: var(--ti); font-size: calc(var(--u) * 11); margin-left: calc(var(--u) * 6); }
+  .mail.sel { background: oklch(1 0 0 / 0.05); border: 1px solid oklch(1 0 0 / 0.08); }
+  .body { grid-column: 2 / 4; margin-top: calc(var(--u) * 8); font-size: calc(var(--u) * 13); line-height: 1.5; color: oklch(0.82 0.01 220); white-space: pre-line; }
+  .acts { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: calc(var(--u) * 6); margin-top: calc(var(--u) * 10); }
+  .btn { font-size: calc(var(--u) * 11); font-weight: 600; letter-spacing: 0.06em; padding: calc(var(--u) * 6) calc(var(--u) * 11); border-radius: 6px; border: 1px solid oklch(1 0 0 / 0.12); color: oklch(0.85 0.02 220); background: oklch(1 0 0 / 0.04); }
+  .btn.pri { background: oklch(0.32 0.05 200); border-color: oklch(0.5 0.08 200); color: oklch(0.9 0.08 195); }
+  .hover { position: absolute; right: calc(var(--u) * 10); top: calc(var(--u) * 9); display: flex; gap: calc(var(--u) * 4); }
+  .ico { width: calc(var(--u) * 24); height: calc(var(--u) * 24); border-radius: 6px; border: 1px solid oklch(1 0 0 / 0.1); background: oklch(0.22 0.016 245); display: grid; place-items: center; font-size: calc(var(--u) * 11); color: var(--ink-soft); }
+
+  /* Board */
+  .right { display: grid; grid-template-rows: auto 1fr; gap: calc(var(--u) * 14); min-height: 0; }
+  .panel.strip { flex-direction: row; display: flex; gap: calc(var(--u) * 28); align-items: baseline; padding: calc(var(--u) * 12) calc(var(--u) * 18); }
+  .stat b { font-family: var(--mono); font-size: calc(var(--u) * 26); font-weight: 600; }
+  .stat span { display: block; font-size: calc(var(--u) * 10); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); margin-top: 2px; }
+  .cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: calc(var(--u) * 14); min-height: 0; }
+  .col .title i { width: calc(var(--u) * 10); height: calc(var(--u) * 10); border-radius: 3px; display: inline-block; }
+  .card { position: relative; padding: calc(var(--u) * 11) calc(var(--u) * 12); border-radius: 8px; background: oklch(0.2 0.016 245); border: 1px solid oklch(1 0 0 / 0.06); margin-bottom: calc(var(--u) * 8); border-left: 3px solid var(--edge, transparent); }
+  .card .name { font-size: calc(var(--u) * 13.5); line-height: 1.35; color: var(--ink); }
+  .meta { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 6); align-items: center; margin-top: calc(var(--u) * 8); font-size: calc(var(--u) * 11); color: var(--ink-soft); }
+  .proj { padding: 1px calc(var(--u) * 6); border-radius: 4px; background: oklch(1 0 0 / 0.06); }
+  .pill { padding: 1px calc(var(--u) * 6); border-radius: 4px; font-weight: 600; font-size: calc(var(--u) * 10); letter-spacing: 0.06em; }
+  .pill.high { background: oklch(0.66 0.2 20 / 0.2); color: oklch(0.8 0.14 20); }
+  .pill.med { background: oklch(0.8 0.15 70 / 0.16); color: oklch(0.85 0.12 75); }
+  .due { font-family: var(--mono); }
+  .due.late { color: oklch(0.75 0.17 25); }
+  .who { margin-left: auto; display: flex; gap: 3px; }
+  .av { width: calc(var(--u) * 20); height: calc(var(--u) * 20); border-radius: 50%; display: grid; place-items: center; font-size: calc(var(--u) * 10); font-weight: 700; background: oklch(0.35 0.06 200); color: oklch(0.92 0.05 195); }
+  .av.j { background: oklch(0.35 0.07 300); color: oklch(0.9 0.06 300); }
+  .from-j { font-size: calc(var(--u) * 10.5); color: oklch(0.8 0.08 300); margin-top: calc(var(--u) * 6); }
+  .card.sel { border-color: oklch(1 0 0 / 0.16); background: oklch(0.23 0.018 245); }
+  .move { display: flex; flex-wrap: wrap; gap: calc(var(--u) * 5); margin-top: calc(var(--u) * 10); }
+  .col.done .card { opacity: 0.6; }
+  .col.done .name { text-decoration: line-through; text-decoration-color: oklch(1 0 0 / 0.3); }
+
+  .status { position: absolute; left: calc(var(--u) * 26); right: calc(var(--u) * 26); bottom: calc(var(--u) * 10); display: flex; gap: calc(var(--u) * 22); font-family: var(--mono); font-size: calc(var(--u) * 10.5); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); }
+  .status em { font-style: normal; color: oklch(0.75 0.15 25); }
+
+  .toast { position: absolute; right: calc(var(--u) * 40); bottom: calc(var(--u) * 50); width: calc(var(--u) * 340); padding: calc(var(--u) * 14) calc(var(--u) * 16); border-radius: 12px; background: oklch(0.21 0.02 245 / 0.97); border: 1px solid oklch(1 0 0 / 0.14); box-shadow: 0 12px 40px rgb(0 0 0 / 0.5); }
+  .toast .k { font-size: calc(var(--u) * 10); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); display: flex; gap: calc(var(--u) * 7); align-items: center; }
+  .toast .t { font-size: calc(var(--u) * 14); margin-top: calc(var(--u) * 6); font-weight: 600; }
+  .toast .s { font-size: calc(var(--u) * 12); color: var(--ink-soft); margin-top: 2px; }
+  .toast .acts { margin-top: calc(var(--u) * 10); }
+  .label { position: absolute; font-family: var(--mono); font-size: calc(var(--u) * 11); color: oklch(0.85 0.14 75); background: oklch(0.25 0.05 75 / 0.9); padding: 2px 8px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wall">
+  <div class="left">
+    <span class="chip on">All mail <b>14</b></span>
+    <span class="chip"><i class="dot ms"></i>MuchBetter <b>6</b></span>
+    <span class="chip"><i class="dot gm"></i>Gmail <b>5</b></span>
+    <span class="chip"><i class="dot ti"></i>Titan <b>2</b></span>
+    <span class="chip"><i class="dot gd"></i>PicklePlay <b>1</b></span>
+  </div>
+  <div class="modes"><span>CLAUDE STATS</span><span>CLIENTS</span><span class="on">WORK</span></div>
+  <div class="actions">
+    <span class="seg"><span class="on">MINE</span><span>EVERYONE</span></span>
+    <span class="chip">+ Task</span>
+    <span class="chip">Notify: on</span>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="head"><div class="title">Inbox <span class="count">14 unread · 4 accounts</span></div><span class="count">newest first</span></div>
+      <div class="scroll">
+        <div class="mail unread sel"><i class="dot ms"></i><div class="from">Sample Client (Pty) Ltd</div><div class="when">09:42</div>
+          <div class="subj">Re: homepage copy, second round</div>
+          <div class="body">Hi Gustav,
+Thanks for the draft. Two small changes on the about section, and can we move the launch to the 20th? Everything else is approved.
+Regards, Anna</div>
+          <div class="acts"><span class="btn pri">Reply</span><span class="btn">Archive</span><span class="btn">Flag</span><span class="btn">Mark unread</span><span class="btn">Make a task</span><span class="btn">Open in Outlook</span><span class="btn">Trash</span></div>
+        </div>
+        <div class="mail unread" style="position:relative"><i class="dot gm"></i><div class="from">Jaco</div><div class="when">09:15</div>
+          <div class="subj">Quote numbers for the lodge site</div><div class="snip">Can you check the deposit line before I send it on? I think the second payment date</div>
+          <div class="hover"><span class="ico">✓</span><span class="ico">⇣</span><span class="ico">⚑</span><span class="ico">＋</span></div></div>
+        <div class="mail unread"><i class="dot ti"></i><div class="from">Bookings</div><div class="when">08:51</div>
+          <div class="subj">New booking request, 3 nights from 14 Dec</div><div class="snip">A guest has asked for the cottage for three nights. Reply within 24 hours to</div></div>
+        <div class="mail unread"><i class="dot ms"></i><div class="from">Microsoft 365</div><div class="when">08:30</div>
+          <div class="subj">Your subscription renews on 1 December</div><div class="snip">This is a reminder that your Business Basic subscription will renew</div></div>
+        <div class="mail"><i class="dot gd"></i><div class="from">Club secretary</div><div class="when">Yest</div>
+          <div class="subj">League fixtures for next month<span class="flag">⚑</span></div><div class="snip">Attached is the draft list. Please confirm the court bookings by Friday</div></div>
+        <div class="mail"><i class="dot gm"></i><div class="from">GitHub</div><div class="when">Yest</div>
+          <div class="subj">[muchbetter-client-wall] Release v0.10.1 published</div><div class="snip">gustav-pjvr published a release</div></div>
+        <div class="mail"><i class="dot ms"></i><div class="from">Accountant</div><div class="when">Wed</div>
+          <div class="subj">October statements</div><div class="snip">Please find attached the statements for October. Let me know if</div></div>
+        <div class="bar"></div>
+      </div>
+    </section>
+
+    <div class="right">
+      <section class="panel strip">
+        <div class="stat"><b>7</b><span>in progress</span></div>
+        <div class="stat"><b style="color:var(--wait)">3</b><span>waiting on someone</span></div>
+        <div class="stat"><b style="color:oklch(0.75 0.17 25)">2</b><span>overdue</span></div>
+        <div class="stat"><b>4</b><span>due this week</span></div>
+        <div class="stat"><b style="color:oklch(0.8 0.08 300)">1</b><span>new from Jaco</span></div>
+        <div class="stat"><b style="color:var(--done)">9</b><span>done this week</span></div>
+      </section>
+      <div class="cols">
+        <section class="panel col"><div class="head"><div class="title"><i style="background:var(--prog)"></i>In progress</div><span class="count">7</span></div>
+          <div class="scroll">
+            <div class="card sel" style="--edge:var(--high)"><div class="name">Second round of homepage copy changes</div>
+              <div class="meta"><span class="proj">Client site</span><span class="pill high">HIGH</span><span class="due late">due 5 Nov</span><span class="who"><span class="av">G</span></span></div>
+              <div class="move"><span class="btn">Waiting</span><span class="btn pri">Done</span><span class="btn">Comment</span><span class="btn">Open</span></div></div>
+            <div class="card"><div class="name">Booking page: second calendar link</div>
+              <div class="meta"><span class="proj">Lodge</span><span class="pill med">MED</span><span class="due">due 8 Nov</span><span class="who"><span class="av">G</span></span></div></div>
+            <div class="card"><div class="name">Work mode design for the wall</div>
+              <div class="meta"><span class="proj">Internal</span><span class="who"><span class="av">G</span></span></div></div>
+            <div class="card"><div class="name">Quote v6 follow-up call</div>
+              <div class="meta"><span class="proj">Client site</span><span class="due">due 10 Nov</span><span class="who"><span class="av">G</span><span class="av j">J</span></span></div></div>
+            <div class="bar"></div>
+          </div></section>
+        <section class="panel col"><div class="head"><div class="title"><i style="background:var(--wait)"></i>Waiting on someone else</div><span class="count">3</span></div>
+          <div class="scroll">
+            <div class="card"><div class="name">Logo files from the client</div>
+              <div class="meta"><span class="proj">Client site</span><span class="due">since 30 Oct</span><span class="who"><span class="av">G</span></span></div></div>
+            <div class="card"><div class="name">Owners to remove the old listing links</div>
+              <div class="meta"><span class="proj">Lodge</span><span class="due">since 2 Nov</span><span class="who"><span class="av j">J</span></span></div></div>
+            <div class="card"><div class="name">Domain transfer approval</div>
+              <div class="meta"><span class="proj">Client site</span><span class="who"><span class="av">G</span></span></div></div>
+          </div></section>
+        <section class="panel col"><div class="head"><div class="title"><i style="background:var(--back)"></i>Backlog</div><span class="count">18</span></div>
+          <div class="scroll">
+            <div class="card" style="--edge:oklch(0.8 0.08 300)"><div class="name">Check the deposit line on the lodge quote</div>
+              <div class="meta"><span class="proj">Lodge</span><span class="pill med">MED</span><span class="who"><span class="av">G</span></span></div>
+              <div class="from-j">● New, assigned by Jaco 09:16</div></div>
+            <div class="card"><div class="name">Darken the brand orange for contrast</div>
+              <div class="meta"><span class="proj">Brand</span><span class="who"><span class="av">G</span></span></div></div>
+            <div class="card"><div class="name">Core Web Vitals check after launch</div>
+              <div class="meta"><span class="proj">Streaming site</span><span class="who"><span class="av">G</span></span></div></div>
+            <div class="card"><div class="name">Smoke test the deploy pipeline</div>
+              <div class="meta"><span class="proj">Football site</span><span class="who"><span class="av">G</span></span></div></div>
+            <div class="card"><div class="name">Renew the shared hosting plan</div>
+              <div class="meta"><span class="proj">Admin</span><span class="who"><span class="av j">J</span></span></div></div>
+            <div class="bar"></div>
+          </div></section>
+        <section class="panel col done"><div class="head"><div class="title"><i style="background:var(--done)"></i>Done this week</div><span class="count">9</span></div>
+          <div class="scroll">
+            <div class="card"><div class="name">GitHub releases brought up to date</div><div class="meta"><span class="proj">Internal</span><span class="due">2 Nov</span></div></div>
+            <div class="card"><div class="name">Watcher deployed with calibration</div><div class="meta"><span class="proj">Lodge</span><span class="due">3 Nov</span></div></div>
+            <div class="card"><div class="name">Draft site for review</div><div class="meta"><span class="proj">Football site</span><span class="due">5 Nov</span></div></div>
+            <div class="card"><div class="name">Third browser desk live</div><div class="meta"><span class="proj">Internal</span><span class="due">4 Nov</span></div></div>
+          </div></section>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast">
+    <div class="k"><i class="dot gm"></i>Gmail · just now</div>
+    <div class="t">Jaco</div>
+    <div class="s">Quote numbers for the lodge site</div>
+    <div class="acts"><span class="btn pri">Show</span><span class="btn">Mark read</span><span class="btn">Later</span></div>
+  </div>
+
+  <div class="status"><span>MuchBetter (M365) synced 20s ago</span><span>Gmail live (IDLE)</span><span>Titan live (IDLE)</span><span>PicklePlay live (IDLE)</span><span>monday synced 40s ago</span><span>quiet hours 18:00 to 07:30</span><span>Work data stays on this PC, never projected</span></div>
+</div>
+</body>
+</html>

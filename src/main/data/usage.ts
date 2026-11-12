@@ -44,7 +44,7 @@
  */
 
 import type { PeakVelocity } from '../../shared/velocity';
-import { promises as fs, createReadStream } from 'node:fs';
+import { promises as fs, createReadStream, existsSync, readdirSync } from 'node:fs';
 import { costOf } from '../../shared/pricing';
 import { localDayKey } from '../../shared/day';
 import { bucketOf, foldIntraday, type Intraday } from '../../shared/intraday';
@@ -61,6 +61,36 @@ import * as readline from 'node:readline';
 export const CLAUDE_HOME = process.env.MBW_CLAUDE_HOME || path.join(os.homedir(), '.claude');
 const PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 const HISTORY_FILE = path.join(CLAUDE_HOME, 'history.jsonl');
+
+/**
+ * Further Claude Code accounts on this machine (Gustav, 2026-11-12): a second
+ * account runs with CLAUDE_CONFIG_DIR=~/.claude-account2 and writes its
+ * transcripts there. They count into the same Claude totals, not shown apart.
+ *
+ * Only folders named exactly `.claude-account<N>` in the home folder, so a
+ * backup copy of ~/.claude (`.claude-old`, `.claude-backup`) is never counted
+ * twice. With MBW_CLAUDE_HOME set (tests, or a non-default home) only the
+ * folders listed in MBW_EXTRA_CLAUDE_HOMES are added, separated by the path
+ * delimiter. Prompt counts still come from the main home's history.jsonl.
+ */
+const EXTRA_HOME = /^\.claude-account\d+$/;
+export function extraProjectDirs(): string[] {
+  const listed = process.env.MBW_EXTRA_CLAUDE_HOMES;
+  let homes: string[];
+  if (listed !== undefined) homes = listed.split(path.delimiter).filter(Boolean);
+  else if (process.env.MBW_CLAUDE_HOME) homes = [];
+  else {
+    try {
+      homes = readdirSync(os.homedir(), { withFileTypes: true })
+        .filter((e) => e.isDirectory() && EXTRA_HOME.test(e.name))
+        .map((e) => path.join(os.homedir(), e.name))
+        .sort();
+    } catch {
+      homes = [];
+    }
+  }
+  return homes.map((h) => path.join(h, 'projects')).filter((d) => d !== PROJECTS_DIR && existsSync(d));
+}
 
 /**
  * Bump when the aggregate shape changes, to invalidate old caches.
@@ -780,6 +810,18 @@ export async function refreshIndex(
   try {
     await fs.access(PROJECTS_DIR);
     files = await listTranscripts(PROJECTS_DIR);
+    // Other accounts' transcripts join the same index. A file whose path under
+    // projects/ is already present (the same session copied into both homes)
+    // is read once, from the main home.
+    const seen = new Set(files.map((f) => path.relative(PROJECTS_DIR, f).toLowerCase()));
+    for (const dir of extraProjectDirs()) {
+      for (const f of await listTranscripts(dir)) {
+        const rel = path.relative(dir, f).toLowerCase();
+        if (seen.has(rel)) continue;
+        seen.add(rel);
+        files.push(f);
+      }
+    }
   } catch (err) {
     index.unavailable = true;
     index.unavailableReason = `cannot read ${PROJECTS_DIR}: ${(err as Error).message}`;

@@ -37,6 +37,7 @@ import {
 import * as projection from './projection';
 import {
   PROJECTS_DIR,
+  extraProjectDirs,
   emptyIndex,
   loadIndex,
   refreshIndex,
@@ -132,6 +133,8 @@ let t3Usage: T3Snapshot | undefined;
  */
 let staleFiles: Record<string, FileContribution> = {};
 let usageWatcher: FSWatcher | null = null;
+/** Watchers on other accounts' projects folders (~/.claude-account<N>). The 60 s sweep backs them up. */
+let extraUsageWatchers: FSWatcher[] = [];
 let usageSweep: NodeJS.Timeout | null = null;
 let usageWatchFailures = 0;
 let usageTimer: NodeJS.Timeout | null = null;
@@ -354,6 +357,7 @@ function startUsageWatch(): void {
       console.warn('[usage] watcher error, will restart:', err.message);
       try {
         usageWatcher?.close();
+  for (const w of extraUsageWatchers) w.close();
         if (usageSweep) clearInterval(usageSweep);
         usageSweep = null;
       } catch {
@@ -367,6 +371,25 @@ function startUsageWatch(): void {
       retry.unref?.();
     });
     console.log('[usage] watching', PROJECTS_DIR);
+    for (const w of extraUsageWatchers) w.close();
+    extraUsageWatchers = [];
+    for (const dir of extraProjectDirs()) {
+      try {
+        const w = watchFs(dir, { recursive: true, persistent: true }, () => {
+          if (usageTimer) clearTimeout(usageTimer);
+          usageTimer = setTimeout(() => {
+            usageTimer = null;
+            void refreshUsage('transcript changed');
+          }, 900);
+        });
+        // A broken extra watcher is dropped; the 60 s sweep still reads that folder.
+        w.on('error', () => w.close());
+        extraUsageWatchers.push(w);
+        console.log('[usage] watching', dir);
+      } catch {
+        /* the sweep covers it */
+      }
+    }
   } catch (err) {
     console.warn('[usage] could not watch transcripts:', (err as Error).message);
   }
@@ -1891,6 +1914,7 @@ function quit(): void {
   projection.stopProjection();
   if (usageTimer) clearTimeout(usageTimer);
   usageWatcher?.close();
+  for (const w of extraUsageWatchers) w.close();
   // Persist whatever the periodic save has not yet flushed.
   void saveIndex(usageCacheFile(), withPending(usage)).catch(() => undefined);
   if (codexTimer) clearTimeout(codexTimer);

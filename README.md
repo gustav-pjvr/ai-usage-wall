@@ -89,7 +89,9 @@ so deleting the file is safe.
 ## Claude Stats
 
 Everything on that view is read from files on this machine: Claude Code's
-transcripts (`~/.claude/projects/**/*.jsonl`, `~/.claude/history.jsonl`), T3
+transcripts (`~/.claude/projects/**/*.jsonl`, `~/.claude/history.jsonl`, plus the
+`projects` folder of any second account in `~/.claude-account<N>`, counted into the
+same Claude totals), T3
 Code's local database as a fallback for Claude sessions missing from them,
 Codex's session rollouts (`~/.codex/sessions`, see
 [docs/codex-usage.md](docs/codex-usage.md)), and the one plan-limits reading

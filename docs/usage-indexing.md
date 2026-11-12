@@ -44,6 +44,19 @@ The root is resolved once at module load (`usage.ts:54`):
 CLAUDE_HOME = process.env.MBW_CLAUDE_HOME || path.join(os.homedir(), ".claude")
 ```
 
+**Further accounts (2026-11-12).** A second Claude Code account run with
+`CLAUDE_CONFIG_DIR=~/.claude-account2` writes its transcripts to
+`~/.claude-account2/projects`. `extraProjectDirs()` adds every home folder named
+exactly `.claude-account<N>` that has a `projects` folder, so the same index and
+totals include them; they are not shown separately. The exact name is the
+guard against double counting: a backup copy of `~/.claude` under another name
+is never read. A file whose path under `projects/` already exists in the main
+home is read once, from the main home. Each extra folder gets its own watcher,
+backed by the 60 s sweep. Prompt counts still come from the main home's
+`history.jsonl` only. With `MBW_CLAUDE_HOME` set, only folders listed in
+`MBW_EXTRA_CLAUDE_HOMES` (path-delimited) are added; `test/claude-accounts.test.mjs`
+covers this.
+
 The environment override exists so the "no Claude Code on this machine" path can
 actually be exercised instead of reasoned about, and so a non-default location
 can be pointed at without a rebuild. It is read at import time, so anything that

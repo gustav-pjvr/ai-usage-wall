@@ -410,7 +410,8 @@ Packaging requirements:
 ### Where the numbers come from
 
 Claude Code writes an **append-only JSONL transcript per session** under
-`~/.claude/projects/<slugified-cwd>/<sessionId>.jsonl`. Every assistant record
+`~/.claude/projects/<slugified-cwd>/<sessionId>.jsonl` (and, for a second account,
+`~/.claude-account<N>/projects/...`, folded into the same totals). Every assistant record
 carries a real `message.usage` block: `input_tokens`, `output_tokens`,
 `cache_creation_input_tokens`, `cache_read_input_tokens`,
 `output_tokens_details.thinking_tokens`, `server_tool_use` counts, plus model,
